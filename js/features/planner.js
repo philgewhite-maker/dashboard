@@ -74,8 +74,13 @@ const PLANNER_SCROLL_MAX_SPEED = 24;
 function autoScrollDuringPlannerDrag(e) {
 if (!plannerDragActive) return;
 const y = e.clientY;
-if (y < PLANNER_SCROLL_EDGE) {
-window.scrollBy(0, -Math.ceil(((PLANNER_SCROLL_EDGE - y) / PLANNER_SCROLL_EDGE) * PLANNER_SCROLL_MAX_SPEED));
+// The sticky tab bar covers the top of the screen (203px on a phone, where
+// it wraps to several rows), so the scroll-up strip starts below it --
+// measured at 375px wide, where a fixed strip from y=0 sat entirely under it.
+const bar = document.querySelector('.tab-bar');
+const top = Math.max(0, bar ? bar.getBoundingClientRect().bottom : 0);
+if (y < top + PLANNER_SCROLL_EDGE) {
+window.scrollBy(0, -Math.ceil(((top + PLANNER_SCROLL_EDGE - Math.max(y, top)) / PLANNER_SCROLL_EDGE) * PLANNER_SCROLL_MAX_SPEED));
 } else if (y > window.innerHeight - PLANNER_SCROLL_EDGE) {
 window.scrollBy(0, Math.ceil(((y - (window.innerHeight - PLANNER_SCROLL_EDGE)) / PLANNER_SCROLL_EDGE) * PLANNER_SCROLL_MAX_SPEED));
 }

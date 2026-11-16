@@ -45,8 +45,13 @@ const AIRBNB_SCROLL_MAX_SPEED = 24;
 function autoScrollDuringKeyDrag(e) {
 if (!keysDragActive) return;
 const y = e.clientY;
-if (y < AIRBNB_SCROLL_EDGE) {
-window.scrollBy(0, -Math.ceil(((AIRBNB_SCROLL_EDGE - y) / AIRBNB_SCROLL_EDGE) * AIRBNB_SCROLL_MAX_SPEED));
+// The sticky tab bar covers the top of the screen (203px on a phone, where
+// it wraps to several rows), so the scroll-up strip starts below it --
+// measured at 375px wide, where a fixed strip from y=0 sat entirely under it.
+const bar = document.querySelector('.tab-bar');
+const top = Math.max(0, bar ? bar.getBoundingClientRect().bottom : 0);
+if (y < top + AIRBNB_SCROLL_EDGE) {
+window.scrollBy(0, -Math.ceil(((top + AIRBNB_SCROLL_EDGE - Math.max(y, top)) / AIRBNB_SCROLL_EDGE) * AIRBNB_SCROLL_MAX_SPEED));
 } else if (y > window.innerHeight - AIRBNB_SCROLL_EDGE) {
 window.scrollBy(0, Math.ceil(((y - (window.innerHeight - AIRBNB_SCROLL_EDGE)) / AIRBNB_SCROLL_EDGE) * AIRBNB_SCROLL_MAX_SPEED));
 }
