@@ -10,17 +10,14 @@ import { initPriceBreakdown } from './features/pricebreakdown.js';
 import { initHotelBasket } from './features/hotelbasket.js';
 import { initModelReview } from './features/modelreview.js';
 import { initModelDrift } from './features/modeldrift.js';
-import { initAirbnbEarningsImport } from './features/airbnbearnings.js';
 import { initMailHistory } from './features/mailledger.js';
 import { initAutoLink } from './features/autolink.js';
 import { initDayQueue } from './features/dayqueue.js';
 import { initAiRuns } from './airuns.js';
-import { initAiRunsView } from './features/airunsview.js';
-import { initProvidersSettings } from './features/providerssettings.js';
 import { initRenderBus } from './render-bus.js';
 import { loadData, setSaveStatusHandler, setExternalUpdateHandler, flushSave } from './state.js';
-import { renderAll } from './render-all.js';
-import { switchTab } from './tabs.js';
+import { renderAll, renderTab } from './render-all.js';
+import { switchTab, setTabRenderer } from './tabs.js';
 import { initHabitForm } from './features/habits.js';
 import { initHeating } from './features/heating.js';
 import { initGoalForm } from './features/goals.js';
@@ -39,13 +36,7 @@ import { initEnhancementForm } from './features/enhancements.js';
 import { initTasks } from './features/tasks.js';
 import { initGoogleTasksFeed } from './features/googletasksfeed.js';
 import { initQuestions } from './features/questions.js';
-import { initContacts } from './features/contacts.js';
-import { initPhotoScan } from './features/photoscan.js';
 import { initPhotoAlbums } from './features/photoalbums.js';
-import { initTinderImport } from './features/tinderimport.js';
-import { initDatingImport } from './features/manualimport.js';
-import { initWhatsAppImport } from './features/whatsappimport.js';
-import { initTelegramImport } from './features/telegramimport.js';
 import { initPhotoSync } from './features/photosync.js';
 import { initHealthSync, initHealthDaily, initHealthChart } from './features/health.js';
 import { initAirbnbListingsForm, initAirbnbSync, initAirbnbAddBooking, initAirbnbKeys, initKeysSettingsForm } from './features/airbnb.js';
@@ -79,7 +70,6 @@ import { initTicker } from './features/ticker.js';
 import { initLetting, accrueLettings } from './features/letting.js';
 import { initLoans } from './features/loans.js';
 import { initSettings } from './features/settings.js';
-import { initSwitchAdvisorAdmin } from './features/switchadvisoradmin.js';
 import { initGoogleAccount } from './features/googleaccount.js';
 import { initMail } from './features/mail.js';
 import { initAutoSync } from './sync/autosync.js';
@@ -266,6 +256,30 @@ if (document.readyState === 'complete') register();
 else window.addEventListener('load', register);
 }
 
+// PERF-PLAN C10: modules whose whole job is a panel on one tab are fetched and wired the
+// first time that tab is shown (the tab button, a goto link, a chip or the URL hash all go
+// through switchTab, which dispatches tabshown), not at boot. Each init* is called exactly
+// as before, just later; none of them is needed by a background task or by another tab
+// (checked: no other module imports them; their elements all sit inside the named tab).
+// If the app opens already on that tab the load starts straight away. Files stay in sw.js
+// CORE_ASSETS, so this still works offline.
+function initOnFirstShow(tab, load) {
+let started = false;
+const go = () => {
+if (started) return;
+started = true;
+document.removeEventListener('tabshown', onShow);
+load().catch((err) => console.error(`Lazy init for the ${tab} tab failed:`, err));
+};
+function onShow(e) { if (e.detail && e.detail.tab === tab) go(); }
+document.addEventListener('tabshown', onShow);
+if (document.querySelector('[data-tab-btn].active')?.dataset.tabBtn === tab) go();
+}
+// One failing init must not stop the ones after it.
+function runInits(list) {
+list.forEach(([name, fn]) => { try { const r = fn(); if (r && r.catch) r.catch((err) => console.error(`${name} failed:`, err)); } catch (err) { console.error(`${name} failed:`, err); } });
+}
+
 async function main() {
 document.getElementById('today-date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
 
@@ -284,7 +298,11 @@ rolloverTaskEntries();
 // (which tag fields are visible, which overview sections are folded), so
 // they have to land before the first paint or it renders once wrong.
 await Promise.all([initSensitiveFields(), initOverviewPrefs(), initHideArchivedFaded()]);
-renderAll();
+// Only the always-visible panels (ticker) now; every tab is drawn the first time it is
+// shown, by switchTab, so initTabs() just below draws the one the app opens on before
+// the boot gate lifts. renderAll() with no argument still draws everything.
+renderAll({ onlyTab: null });
+setTabRenderer(renderTab);
 
 initTabs();
 // Reveal the board (see the boot gate in css/style.css) now that the first paint's content is in.
@@ -324,13 +342,25 @@ initPlanner();
 initTelegramFamily();
 initGoogleTasksFeed();
 initQuestions();
-initContacts();
-initPhotoScan();
 initPhotoAlbums();
-initTinderImport();
-initWhatsAppImport();
-initDatingImport();
-initTelegramImport();
+initOnFirstShow('dating', async () => {
+const [contacts, photoscan, tinder, whatsapp, manual, telegram] = await Promise.all([
+import('./features/contacts.js'), import('./features/photoscan.js'), import('./features/tinderimport.js'),
+import('./features/whatsappimport.js'), import('./features/manualimport.js'), import('./features/telegramimport.js'),
+]);
+runInits([['initContacts', contacts.initContacts], ['initPhotoScan', photoscan.initPhotoScan], ['initTinderImport', tinder.initTinderImport],
+['initWhatsAppImport', whatsapp.initWhatsAppImport], ['initDatingImport', manual.initDatingImport], ['initTelegramImport', telegram.initTelegramImport]]);
+});
+initOnFirstShow('finances', async () => {
+const m = await import('./features/airbnbearnings.js');
+runInits([['initAirbnbEarningsImport', m.initAirbnbEarningsImport]]);
+});
+initOnFirstShow('settings', async () => {
+const [advisor, providers, runs] = await Promise.all([
+import('./features/switchadvisoradmin.js'), import('./features/providerssettings.js'), import('./features/airunsview.js'),
+]);
+runInits([['initSwitchAdvisorAdmin', advisor.initSwitchAdvisorAdmin], ['initProvidersSettings', providers.initProvidersSettings], ['initAiRunsView', runs.initAiRunsView]]);
+});
 initPhotoSync();
 initHealthSync();
 initHealthDaily();
@@ -354,7 +384,6 @@ accrueLettings();
 initLetting();
 initLoans();
 await initSettings();
-await initSwitchAdvisorAdmin();
 registerServiceWorker();
 // After the panels are wired, so the captured task renders into a live UI.
 // Not awaited — an upload of a shared file shouldn't hold up the page.
@@ -381,12 +410,9 @@ initPriceBreakdown();
 initHotelBasket();
 async function startModelReview() { await new Promise((r) => setTimeout(r, 0)); initModelReview(); }
 startModelReview();
-initAirbnbEarningsImport();
 initMailHistory();
 initAutoLink();
 initAiRuns();
-initAiRunsView();
-initProvidersSettings();
 initDayQueue();
 initRenderBus();
 }
