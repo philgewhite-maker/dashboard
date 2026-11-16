@@ -42,8 +42,9 @@ return r && Array.isArray(r.zones) && r.fetchedAt ? r : null;
 const ageOf = (r) => (r ? Date.now() - r.fetchedAt : Infinity);
 
 // Alerts for the ticker, from a reading. Pure: pass `now` to test it.
-//   cold          actual < HEAT_LOW_C            (not for standby/away zones, whose
-//                                                 frost setpoint is deliberately low)
+//   cold          actual < HEAT_LOW_C            (every zone, standby/away included: the alert is on the
+//                                                 room's actual temperature, e.g. a window left open; the
+//                                                 frost setpoint is only the hub's backstop)
 //   hot           actual > HEAT_HIGH_C
 //   hot+heating   actual > HEAT_HIGH_WHILE_HEATING_C while heating is on
 // One alert per zone, the 28 C one winning over the 25 C one. Offline zones
@@ -64,7 +65,7 @@ if (t == null || z.offline) return;
 let kind = '';
 if (t > HEAT_HIGH_C) kind = 'hot';
 else if (t > HEAT_HIGH_WHILE_HEATING_C && z.heating) kind = 'hot-heating';
-else if (t < HEAT_LOW_C && !z.standby && !z.away) kind = 'cold';
+else if (t < HEAT_LOW_C) kind = 'cold';
 if (!kind) return;
 const zone = z.zone || 'Zone';
 const word = kind === 'cold' ? 'below 18°' : kind === 'hot' ? 'above 28°' : 'above 25° and heating';
