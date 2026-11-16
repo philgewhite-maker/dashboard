@@ -316,9 +316,10 @@ const addMissing = !!(document.getElementById('aex-add-missing') || {}).checked;
 const r = applyImport(state.items, { addMissing, ownerKey: state.ownerKey });
 import('./bookingrequests.js').then((m) => { m.resolveRequestOutcomes(); queueSave(); });
 renderLetting();
+import('./bookingsettings.js').then((m) => m.renderBookingEvaluatorSettings()).catch(() => {});
 rerun();
 const status = document.getElementById('aex-status');
-if (status) status.textContent = `Filled in ${r.filled} stay${r.filled === 1 ? '' : 's'} and entr${r.filled === 1 ? 'y' : 'ies'}${r.added ? `; added ${r.added} Earned entr${r.added === 1 ? 'y' : 'ies'}` : ''}.`;
+if (status) status.innerHTML = `Filled in ${r.filled} stay${r.filled === 1 ? '' : 's'} and entr${r.filled === 1 ? 'y' : 'ies'}${r.added ? `; added ${r.added} Earned entr${r.added === 1 ? 'y' : 'ies'}` : ''}. <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#be-est-rates">See the estimated rates</span>`;
 });
 }
 

@@ -330,11 +330,13 @@ return `<details class="settings-subgroup" open><summary>Three of the simulated 
 function logHtml() {
 const q = state.prefill && state.prefill.requestId ? (data.bookingRequests || []).find((x) => x.id === state.prefill.requestId) : null;
 const saved = q && q.evaluation ? `Saved ${escapeHtml(String(q.evaluation.at).slice(0, 10))} (${escapeHtml(q.evaluation.recommendation)}).` : '';
+const links = q ? `${q.messageId ? `<button class="sync-btn sm inline" type="button" data-be-open-mail="${escapeHtml(q.messageId)}">Open the request email</button>` : ''}<span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-bkreq='${escapeHtml(q.id)}']">Back to the request</span>` : '';
 return `<div class="sync-row" style="margin-top:8px;align-items:center;">
 <button class="sync-btn sm inline" type="button" id="be-sensitivity">What would change the answer?</button>
 <button class="sync-btn sm inline" type="button" id="be-save">${q ? 'Save this verdict on the request' : 'Save to the request log'}</button>
 <button class="sync-btn sm inline" type="button" data-be-decide="accepted">I accepted it</button>
 <button class="sync-btn sm inline" type="button" data-be-decide="declined">I declined it</button>
+${links}
 <span class="sync-status" id="be-save-status">${saved}</span>
 </div>
 <div id="be-sens"></div>`;
@@ -410,6 +412,8 @@ return;
 if (e.target.closest('#be-run')) { state.overrides = {}; run(); return; }
 if (e.target.closest('#be-whatif-reset')) { state.overrides = {}; run(); return; }
 if (e.target.closest('#be-save')) { saveToLog(); renderResult(); const s = document.getElementById('be-save-status'); if (s) s.textContent = 'Saved on the request log.'; return; }
+const mailBtn = e.target.closest('[data-be-open-mail]');
+if (mailBtn) { const { openMessage } = await import('./mailviewer.js'); openMessage(mailBtn.dataset.beOpenMail); return; }
 const decide = e.target.closest('[data-be-decide]');
 if (decide) {
 saveToLog(decide.dataset.beDecide); renderResult();
@@ -419,7 +423,10 @@ if (decide.dataset.beDecide === 'accepted') {
 const sync = document.getElementById('airbnb-sync-btn');
 if (sync && !sync.disabled) { sync.click(); if (s) s.innerHTML = 'Recorded as accepted. Running the <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb sync</span>…'; }
 else if (s) s.innerHTML = 'Recorded as accepted. The <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb sync</span> is already running or not available, so it was not started.';
-} else if (s) s.textContent = `Recorded as ${decide.dataset.beDecide}.`;
+} else if (s) {
+const rid = state.prefill && state.prefill.requestId;
+s.innerHTML = `Recorded as ${escapeHtml(decide.dataset.beDecide)}.${rid ? ` <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-bkreq='${escapeHtml(rid)}']">Back to the request</span>` : ''}`;
+}
 return;
 }
 if (e.target.closest('#be-sensitivity')) {
