@@ -1,4 +1,12 @@
 // Guest price, elasticity prior and the cleaning-fee scenario (PRICING-PLAN.md section E, phase 5).
+// RECEIVED MONEY, NO PLATFORM FEES: every income figure in the dashboard is already what was received after ALL Airbnb
+// fees, so this model works in received amounts and models no guest or host fee (both default to 0 below). A fee that is
+// a constant share of what the guest pays cancels in the price ratios the elasticity acts on. The fee parameters still
+// exist (allInGuestPrice's guestFeePct, the scenario's guestFeePct/hostFeePct) and work if given, for callers that read
+// them, but nothing here sets them non-zero. The one place listed money meets received money is the cleaning fee: the
+// cleaningFees below are the LISTED amounts guests see; bookingmodel-candidate.js (receivedCleaningFees) scales them to
+// received money by one factor per room (calibrated received cleaning income / baseline listed per-stay fee). The
+// scenario helpers here take the same kind of factor as `cleaningScale` (default 1 = fees used as listed).
 // Pure maths: no DOM, no stored data read or written. Settings come in as the booking evaluator's settings object
 // (data.prefs.bookingEvaluator, keys `guestPrice` and `elasticityPrior`); anything missing falls back to the defaults
 // below, which live ONLY here for now. They are deliberately not in DEFAULT_PREFS.bookingEvaluator yet: bookingmodel.js
@@ -17,15 +25,13 @@ import { stepPct, discountsOf } from './bookingmodel.js';
 
 // ---- Defaults (see the header: not yet in js/state.js DEFAULT_PREFS) ---------------------------------------
 const DEFAULT_GUEST_PRICE = {
-  // ASSUMPTION, unverified for this account: Airbnb's split-fee guest service fee, recalled from Airbnb's help centre
-  // as "generally under 14.2% of the booking subtotal" (nightly price after discounts + cleaning fee). The real rate
-  // varies by booking and Airbnb has been moving hosts to a host-only fee; check one real guest receipt and correct it.
-  airbnbGuestFeePct: 14.2,
+  // 0 because prices here are in received money (after all Airbnb fees): no fee is modelled. Keep it 0 unless the owner
+  // says otherwise; the key stays so callers that read it do not break.
+  airbnbGuestFeePct: 0,
   // Direct bookings: no platform guest fee (own site, word of mouth).
   directGuestFeePct: 0,
-  // ASSUMPTION, unverified: the split-fee host service fee, recalled as 3% of the same subtotal. Used only to turn the
-  // scenario's guest spend into host payout.
-  hostFeePct: 3,
+  // 0 for the same reason: payouts are already received amounts. Keep it 0 unless the owner says otherwise.
+  hostFeePct: 0,
   // Which listings are which kind of room, by Airbnb listing id. Source: PRICING-PLAN.md, Airbnb settings read 14 Nov
   // 2026 (Double = 1635499706498185151) and owner answer 2 (the Double's bathroom is shared with the host only).
   roomTypes: {
@@ -33,7 +39,8 @@ const DEFAULT_GUEST_PRICE = {
     '1437224781619025669': 'ensuite',
     '1651495519889440619': 'ensuite',
   },
-  // Cleaning fee guests pay, per listing. Source: PRICING-PLAN.md, "Airbnb settings as read Sat 14 Nov 2026".
+  // Cleaning fee guests pay, per listing: LISTED amounts, not received money (bookingmodel-candidate.js scales them to
+  // received money, see the header). Source: PRICING-PLAN.md, "Airbnb settings as read Sat 14 Nov 2026".
   // shortStayMaxNights: ASSUMPTION, Airbnb's short-stay cleaning fee taken to apply to stays of 1-2 nights (not read
   // from the settings page; check the fee page's own wording).
   cleaningFees: {
@@ -103,11 +110,12 @@ function cleaningFeeFor(fees, nights) {
 }
 
 // ---- All-in guest price ------------------------------------------------------------------------------------
-// All-in guest price per night = nightly price after discounts + cleaning fee / nights + platform guest fee, the fee
-// being guestFeePct of (nightly after discounts + cleaning fee / nights), i.e. of the booking subtotal.
+// All-in price per night = nightly price after discounts + cleaning fee / nights + an optional platform guest fee, the
+// fee being guestFeePct of (nightly after discounts + cleaning fee / nights). guestFeePct is 0 by default (received
+// money, no fees modelled), so the all-in price is the subtotal.
 // `nightly` is the raw nightly price before discounts. Discounts: the listing's short-notice step (needs leadDays) and
 // length step (from `disc`, the shape discountsOf() returns), plus `extraDiscount` (a fraction, e.g. a custom
-// promotion), all combining by multiplying as in bookingmodel.js. `guestFeePct` is a fraction (0.142).
+// promotion), all combining by multiplying as in bookingmodel.js. `guestFeePct` is a fraction, normally 0.
 function allInGuestPrice({ nightly, nights, cleaningFee = 0, leadDays = null, disc = null, extraDiscount = 0, guestFeePct = 0 }) {
   const n = Math.max(1, Math.round(num(nights, 1)));
   const sn = disc && leadDays != null ? stepPct(disc.shortNotice, 'days', leadDays) : 0;
@@ -179,15 +187,19 @@ function demandMultiplier(allIn, reference, elasticity) {
 // current / alternatives: {label, perStay, shortStay?, shortStayMaxNights?, nightlyAdd?}. nightlyAdd is added to the
 // raw nightly price before discounts (folding the fee into the price); see foldedAlternative().
 // elasticity: a number, or a function ({nights, month, leadDays}) => number.
-// Income: host payout = (nightly after discounts x nights + cleaning fee) x (1 - hostFeePct); net = payout less
-// cleanCost per booking (your own cost of a changeover).
+// Income: payout = (nightly after discounts x nights + cleaning fee) x (1 - hostFeePct), hostFeePct 0 by default (all
+// money is received money); net = payout less cleanCost per booking (your own cost of a changeover).
+// cleaningScale (default 1) multiplies every cleaning fee, to turn LISTED fees into received money the way
+// bookingmodel-candidate.js does; nightly / nightlyAdd are taken as received already.
 // Not modelled: capacity (more short stays can crowd out others; the booking model's simulation handles that once this
 // is wired in), and any change in how many guests search a listing whose fee is shown differently.
-function cleaningFeeScenario({ nightly, mix, current, alternatives = [], elasticity, disc = null, guestFeePct = 0, hostFeePct = 0, cleanCost = 0, extraDiscount = 0 }) {
+function cleaningFeeScenario({ nightly, mix, current, alternatives = [], elasticity, disc = null, guestFeePct = 0, hostFeePct = 0, cleanCost = 0, extraDiscount = 0, cleaningScale = 1 }) {
   const rows = (mix || []).filter((m) => Number(m.nights) >= 1 && Number(m.bookings) >= 0).map((m) => ({ nights: Math.round(Number(m.nights)), bookings: Number(m.bookings), month: m.month ?? null, leadDays: m.leadDays ?? null }));
   const epsOf = typeof elasticity === 'function' ? elasticity : () => Number(elasticity) || 0;
   const hf = Math.max(0, num(hostFeePct, 0));
-  const priceOf = (opt, r) => allInGuestPrice({ nightly: num(nightly, 0) + num(opt.nightlyAdd, 0), nights: r.nights, cleaningFee: cleaningFeeFor(opt, r.nights), leadDays: r.leadDays, disc, extraDiscount, guestFeePct });
+  const cs = Math.max(0, num(cleaningScale, 1));
+  const feeOf = (opt, n) => cleaningFeeFor(opt, n) * cs;
+  const priceOf = (opt, r) => allInGuestPrice({ nightly: num(nightly, 0) + num(opt.nightlyAdd, 0), nights: r.nights, cleaningFee: feeOf(opt, r.nights), leadDays: r.leadDays, disc, extraDiscount, guestFeePct });
   const run = (opt) => {
     let bookings = 0; let nights = 0; let guestSpend = 0; let payout = 0; let cleaning = 0;
     const byLength = rows.map((r) => {
@@ -195,7 +207,7 @@ function cleaningFeeScenario({ nightly, mix, current, alternatives = [], elastic
       const eps = epsOf({ nights: r.nights, month: r.month, leadDays: r.leadDays });
       const mult = demandMultiplier(p.perNight, cur.perNight, eps);
       const b = r.bookings * mult;
-      const clean = cleaningFeeFor(opt, r.nights);
+      const clean = feeOf(opt, r.nights);
       bookings += b; nights += b * r.nights; guestSpend += b * p.total;
       payout += b * (p.nightlyAfter * r.nights + clean) * (1 - hf);
       cleaning += b * clean;
@@ -216,37 +228,38 @@ function cleaningFeeScenario({ nightly, mix, current, alternatives = [], elastic
 // "Fold the fee into the nightly price": the nightlyAdd (before discounts) that, at today's mix and with no change in
 // demand, brings in the same nightly + cleaning income as the current fee. Solves
 // sum(bookings x nights x add x discountFactor) = sum(bookings x (currentFee - newFee)) for add, with newFee = 0 unless
-// `keep` gives one ({perStay, shortStay, shortStayMaxNights}).
-function foldedAlternative({ mix, current, disc = null, extraDiscount = 0, keep = null, label = 'Cleaning fee folded into the nightly price' }) {
+// `keep` gives one ({perStay, shortStay, shortStayMaxNights}). cleaningScale as in cleaningFeeScenario.
+function foldedAlternative({ mix, current, disc = null, extraDiscount = 0, keep = null, cleaningScale = 1, label = 'Cleaning fee folded into the nightly price' }) {
   let money = 0; let weighted = 0;
   (mix || []).forEach((m) => {
     const n = Math.round(Number(m.nights)); const b = Number(m.bookings);
     if (!(n >= 1) || !(b > 0)) return;
     const f = allInGuestPrice({ nightly: 1, nights: n, leadDays: m.leadDays ?? null, disc, extraDiscount }).nightlyAfter; // discount factor
-    money += b * (cleaningFeeFor(current, n) - (keep ? cleaningFeeFor(keep, n) : 0));
+    money += b * num(cleaningScale, 1) * (cleaningFeeFor(current, n) - (keep ? cleaningFeeFor(keep, n) : 0));
     weighted += b * n * f;
   });
   const add = weighted > 0 ? money / weighted : 0;
   return { label, perStay: keep ? num(keep.perStay, 0) : 0, shortStay: keep ? keep.shortStay ?? null : null, shortStayMaxNights: keep ? keep.shortStayMaxNights ?? 0 : 0, nightlyAdd: add };
 }
 
-// The scenario for one Airbnb listing, from settings: its cleaning fees, discounts, guest and host fees and the
-// elasticity prior by month and lead time. `nightly` (raw, before discounts) and `mix` come from the caller (the booking
+// The scenario for one Airbnb listing, from settings: its cleaning fees, discounts, the (default 0) guest and host fees
+// and the elasticity prior by month and lead time. `cleaningScale` (default 1) turns the LISTED cleaning fees into
+// received money, as bookingmodel-candidate.js does. `nightly` (raw, before discounts) and `mix` come from the caller (the booking
 // model's base price and stay-length draws). Alternatives default to: fee folded into the nightly price, and no
 // short-stay fee (every stay pays the per-stay fee).
-function cleaningFeeScenarioFor(s, listingId, { nightly, mix, alternatives = null, cleanCost = 0, channel = 'airbnb' }) {
+function cleaningFeeScenarioFor(s, listingId, { nightly, mix, alternatives = null, cleanCost = 0, channel = 'airbnb', cleaningScale = 1 }) {
   const g = guestPriceSettings(s);
   const current = { label: 'Current cleaning fee', ...(g.cleaningFees[listingId] || { perStay: 0 }) };
   const disc = discountsOf(s, channel === 'airbnb' ? 'airbnb' : 'direct', channel === 'airbnb' ? listingId : null);
   const alts = alternatives || [
-    foldedAlternative({ mix, current, disc }),
+    foldedAlternative({ mix, current, disc, cleaningScale }),
     { label: 'One fee for every stay length', perStay: current.perStay, shortStay: null, shortStayMaxNights: 0 },
   ];
   return {
     listingId,
     roomType: roomTypeOf(s, listingId),
     ...cleaningFeeScenario({
-      nightly, mix, current, alternatives: alts, disc, cleanCost,
+      nightly, mix, current, alternatives: alts, disc, cleanCost, cleaningScale,
       guestFeePct: guestFeePctOf(s, channel),
       hostFeePct: channel === 'airbnb' ? clampPct(g.hostFeePct, 0) : 0,
       elasticity: ({ month, leadDays }) => elasticityFor(s, { listingId, month, leadDays }).value,
@@ -264,17 +277,19 @@ function selfTest() {
   } } };
   const D = '1635499706498185151'; const P = '1437224781619025669';
 
-  // 1. Double, £125, 3 nights, 30 days ahead: no discount, £75 fee: 125 + 25 = 150, + 14.2% = 171.30 a night.
+  // 1. Double, £125, 3 nights, 30 days ahead: no discount, £75 fee: 125 + 25 = 150 a night (no fee modelled).
   let a = allInForListing(s, D, { nightly: 125, nights: 3, leadDays: 30 });
-  ok('All-in: Double 3 nights, 125 + 75/3 + 14.2%', a.perNight, 171.3);
-  ok('All-in: total = per night x nights', a.total, 513.9);
-  // 2. Double, 7 nights, 4 days ahead: 10% short notice and 10% weekly: 125 x 0.81 = 101.25; (708.75 + 75) x 1.142 = 895.0425.
+  ok('All-in: Double 3 nights, 125 + 75/3', a.perNight, 150);
+  ok('All-in: total = per night x nights', a.total, 450);
+  ok('Default guest and host fees are 0', DEFAULT_GUEST_PRICE.airbnbGuestFeePct === 0 && DEFAULT_GUEST_PRICE.hostFeePct === 0, true);
+  ok('All-in: an explicit guest fee still works (14.2% on 150)', allInGuestPrice({ nightly: 125, nights: 3, cleaningFee: 75, guestFeePct: 0.142 }).perNight, 171.3);
+  // 2. Double, 7 nights, 4 days ahead: 10% short notice and 10% weekly: 125 x 0.81 = 101.25; (708.75 + 75 = 783.75.
   a = allInForListing(s, D, { nightly: 125, nights: 7, leadDays: 4 });
   ok('All-in: Double 7 nights at short notice, both discounts', a.nightlyAfter, 101.25);
-  ok('All-in: Double 7 nights total (708.75 + 75) x 1.142', a.total, 895.0425);
-  // 3. En-suite Phil, £160, 2 nights: short-stay fee £75: (160 + 37.5) x 1.142 = 225.545.
+  ok('All-in: Double 7 nights total 708.75 + 75', a.total, 783.75);
+  // 3. En-suite Phil, £160, 2 nights: short-stay fee £75: 160 + 37.5 = 197.5.
   a = allInForListing(s, P, { nightly: 160, nights: 2, leadDays: 30 });
-  ok('All-in: short-stay cleaning fee on 2 nights', a.perNight, 225.545);
+  ok('All-in: short-stay cleaning fee on 2 nights', a.perNight, 197.5);
   ok('Short-stay fee stops at the 3rd night', cleaningFeeFor({ perStay: 95, shortStay: 75, shortStayMaxNights: 2 }, 3), 95);
   // 4. Direct channel: no guest fee, shared (empty) discounts: 125 + 25 = 150.
   ok('All-in: direct, no guest fee', allInForListing(s, D, { nightly: 125, nights: 3, leadDays: 30, channel: 'direct' }).perNight, 150);
@@ -311,26 +326,36 @@ function selfTest() {
   ok('Scenario e=-1: bookings 20.658537', o.bookings, 20.658536585365855, 1e-6);
   ok('Scenario e=-1: net change -0.658537 x 50', o.change.net, -0.658536585365855 * 50, 1e-6);
   ok('Scenario e=-1: short stays rise to 53.72% of bookings', o.byLength[0].share, 11.097560975609756 / 20.658536585365855, 1e-9);
-  // 9. Same mix with Airbnb's fees (guest 14.2%, host 3%) and elasticity -1.8 (checked in Python):
-  // folded: 2-night x1.206173, 5-night x0.922367; payout 7981.479 against 7954; net 6917.209 against 6954.
-  sc = cleaningFeeScenario({ nightly: 100, mix, current: cur, alternatives: [fold, { label: 'short £40', perStay: 60, shortStay: 40, shortStayMaxNights: 2 }], elasticity: -1.8, guestFeePct: 0.142, hostFeePct: 0.03, cleanCost: 50 });
+  // 9. Same mix, no fees (the default), elasticity -1.8 (checked in Python):
+  // folded: 2-night x1.206173, 5-night x0.922367; payout 8228.329 against 8200; net 7164.059 against 7200.
+  sc = cleaningFeeScenario({ nightly: 100, mix, current: cur, alternatives: [fold, { label: 'short £40', perStay: 60, shortStay: 40, shortStayMaxNights: 2 }], elasticity: -1.8, cleanCost: 50 });
   o = sc.options[0];
-  ok('Scenario e=-1.8: current payout (7000 + 1200) x 0.97', sc.current.payout, 7954);
+  ok('Scenario e=-1.8: current payout 7000 + 1200', sc.current.payout, 8200);
   ok('Scenario e=-1.8: folded 2-night multiplier', o.byLength[0].multiplier, 1.206172914624661, 1e-9);
-  ok('Scenario e=-1.8: folded payout', o.payout, 7981.4790090228225, 1e-6);
-  ok('Scenario e=-1.8: folded net', o.net, 6917.208816013854, 1e-6);
-  // A £40 short-stay fee: 2-night stays x1.154973, 5-night unchanged; payout 8120.777, net 7043.290.
+  ok('Scenario e=-1.8: folded payout', o.payout, 8228.32887528126, 1e-6);
+  ok('Scenario e=-1.8: folded net', o.net, 7164.058682272291, 1e-6);
+  // A £40 short-stay fee: 2-night stays x1.154973, 5-night unchanged; payout 8371.935, net 7294.448.
   const sh = sc.options[1];
   ok('Scenario e=-1.8: short-stay fee leaves 5-night stays alone', sh.byLength[1].multiplier, 1);
-  ok('Scenario e=-1.8: short-stay fee payout', sh.payout, 8120.77689323181, 1e-6);
-  ok('Scenario e=-1.8: short-stay fee net', sh.net, 7043.290447090958, 1e-6);
+  ok('Scenario e=-1.8: short-stay fee payout', sh.payout, 8371.934941476093, 1e-6);
+  ok('Scenario e=-1.8: short-stay fee net', sh.net, 7294.44849533524, 1e-6);
+  // 9b. The optional fee parameters still work if given (guest 14.2%, host 3%; values checked in Python earlier).
+  const scf = cleaningFeeScenario({ nightly: 100, mix, current: cur, alternatives: [fold], elasticity: -1.8, guestFeePct: 0.142, hostFeePct: 0.03, cleanCost: 50 });
+  ok('Optional fees: current payout (7000 + 1200) x 0.97', scf.current.payout, 7954);
+  ok('Optional fees: folded payout', scf.options[0].payout, 7981.4790090228225, 1e-6);
+  // 9c. cleaningScale: a 60 fee at scale 0.5 behaves as a 30 fee with no scale.
+  const half = cleaningFeeScenario({ nightly: 100, mix, current: cur, alternatives: [foldedAlternative({ mix, current: cur, cleaningScale: 0.5 })], elasticity: -1.8, cleanCost: 50, cleaningScale: 0.5 });
+  const c30 = { label: 'now', perStay: 30 };
+  const plain = cleaningFeeScenario({ nightly: 100, mix, current: c30, alternatives: [foldedAlternative({ mix, current: c30 })], elasticity: -1.8, cleanCost: 50 });
+  ok('cleaningScale 0.5 on a 60 fee equals a 30 fee: folded payout', half.options[0].payout, plain.options[0].payout, 1e-9);
+  ok('cleaningScale 0.5 on a 60 fee: current payout 7000 + 600', half.current.payout, 7600);
   // 10. Fold with a length discount: 7-night stays take 10%, so add = 10 x 60 / (10 x 7 x 0.9) = 9.52381.
   const f10 = foldedAlternative({ mix: [{ nights: 7, bookings: 10 }], current: cur, disc: { shortNotice: [], length: [{ nights: 7, pct: 10 }] } });
   ok('Fold: allows for the length discount', f10.nightlyAdd, 600 / 63);
   // 11. From settings: Double, January, 3-night stays: the elasticity used is the shared January prior.
   const fs = cleaningFeeScenarioFor(s, D, { nightly: 125, mix: [{ nights: 3, bookings: 4, month: 0, leadDays: 30 }] });
   ok('Scenario from settings: shared January elasticity', fs.options[0].byLength[0].elasticity, -2.16);
-  ok('Scenario from settings: current payout (375 + 75) x 0.97 x 4', fs.current.payout, 1746);
+  ok('Scenario from settings: current payout (375 + 75) x 4', fs.current.payout, 1800);
 
   const failed = out.filter((t) => !t.pass);
   return { ok: failed.length === 0, passed: out.length - failed.length, total: out.length, failed };
