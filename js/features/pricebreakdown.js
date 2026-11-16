@@ -41,7 +41,9 @@ const a = new Date(`${v.from}T00:00:00`); const b = new Date(`${v.to}T00:00:00`)
 const span = a.getMonth() === b.getMonth() ? `${a.getDate()}–${shortDay(v.to)}` : `${shortDay(v.from)}–${shortDay(v.to)}`;
 return `${v.nights}-night gap ${span}`;
 }
-const yieldToPage = () => new Promise((r) => setTimeout(r, 0));
+// A MessageChannel hop, not setTimeout: Chrome throttles setTimeout chains in a hidden tab to about one a second or
+// slower (seen live: a 1.4 s projection took minutes in a background tab), but not message events.
+const yieldToPage = () => new Promise((r) => { const ch = new MessageChannel(); ch.port1.onmessage = () => r(); ch.port2.postMessage(0); });
 
 // ---- Record references (CLAUDE.md: every record shown here links back) ----------------------------
 let chips = null; // { stayChipHtml, taskChipHtml } once loaded
@@ -94,7 +96,7 @@ const deadKey = (v) => `${v.roomKey}|${v.from}|${v.to}`;
 async function projectSliced(model, c, opts, onBusy, label) {
 const proj = model.makeProjection(c, opts);
 if (proj.error) return proj;
-while (!proj.step(100)) { onBusy(`${label} ${Math.round(proj.progress * 100)}%`); await yieldToPage(); }
+for (let done = false; !done;) { const t = performance.now(); while (!(done = proj.step(50)) && performance.now() - t < 40); onBusy(`${label} ${Math.round(proj.progress * 100)}%`); await yieldToPage(); }
 return proj.finish();
 }
 async function compute(roomKey, range, onBusy) {
