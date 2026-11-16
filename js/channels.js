@@ -185,6 +185,47 @@ function createLongLet(doc, opts, blank, todayIso) {
   return { stay, created: true, plan };
 }
 
+// Unlinked income rows that would carry a long let on without a gap: same guest as the let's own payments, starting
+// on its checkout (or ending on its checkin), chained. Rows from another guest are never offered.
+function adjoiningPayments(doc, stay) {
+  if (!stay || stay.letType !== 'long') return [];
+  const key = (e) => String((e && (e.guest || e.note)) || '').trim().toLowerCase();
+  const byId = new Map((doc.lettingLedger || []).map((e) => [e.id, e]));
+  const guests = new Set((stay.paymentIds || []).map((id) => key(byId.get(id))).filter(Boolean));
+  if (!guests.size) return [];
+  const pool = longLetCandidates(doc).filter((e) => guests.has(key(e)));
+  const picked = [];
+  let start = stay.checkin;
+  let end = stay.checkout;
+  for (let more = true; more;) {
+    more = false;
+    for (const e of pool) {
+      if (picked.includes(e.id)) continue;
+      const s = ledgerRowSpan(e);
+      if (s.start === end) { end = s.end; picked.push(e.id); more = true; } else if (s.end === start) { start = s.start; picked.push(e.id); more = true; }
+    }
+  }
+  return picked;
+}
+
+// Add payments to an existing long let: re-plans the whole set (so the no-gap rule still holds) and moves the
+// stay's dates. The stay keeps its id; the ledger rows are not touched. Returns { stay } or { error }.
+function extendLongLet(doc, stayId, addIds, todayIso) {
+  const stay = (doc.airbnbReservations || []).find((r) => r.id === stayId && r.letType === 'long');
+  if (!stay) return { error: 'That long let is gone.' };
+  const others = { ...doc, airbnbReservations: (doc.airbnbReservations || []).filter((r) => r.id !== stayId) };
+  const ids = [...(stay.paymentIds || []), ...(addIds || [])];
+  if (ids.length < 2) return { error: 'Pick at least two payments.' };
+  const plan = planLongLet(others, ids);
+  if (!plan.ok) return { error: plan.error };
+  const today = todayIso || new Date().toISOString().slice(0, 10);
+  stay.paymentIds = plan.ids;
+  stay.checkin = plan.start;
+  stay.checkout = plan.end;
+  stay.status = plan.end <= today ? 'completed' : 'booked';
+  return { stay, plan };
+}
+
 // Leo & Jerry: one direct contract signed up front, 27 Sep 2024 -> 23 May 2025 (238 nights), 17 fortnightly payments of
 // £1,105 (8 on "En-Suite - Phil", then 9 on "En-Suite - Lewis" at £552.50 owner share each). Acts only when it finds
 // exactly that; anything else returns { done: false, reason } and changes nothing (the manual merge is then the route).
@@ -220,5 +261,5 @@ function migrateLeoJerry(doc, blank, todayIso) {
 export {
   CHANNEL_GROUPS, CHANNEL_GROUP_LABEL, DEFAULT_LETTING_CHANNELS, BUILTIN_CHANNEL_IDS,
   normaliseChannels, platformForChannel, channelById, channelName, channelChoices, newChannelId, applyStayChannel, migrateStayChannel,
-  ledgerRowSpan, linkedPaymentIds, longLetFor, longLetCandidates, planLongLet, createLongLet, migrateLeoJerry,
+  ledgerRowSpan, linkedPaymentIds, longLetFor, longLetCandidates, planLongLet, createLongLet, adjoiningPayments, extendLongLet, migrateLeoJerry,
 };

@@ -3,7 +3,7 @@
 // (defaults in state.js DEFAULT_PREFS). Every box is a number or a tick; the model blends
 // each with your own data as it builds up.
 import { data, queueSave, DEFAULT_PREFS, blankAirbnbReservation } from '../state.js';
-import { CHANNEL_GROUPS, CHANNEL_GROUP_LABEL, BUILTIN_CHANNEL_IDS, normaliseChannels, newChannelId, longLetCandidates, planLongLet, createLongLet, ledgerRowSpan, channelName } from '../channels.js';
+import { CHANNEL_GROUPS, CHANNEL_GROUP_LABEL, BUILTIN_CHANNEL_IDS, normaliseChannels, newChannelId, longLetCandidates, planLongLet, createLongLet, adjoiningPayments, extendLongLet, ledgerRowSpan, channelName } from '../channels.js';
 import { escapeHtml, uid } from '../utils.js';
 import { nightRateRooms } from './letting.js';
 
@@ -114,9 +114,9 @@ return `<h4 class="be-set-h" id="long-lets">Long lets</h4>
 <div class="settings-note" style="margin:0 0 4px;">A long let is one stay with a signing date, a start and an end, paid by a schedule of income entries. Merging links the entries you tick to a single stay; the entries themselves (amounts, owners, dates) do not change, and the same nights stay blocked on the occupancy chart.</div>
 ${body}
 ${llMsg ? `<div class="sync-status">${llMsg}</div>` : ''}
-${made.length ? `<div class="settings-note" style="margin:8px 0 2px;">Long lets already made</div>${made.map((r) => `<div class="be-set-row"><span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-airbnb-row='${escapeHtml(r.id)}']" title="Open this stay">${escapeHtml(r.guestName || 'Long let')} &middot; ${escapeHtml(r.checkin)} &rarr; ${escapeHtml(r.checkout)} &middot; ${r.paymentIds.length} payments &middot; ${escapeHtml(channelName(channels(), r.channel))}</span> <button class="sync-btn sm inline" type="button" data-ll-split="${escapeHtml(r.id)}" title="Delete this stay and show its payments as separate stays again. The income entries are untouched.">Split back</button></div>`).join('')}` : ''}`;
+${made.length ? `<div class="settings-note" style="margin:8px 0 2px;">Long lets already made</div>${made.map((r) => `<div class="be-set-row"><span class="stay-link" data-open-stay="${escapeHtml(r.id)}" title="Open this stay">${escapeHtml(r.guestName || 'Long let')} &middot; ${escapeHtml(r.checkin)} &rarr; ${escapeHtml(r.checkout)} &middot; ${r.paymentIds.length} payments &middot; ${escapeHtml(channelName(channels(), r.channel))}</span> ${(() => { const adj = adjoiningPayments(data, r); return adj.length ? `<button class="sync-btn sm inline" type="button" data-ll-extend="${escapeHtml(r.id)}" title="Same guest, starting the day this let ends (or ending the day it starts): add to this let. The income entries are untouched.">Add ${adj.length} adjoining payment${adj.length === 1 ? '' : 's'}</button> ` : ''; })()}<button class="sync-btn sm inline" type="button" data-ll-split="${escapeHtml(r.id)}" title="Delete this stay and show its payments as separate stays again. The income entries are untouched.">Split back</button></div>`).join('')}` : ''}`;
 }
-function renderLongLet() { const el = document.getElementById('ll-merge-box'); if (el) el.innerHTML = longLetHtml(); }
+function renderLongLet() { const el = document.getElementById('ll-merge-box'); if (el) el.innerHTML = longLetHtml(); import('./airbnb.js').then((m) => m.bindStayChips()).catch(() => {}); }
 
 function earningsDataHtml() {
 const rows = data.airbnbEarnings || [];
@@ -282,8 +282,21 @@ const picked = rows.map((x) => x.id);
 const guestName = rows.length ? guestOf(rows[0]) : '';
 const r = createLongLet(data, { paymentIds: picked, listingId: document.getElementById('ll-listing').value, bookedOn: document.getElementById('ll-booked').value, channel: document.getElementById('ll-channel').value, guestName }, blankAirbnbReservation);
 if (r.error) { llMsg = escapeHtml(r.error); } else {
-llMsg = `Merged ${r.stay.paymentIds.length} payments into one long let, <span class="inline-goto-link" data-goto-tab="overview" data-goto-target="[data-airbnb-row='${escapeHtml(r.stay.id)}']">open the stay</span>.`;
+llMsg = `Merged ${r.stay.paymentIds.length} payments into one long let, <span class="stay-link" data-open-stay="${escapeHtml(r.stay.id)}">open the stay</span>.`;
 llOff = new Set(); queueSave();
+import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {});
+import('./letting.js').then((m) => m.renderLetting && m.renderLetting()).catch(() => {});
+}
+renderLongLet(); return;
+}
+const extend = e.target.closest('[data-ll-extend]');
+if (extend) {
+const stay = (data.airbnbReservations || []).find((x) => x.id === extend.dataset.llExtend);
+const before = stay ? `${stay.checkin} → ${stay.checkout}` : '';
+const r = extendLongLet(data, extend.dataset.llExtend, adjoiningPayments(data, stay));
+if (r.error) { llMsg = escapeHtml(r.error); } else {
+llMsg = `<span class="stay-link" data-open-stay="${escapeHtml(r.stay.id)}">${escapeHtml(r.stay.guestName || 'Long let')}</span> now runs ${escapeHtml(r.stay.checkin)} → ${escapeHtml(r.stay.checkout)} (${r.plan.nights} nights, ${r.stay.paymentIds.length} payments; was ${escapeHtml(before)}).`;
+queueSave();
 import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {});
 import('./letting.js').then((m) => m.renderLetting && m.renderLetting()).catch(() => {});
 }

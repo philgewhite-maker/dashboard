@@ -896,7 +896,7 @@ ${payoutCheckHtml(r)}
 // Upcoming stays and those still awaiting income are rows on this panel; an earlier or
 // cancelled one is shown by its entry in Letting income instead.
 function stayIsOnPanel(r) {
-return notCancelled(r) && ((r.letType === 'long' && (r.paymentIds || []).length > 0) || r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
+return notCancelled(r) && (r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)));
 }
 function stayChipHtml(r, extraHtml = '') {
 const listing = data.airbnbListings.find((l) => l.id === r.listingId) || {};
@@ -912,7 +912,9 @@ switchTab('overview');
 requestAnimationFrame(() => scrollAndFlash(`[data-airbnb-row="${CSS.escape(id)}"]`));
 return;
 }
-const entry = (data.lettingLedger || []).find((e) => e.reservationId === id);
+// A finished long let has no reservationId on its payments (they don't point back), so it opens its first one.
+const entry = (data.lettingLedger || []).find((e) => e.reservationId === id)
+|| (r.letType === 'long' && (r.paymentIds || []).length ? (data.lettingLedger || []).find((e) => e.id === r.paymentIds[0]) : null);
 if (!entry) return;
 switchTab('finances');
 requestAnimationFrame(() => scrollAndFlash(`[data-letting-date="${CSS.escape(entry.id)}"]`));
@@ -1047,7 +1049,7 @@ const countEl = document.getElementById('airbnb-count');
 if (!el) return;
 const upcoming = data.airbnbReservations
 .filter(notCancelled)
-.filter((r) => (r.letType === 'long' && (r.paymentIds || []).length > 0) || r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
+.filter((r) => r.checkout >= todayStr() || (!r.accruedAt && r.checkout > r.checkin && r.checkout >= dateStrAdd(todayStr(), -AWAITING_INCOME_DAYS)))
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
 const errorsHtml = airbnbSyncErrorsHtml();

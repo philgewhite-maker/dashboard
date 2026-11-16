@@ -1403,7 +1403,7 @@ font-size:11px;
    wherever explanatory text names another tab/panel to go set up
    (starting with connections.js's own "import it on the Dating admin
    tab" line). */
-.inline-goto-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;}
+.inline-goto-link,.stay-link{cursor:pointer;text-decoration:underline;text-decoration-style:dotted;}
 /* Same idiom planner.js's own draft/firm distinction settled on --
    border style + font weight, not a new colour/shape -- deal-linked
    reads as "locked in" (solid fill, like Planner's Firm), transferrable
