@@ -121,6 +121,11 @@ const TOP_RATED_GUEST_SHARE_PCT = 50; // fallback only: the owner's figure (top-
 const PAST_MIN_NIGHTS = 5;
 const DEMAND_WEEKS = 104;
 const LEVEL_PRIOR_K = 3;
+// v9: a room's demand level is held towards the OTHER rooms' pooled rate (demandPool) instead of its own occupancy-based
+// start, once they have enough requests to stand as a prior. All three unsourced (this build's choices):
+const POOL_HOUSE_MIN_N = 10; // requests the other rooms must have (by ctx.today) before their rate is a prior at all
+const POOL_TAU_MIN = 0.5; // floor on the between-room spread of log level: at the floor the prior weighs 1 / 0.5^2 = 4 pseudo-requests
+const POOL_OCC_K = 6; // months of occupancy evidence at which a room's own occupancy counts half towards its relative factor
 const MONTH_SHRINK_K = 5;
 const LAMBDA_MAX = 4;
 // The review's demand factor multiplies the request rate. One fitted under an earlier model version meant something else
@@ -1561,8 +1566,10 @@ return (lo + hi) / 2;
 // availability), and how far each month of the year sits from London's shape (adj, 1 = as London).
 //   exposure X[m] = sum over past weeks and check-in dates in month m of
 //                   London's index x weekday weight x the share of that date's requests due that week x fit
-//   L      = (requests + LEVEL_PRIOR_K) / (total exposure + LEVEL_PRIOR_K / L0), L0 being the rate that fills an
-//            empty calendar to the room's achieved occupancy (all a room without requests has to go on);
+//   L      = (requests + k) / (total exposure + k / m): v8 took m = L0, the rate that fills an empty calendar to the
+//            room's achieved occupancy, and k = LEVEL_PRIOR_K; v9 takes m and k from the other rooms where they have
+//            enough requests (demandPool: the pooled house rate times a room-relative factor, k from the between-room
+//            spread), and v8's pair otherwise;
 //   adj[m] = (requests for month m + MONTH_SHRINK_K) / (L x X[m] + MONTH_SHRINK_K): a month with little exposure
 //            or few requests stays near London's shape.
 // The level is then put on the footing of the room's rating stage today (out.stage, see stageDemand).
@@ -1613,23 +1620,95 @@ const out = { mult, fit, adj, perRoom };
 cache.set('stage', out);
 return out;
 }
-function demandFor(ctx, params, ri) {
+// v9: what each room's own records say, before any prior: its occupancy-based start L0, and from its exposure grid its
+// requests n (N by month of check-in), exposure X (by month) and weeks. Cached per room.
+function demandRaw(ctx, params, ri) {
 const cache = ctx.demandCache || (ctx.demandCache = new Map());
-if (cache.has(ri)) return cache.get(ri);
+const key = `raw|${ri}`;
+if (cache.has(key)) return cache.get(key);
 const o = params.occ[ri];
 const L0 = Math.max(0.01, rateForOccupancy(ctx, params, ri, Math.min(0.97, Math.max(0.02, o.overall ?? OCC_PRIOR))));
-const out = { L: L0, L0, stage: 1, adj: new Array(12).fill(1), N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, weeks: 0, from: null };
+const out = { L0, grid: null, N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, Xsum: 0, weeks: 0, from: null, occW: (o.byMonthW || []).reduce((a, b) => a + (Number(b) || 0), 0) };
 const grid = exposureGrid(ctx, params, ri);
 if (grid) {
+out.grid = grid;
 out.X = exposureByMonth(grid, params.lead, params.leadSigma);
 out.weeks = grid.weeks;
 grid.asks.forEach((a) => { out.N[monthOf(a.checkin)]++; out.n++; });
-const X = out.X.reduce((a, b) => a + b, 0);
-if (X > 0) {
-out.L = (out.n + LEVEL_PRIOR_K) / (X + LEVEL_PRIOR_K / L0);
-out.adj = out.N.map((n, m) => (n + MONTH_SHRINK_K) / (out.L * out.X[m] + MONTH_SHRINK_K));
-}
+out.Xsum = out.X.reduce((a, b) => a + b, 0);
 out.from = dayStr(grid.first);
+}
+cache.set(key, out);
+return out;
+}
+
+// v9: partial pooling of the demand level across the rooms (empirical Bayes on the log level). v8 held each room's
+// level towards an occupancy-based start by LEVEL_PRIOR_K pseudo-requests; for a room with few requests that start
+// decided the level, and it is a simulated figure (the rate that fills an empty calendar to the occupancy seen), not a
+// measured one. Here the prior for room r's log level is
+//   log L_r ~ N( log H_r + log phi_r,  tau^2 ),
+//   H_r     = sum of the OTHER rooms' requests / sum of their exposure (leave-one-out: a room never informs its own
+//             prior; everything is as of ctx.today, from the same grids as the room's own count, so no look-ahead),
+//   phi_r   = (L0_r / L0_H)^s_r, the room's occupancy-based start against the other rooms' (their exposure-weighted
+//             geometric mean), raised to s_r = W_r / (W_r + POOL_OCC_K), W_r the room's months of occupancy evidence
+//             (occ.byMonthW): the other rooms say what a given occupancy means in requests; the room's own occupancy
+//             says where it sits against them, as far as there is occupancy to go on. phi = 1 with none.
+//   tau^2   = max(POOL_TAU_MIN^2, DerSimonian-Laird moment estimate over the rooms with exposure, of the spread of
+//             log((n + 0.5) / X) - log phi about its mean, with weights n + 0.5).
+// A Gamma prior with the same mean and log-spread (shape 1 / tau^2) makes the posterior mean the same closed form v8
+// uses, with the house standing where the occupancy start stood and the pseudo-count set by the spread:
+//   L_r = (n_r + k_r) / (X_r + k_r / m_r),  m_r = H_r phi_r,  k_r = 1 / (tau^2 + 1 / n_H),
+// n_H the other rooms' requests (their rate's own sampling variance in log space, 1 / n_H, widens the prior). A room with
+// no grid takes m_r. Where the other rooms have fewer than POOL_HOUSE_MIN_N requests (one room, or a house just
+// started) the prior is v8's: L0 with LEVEL_PRIOR_K. A room with many requests is barely moved either way
+// (k_r <= 4 against its n). Cached once for every room.
+function demandPool(ctx, params) {
+const cache = ctx.demandCache || (ctx.demandCache = new Map());
+if (cache.has('pool')) return cache.get('pool');
+const raws = ctx.rooms.map((_, i) => demandRaw(ctx, params, i));
+const withX = raws.map((r, i) => i).filter((i) => raws[i].grid && raws[i].Xsum > 0);
+const logL0 = raws.map((r) => Math.log(r.L0));
+const sOf = (r) => r.occW / (r.occW + POOL_OCC_K);
+// Between-room spread: deviations after the relative factor (against the whole house), weighted by requests.
+const logL0House = withX.length ? withX.reduce((a, i) => a + raws[i].Xsum * logL0[i], 0) / withX.reduce((a, i) => a + raws[i].Xsum, 0) : 0;
+const es = withX.map((i) => ({ e: Math.log((raws[i].n + 0.5) / raws[i].Xsum) - sOf(raws[i]) * (logL0[i] - logL0House), w: raws[i].n + 0.5 }));
+let tauHat2 = 0;
+if (es.length >= 2) {
+const W = es.reduce((a, x) => a + x.w, 0);
+const ebar = es.reduce((a, x) => a + x.w * x.e, 0) / W;
+const Q = es.reduce((a, x) => a + x.w * (x.e - ebar) ** 2, 0);
+const C = W - es.reduce((a, x) => a + x.w * x.w, 0) / W;
+tauHat2 = C > 0 ? Math.max(0, (Q - (es.length - 1)) / C) : 0;
+}
+const tau2 = Math.max(POOL_TAU_MIN * POOL_TAU_MIN, tauHat2);
+const out = ctx.rooms.map((_, ri) => {
+const others = withX.filter((i) => i !== ri);
+const nH = others.reduce((a, i) => a + raws[i].n, 0);
+const XH = others.reduce((a, i) => a + raws[i].Xsum, 0);
+if (!(nH >= POOL_HOUSE_MIN_N) || !(XH > 0)) return { source: 'occupancy', mean: raws[ri].L0, k: LEVEL_PRIOR_K, house: null, houseN: nH, phi: 1, s: sOf(raws[ri]), tau: Math.sqrt(tau2), tauHat: Math.sqrt(tauHat2) };
+const H = nH / XH;
+const logL0Others = others.reduce((a, i) => a + raws[i].Xsum * logL0[i], 0) / XH;
+const s = sOf(raws[ri]);
+const phi = Math.exp(s * (logL0[ri] - logL0Others));
+const k = 1 / (tau2 + 1 / nH);
+return { source: 'house', mean: H * phi, k, house: H, houseN: nH, phi, s, tau: Math.sqrt(tau2), tauHat: Math.sqrt(tauHat2) };
+});
+cache.set('pool', out);
+return out;
+}
+
+function demandFor(ctx, params, ri) {
+const cache = ctx.demandCache || (ctx.demandCache = new Map());
+if (cache.has(ri)) return cache.get(ri);
+const raw = demandRaw(ctx, params, ri);
+const prior = demandPool(ctx, params)[ri];
+const out = { L: prior.mean, L0: raw.L0, stage: 1, adj: new Array(12).fill(1), N: raw.N, X: raw.X, n: raw.n, weeks: raw.weeks, from: raw.from, prior: { ...prior, share: null } };
+if (raw.grid) {
+if (raw.Xsum > 0) {
+out.L = (raw.n + prior.k) / (raw.Xsum + prior.k / prior.mean);
+out.prior.share = prior.k / (raw.n + prior.k);
+out.adj = raw.N.map((n, m) => (n + MONTH_SHRINK_K) / (out.L * raw.X[m] + MONTH_SHRINK_K));
+}
 const sd = stageDemand(ctx, params);
 out.stage = sd.adj[ri];
 }
@@ -1947,7 +2026,7 @@ const o = params.occ[ri];
 const fmtMoney = (v) => `£${Math.round(v)}`;
 const d = demandFor(ctx, params, ri);
 const mon = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][m];
-const demandSource = `London's season for ${mon} ×${MARKET_SEASON[m].toFixed(2)} (${MARKET_CREDIT}); this room's level ${d.L.toFixed(2)} a date, ${d.n ? `from ${d.n} request${d.n === 1 ? '' : 's'} since ${d.from} set against the dates and stay lengths that were open to request each week` : `from the ${Math.round((o.overall ?? OCC_PRIOR) * 100)}% occupancy it has achieved (no requests of its own yet)`}${d.n ? `; ${mon} adjusted ×${d.adj[m].toFixed(2)} on ${d.N[m]} request${d.N[m] === 1 ? '' : 's'} for ${mon} dates` : ''}${(ctx.scale.demand || 1) !== 1 ? `; review factor ×${(ctx.scale.demand || 1).toFixed(2)}` : ''}`;
+const demandSource = `London's season for ${mon} ×${MARKET_SEASON[m].toFixed(2)} (${MARKET_CREDIT}); this room's level ${d.L.toFixed(2)} a date, ${d.n ? `from ${d.n} request${d.n === 1 ? '' : 's'} since ${d.from} set against the dates and stay lengths that were open to request each week${d.prior && d.prior.source === 'house' ? `, held towards your other rooms' rate ${d.prior.house.toFixed(2)} ×${d.prior.phi.toFixed(2)} for this room by ${d.prior.k.toFixed(1)} pseudo-requests (${Math.round((d.prior.share || 0) * 100)}% of the level)` : ''}` : d.prior && d.prior.source === 'house' ? `from your other rooms' rate ${d.prior.house.toFixed(2)} ×${d.prior.phi.toFixed(2)} for this room's occupancy (no requests of its own yet)` : `from the ${Math.round((o.overall ?? OCC_PRIOR) * 100)}% occupancy it has achieved (no requests of its own yet)`}${d.n ? `; ${mon} adjusted ×${d.adj[m].toFixed(2)} on ${d.N[m]} request${d.N[m] === 1 ? '' : 's'} for ${mon} dates` : ''}${(ctx.scale.demand || 1) !== 1 ? `; review factor ×${(ctx.scale.demand || 1).toFixed(2)}` : ''}`;
 return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s, (params.roomListing || [])[ri]), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
@@ -3019,6 +3098,75 @@ const out = shrinkRoomFits(rs, '2027-12-01').fits;
 const vp = 0.0625 + 0.09; const prec = 1 / 0.09 + 1 / vp; const wantA = -1 + (-1 / 0.09) / prec; const wantB = -1.8 + (-1 / vp) / prec;
 const solo = shrinkRoomFits([{ listingId: 'LA', prior: -1, fit: { value: -2, se: 0.3 }, events: 40 }], 'x').fits.LA;
 check('v9 shrinkage: leave-one-out towards the other room, one room alone unchanged', close(out.LA.value, wantA, 1e-12) && close(out.LB.value, wantB, 1e-12) && close(out.LA.se, 1 / Math.sqrt(prec), 1e-12) && solo.value === -2 && solo.se === 0.3 && out.LA.n === 40, `A -2.00 -> ${out.LA.value.toFixed(4)} (se ${out.LA.se.toFixed(3)}), B -1.80 -> ${out.LB.value.toFixed(4)}`);
+}
+// 38-40. Partial pooling of the demand level (demandPool). A made-up house of three rooms run forward as real
+// calendars: requests arrive at a known level per room on London's shape with the defaults' lead and stay-length
+// curves, and every one that finds its nights free books them (minimum stay 1, no discounts, so nothing is declined
+// and nothing unseen is counted). Rooms A and B have been live two years; room C was launched `launch` days before
+// today, so it has a handful of requests. Only what the app would hold is kept (requests with their dates, stays with
+// booking dates) and both models calibrate everything else (occupancy, curves) from that, as they would live. v8 is
+// the committed model on the same records (its own calibrate and demandFor).
+{
+const poolWorld = ({ rates, launch, seed, today = '2026-11-01' }) => {
+const keys = ['A', 'B', 'C'];
+const rooms = rates.map((_, i) => ({ key: keys[i], label: `Room ${keys[i]}`, listingIds: [`L${keys[i]}`], include: true, weight: 1, minNights: 1, priceWeekday: 100, priceWeekend: 100 }));
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
+const c = { today, s, firstClean: 50, rooms, stays: [], requests: [], proposals: [], listingLabels: Object.fromEntries(rooms.map((r) => [r.listingIds[0], r.label])), scale: {}, calRuns: 40 };
+calibrate(c);
+const p = c.params; p.cancelRate = 0;
+const tN = dayNum(today);
+const base = tN - 800; const len = 800 + 450 + LOS_MAX + 2;
+const arr = drawArrivals(c, p, { from: base, to: tN + 450, todayN: null, lam: (ri, cc) => rates[ri] * MARKET_SEASON[monthOf(cc)], rooms: rates.map((_, i) => i) }, mulberry32(hashStr(`pool-world|${seed}`)))
+.filter((a) => a.at >= tN - launch[a.room] && a.at < tN);
+const occ = rates.map(() => new Uint8Array(len));
+const booked = playArrivals(c, p, arr, occ, base, { minNights: Object.fromEntries(rates.map((_, i) => [i, 1])), len });
+const stays = []; const requests = [];
+booked.forEach((b, i) => {
+const id = `b${i}`; const lid = rooms[b.room].listingIds[0]; const t = Math.floor(b.at);
+stays.push({ id, listingId: lid, checkin: dayStr(b.ci), checkout: dayStr(b.co), status: 'stay', bookedOn: dayStr(t), income: 100 * (b.co - b.ci), guest: 'W' });
+requests.push({ id: `r${i}`, listingId: lid, kind: 'request', receivedAt: `${dayStr(t)}T12:00:00.000Z`, checkin: dayStr(b.ci), checkout: dayStr(b.co), reservationId: id });
+});
+return { ...c, params: undefined, gridCache: undefined, demandCache: undefined, stays, requests };
+};
+const both = (world) => {
+const c9 = { ...world }; calibrate(c9);
+const c8 = { ...world }; v8model.calibrate(c8);
+return world.rooms.map((_, ri) => { const d9 = demandFor(c9, c9.params, ri); const d8 = v8model.driftKit.demandFor(c8, c8.params, ri); return { L9: d9.L, L8: d8.L, n: d9.n, n8: d8.n, L0: d9.L0, L08: d8.L0, prior: d9.prior }; });
+};
+const HOUSE = 0.3; const LAUNCH = 28; // 0.3 a date fills two rich rooms to about 100 seen requests in two years; 28 days gives the new one a handful
+const rms = (xs) => Math.sqrt(xs.reduce((a, x) => a + x * x, 0) / xs.length);
+// 38. (a) Same level as the house: over the seeds, the sparse room's level lands far nearer the truth than v8's
+// (RMSE of log(L / true)); the data-rich rooms are barely moved (every seed within 2% of v8); the raw counts and
+// occupancy-based starts the two models see are the same (the change is the prior alone).
+const same = Array.from({ length: 8 }, (_, k) => both(poolWorld({ rates: [HOUSE, HOUSE, HOUSE], launch: [730, 730, LAUNCH], seed: k })));
+const sparse = same.map((r) => r[2]);
+const rich = same.flatMap((r) => [r[0], r[1]]);
+const rmse9 = rms(sparse.map((x) => Math.log(x.L9 / HOUSE))); const rmse8 = rms(sparse.map((x) => Math.log(x.L8 / HOUSE)));
+const richMove = Math.max(...rich.map((x) => Math.abs(x.L9 / x.L8 - 1)));
+const sameRaw = same.flat().every((x) => x.n === x.n8 && close(x.L0, x.L08, 1e-9));
+const pooled = sparse.every((x) => x.prior.source === 'house');
+const nSparse = sparse.map((x) => x.n); const nRich = rich.map((x) => x.n);
+check('v9 pooling (a): a room with plenty of requests keeps v8\'s level within 2%', richMove < 0.02 && sameRaw && pooled && Math.min(...nRich) >= 80, `${rich.length} room-seeds with ${Math.min(...nRich)}-${Math.max(...nRich)} requests: largest move x${(1 + richMove).toFixed(4)}; prior ${pooled ? 'from the other rooms' : 'NOT pooled'} with ${sparse[0].prior.k.toFixed(2)} pseudo-requests (tau ${sparse[0].prior.tau.toFixed(2)}, moment estimate ${sparse[0].prior.tauHat.toFixed(2)})`);
+check('v9 pooling (b): a sparse room at the house\'s level recovers it far better than the occupancy-based start', rmse9 < 0.5 * rmse8 && rmse9 < 0.6 && Math.max(...nSparse) <= 15, `${sparse.length} seeds, ${Math.min(...nSparse)}-${Math.max(...nSparse)} requests each: RMSE of log(level / true) ${rmse9.toFixed(3)} (v9) vs ${rmse8.toFixed(3)} (v8); levels v9 ${sparse.map((x) => x.L9.toFixed(3)).join(' ')} / v8 ${sparse.map((x) => x.L8.toFixed(3)).join(' ')} / v8's starts ${sparse.map((x) => x.L0.toFixed(3)).join(' ')} (true ${HOUSE}); v9 prior means ${sparse.map((x) => x.prior.mean.toFixed(3)).join(' ')}`);
+// 39. (c) A sparse room genuinely three times the house: its level sits above the house on every seed and keeps, on
+// average, at least a third of its distance (in log) from the house rate; it is not dragged fully to the house.
+const diff = Array.from({ length: 6 }, (_, k) => both(poolWorld({ rates: [HOUSE, HOUSE, 3 * HOUSE], launch: [730, 730, LAUNCH], seed: 100 + k }))[2]);
+const kept = diff.map((x) => Math.log(x.L9 / x.prior.house) / Math.log(3 * HOUSE / x.prior.house));
+const keptMean = kept.reduce((a, b) => a + b, 0) / kept.length;
+check('v9 pooling (c): a sparse room three times the house is not dragged fully to it', diff.every((x) => x.L9 > x.prior.house && x.prior.source === 'house') && keptMean > 0.33, `${diff.length} seeds, ${Math.min(...diff.map((x) => x.n))}-${Math.max(...diff.map((x) => x.n))} requests: share of the log-distance from the house kept ${kept.map((v) => v.toFixed(2)).join(' ')} (mean ${keptMean.toFixed(2)}); levels ${diff.map((x) => x.L9.toFixed(3)).join(' ')} against house ${diff.map((x) => x.prior.house.toFixed(3)).join(' ')}, true ${(3 * HOUSE).toFixed(2)}; v8 ${diff.map((x) => x.L8.toFixed(3)).join(' ')}; tau ${diff.map((x) => x.prior.tau.toFixed(2)).join(' ')}`);
+// 40. One room alone, or a house with fewer than POOL_HOUSE_MIN_N requests, is v8 exactly; the house estimate uses only
+// requests received by today (none of the world's later arrivals are in the records, so moving today back must not
+// change what the earlier date sees from a later one).
+const solo = both({ ...poolWorld({ rates: [HOUSE], launch: [730], seed: 7 }) })[0];
+const cFew = { ...poolWorld({ rates: [HOUSE, HOUSE, HOUSE], launch: [730, 730, LAUNCH], seed: 3 }) };
+cFew.requests = cFew.requests.filter((q) => q.listingId === 'LC' || q.receivedAt >= '2026-10-25'); cFew.stays = cFew.stays.filter((x) => x.listingId === 'LC' || x.bookedOn >= '2026-10-25');
+const few = both(cFew)[2];
+const early = { ...poolWorld({ rates: [HOUSE, HOUSE, HOUSE], launch: [730, 730, LAUNCH], seed: 3 }), today: '2026-10-01' };
+const earlyPrior = both(early)[2].prior;
+const T40 = dayNum('2026-10-01');
+const othersAll = early.requests.filter((q) => q.listingId !== 'LC').length;
+const othersBefore = early.requests.filter((q) => q.listingId !== 'LC' && dayNum(q.receivedAt) < T40).length;
+check('v9 pooling: one room alone, or a house with too few requests, is v8 exactly; the house counts nothing after today', solo.L9 === solo.L8 && solo.prior.source === 'occupancy' && few.prior.source === 'occupancy' && few.L9 === few.L8 && earlyPrior.source === 'house' && earlyPrior.houseN > 0 && earlyPrior.houseN <= othersBefore && othersBefore < othersAll, `alone ${solo.L9.toFixed(3)} = v8 ${solo.L8.toFixed(3)}; few: house had ${few.prior.houseN} < ${POOL_HOUSE_MIN_N}; standing on 2026-10-01 the house counts ${earlyPrior.houseN} requests of the other rooms' ${othersAll} on record, ${othersAll - othersBefore} of which arrived after that date`);
 }
 return results;
 }
