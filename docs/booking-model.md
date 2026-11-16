@@ -159,3 +159,22 @@ top-rated-guest share is now 50% (the saved setting already was).
 - **Booking requests and stays**: record requests (including declined ones) and stays with their booking dates. The
   demand level, lead times and stay lengths are learnt from them.
 - **Times a room wasn't offered**: add them, or an empty spell reads as nobody wanting the room.
+
+## v9 candidate (not live, backtest only)
+
+`js/features/bookingmodel-candidate.js` (MODEL_VERSION 9). The guest-response reference becomes the market: the nearby-hotel basket median (hotelbasket.js samples) times a per-cell ratio (month × check-in weekday × stay length). At today's prices the ratio is solved so every cell expects exactly v8's bookings (no level shift); with no usable hotel samples it falls back to v8 exactly. Once 8+ past stays have basket samples, the ratio learns your historical price-to-market position, so being dearer against hotels than usual lowers demand. `fitElasticity(ctx)` estimates each room's price sensitivity from price changes in the price ledger (before/after request counts per change, ±14 days, shrunk across rooms); not wired to settings yet.
+
+Unsourced constants (top of the file): 365-day market horizon, MARKET_FIT_MIN 8, MARKET_FIT_K 8, FIT_WINDOW_DAYS 14, FIT_MIN_EVENTS 5, price changes outside ×0.5–×2 dropped, FIT_TAU_MIN 0.25.
+
+To backtest once hotel samples exist (needs NAS agent 1.17), on the live site console:
+
+```js
+const st = await import('./js/state.js');
+const ok = st.data.hotelPrices.filter(r => r.ok); const since = ok.map(r => r.sampledAt.slice(0,10)).sort()[0];
+const bt = await import('./js/features/modelbacktest.js');
+const m8 = await import('./js/features/bookingmodel.js');
+const m9 = await import('./js/features/bookingmodel-candidate.js?v=' + Date.now());
+const o = { asOf: [since], horizon: 30, runs: 1500 };
+const r8 = await bt.backtest({ ...o, model: m8 }), r9 = await bt.backtest({ ...o, model: m9 });
+console.table([...r8.summary.map(s => ({ v: 8, ...s })), ...r9.summary.map(s => ({ v: 9, ...s }))]);
+```
