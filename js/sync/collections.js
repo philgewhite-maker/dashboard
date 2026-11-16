@@ -51,6 +51,7 @@ const COLLECTIONS = [
 { key: 'airbnbRateProposals', kind: 'records', tab: 'overview', label: 'Airbnb rate proposals' },
 { key: 'bookingRequests', kind: 'records', tab: 'overview', label: 'Airbnb booking requests' },
 { key: 'bookingProjections', kind: 'records', tab: 'finances', label: 'Booking projections' },
+{ key: 'priceLedger', kind: 'records', tab: 'finances', label: 'Price ledger (room-nights)' },
 { key: 'airbnbEarnings', kind: 'records', tab: 'finances', label: 'Airbnb earnings export rows' },
 { key: 'airbnbCleaners', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaners' },
 { key: 'airbnbBlocks', kind: 'singleton', tab: 'overview', label: 'Airbnb blocked nights' },

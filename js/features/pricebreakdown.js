@@ -17,6 +17,7 @@
 // Heavy: computed only when the panel is opened, in slices with a busy line, and cached per room/range/day.
 import { data } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
+import { ledgerLine, ledgerFormHtml, bindLedgerForm } from './priceledger.js';
 
 const RANGES = [30, 60, 90];
 const GAP_MAX_NIGHTS = 14; // longer empty stretches aren't gaps to fill with a cut; they're shown without advice
@@ -367,7 +368,7 @@ const g = stepGroups(nt.breakdown);
 const changes = nt.breakdown.steps.filter((s) => !isApplied(s.status));
 const status = changes.length ? [...new Set(changes.map((s) => STATUS_TEXT[s.status]))].join(', ') : 'Nothing proposed';
 const notes = nt.breakdown.steps.filter((s) => s.key !== 'base' && Math.abs(s.amount) >= 0.005).map((s) => `${s.label}${!isApplied(s.status) ? ` (${STATUS_TEXT[s.status].toLowerCase()})` : ''}: ${s.reason}`).join('; ');
-return `<tr><td>${escapeHtml(day)}</td>${STEP_COLUMNS.map(([k]) => `<td class="num">${k === 'base' ? money0(g[k]) : signed(g[k])}</td>`).join('')}<td class="num"><strong>${money0(nt.current.price)}</strong></td><td class="num">${changes.length ? `<strong>${money0(nt.breakdown.price)}</strong>` : '–'}</td><td>${escapeHtml(status)}</td><td class="num">${money0(nt.expected)} → ${money0(nt.expectedProp)}</td><td class="pb-empty-slot">not known yet</td><td class="pb-notes">${escapeHtml(notes)}</td></tr>`;
+return `<tr><td>${escapeHtml(day)}</td>${STEP_COLUMNS.map(([k]) => `<td class="num">${k === 'base' ? money0(g[k]) : signed(g[k])}</td>`).join('')}<td class="num"><strong>${money0(nt.current.price)}</strong></td><td class="num">${changes.length ? `<strong>${money0(nt.breakdown.price)}</strong>` : '–'}</td><td>${escapeHtml(status)}</td><td class="num">${money0(nt.expected)} → ${money0(nt.expectedProp)}</td>${(() => { const l = ledgerLine(r.room.key, nt.date); return l ? `<td>${escapeHtml(l)}</td>` : '<td class="pb-empty-slot">not known yet</td>'; })()}<td class="pb-notes">${escapeHtml(notes)}</td></tr>`;
 }).join('');
 return `<div class="pb-table-wrap"><table class="pb-table"><thead>${head}</thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -423,7 +424,8 @@ const changes = nt.breakdown.steps.filter((s) => !isApplied(s.status));
 add('pb-tip-total', `current, if booked now · expected ${money0(nt.expected)} (booked in ${Math.round(nt.prob * 100)}% of runs, with the cleaning income when a stay starts that night)`, money0(nt.current.price));
 if (changes.length) add('', `proposed (${[...new Set(changes.map((s) => STATUS_TEXT[s.status]))].join(', ')}) · expected ${money0(nt.expectedProp)} (${Math.round(nt.probProp * 100)}%)`, money0(nt.breakdown.price));
 else add('', 'proposed: nothing proposed for this night', '–');
-add('pb-tip-empty', 'Set in Airbnb: not known yet', '—');
+const setLine = ledgerLine(r.room.key, nt.date);
+add(setLine ? '' : 'pb-tip-empty', setLine ? `Set in Airbnb: ${setLine}` : 'Set in Airbnb: not known yet', setLine ? '' : '—');
 const v = nt.void; const a = nt.advice;
 if (v && a) add('', `${gapName(v)}${nt.gap && nt.gap.plan ? ' (you recorded a void plan; the model’s own pick, without it)' : ''}: ${a.best ? `the model’s pick is worth ${signed(a.gain)} over leaving it (${money0(a.base.net)} → ${money0(a.best.net)} after cleaning)` : 'no cut the model tried beats leaving it'}`);
 }
@@ -486,7 +488,7 @@ root.innerHTML = '<div class="settings-note">No rooms are set up for the evaluat
 return;
 }
 if (!rooms.some((r) => r.key === state.room)) state.room = rooms[0].key;
-root.innerHTML = `${controlsHtml(rooms)}<div class="pb-caption">What the model expects each night to earn from your own history, plus named events and gap filling: not a market price. <strong>Current</strong> counts only what’s applied (a ticked-off rate proposal or gap task, a recorded void plan); <strong>proposed</strong> adds every change still proposed or suggested, drawn outlined. The price actually set in Airbnb’s calendar isn’t stored yet (phase 2/7 of the pricing plan), so that slot is left empty. Short-notice and length discounts are shown as they would apply to a booking made today, the length one averaged over your stay-length mix.</div><div id="pb-out"></div>`;
+root.innerHTML = `${controlsHtml(rooms)}<div class="pb-caption">What the model expects each night to earn from your own history, plus named events and gap filling: not a market price. <strong>Current</strong> counts only what’s applied (a ticked-off rate proposal or gap task, a recorded void plan); <strong>proposed</strong> adds every change still proposed or suggested, drawn outlined. The price actually set in Airbnb’s calendar comes from the price ledger: record it below (reading it back automatically is phase 7), and until a night has one that slot says not known yet. Short-notice and length discounts are shown as they would apply to a booking made today, the length one averaged over your stay-length mix.</div>${ledgerFormHtml(rooms, state.room)}<div id="pb-out"></div>`;
 run();
 }
 
@@ -497,7 +499,8 @@ if (!details || bound) return;
 bound = true;
 details.addEventListener('toggle', () => { if (details.open && !state.opened) { state.opened = true; open(); } });
 const root = document.getElementById('pb-root');
-root.addEventListener('change', (e) => { if (e.target.id === 'pb-room') { state.room = e.target.value; run(); } });
+root.addEventListener('change', (e) => { if (e.target.id === 'pb-room') { state.room = e.target.value; const lr = root.querySelector('#pl-room'); if (lr) lr.value = state.room; run(); } });
+bindLedgerForm(root, () => renderResult());
 root.addEventListener('click', (e) => {
 const rg = e.target.closest('[data-pb-range]');
 if (rg) { state.range = Number(rg.dataset.pbRange); root.querySelectorAll('[data-pb-range]').forEach((b) => b.classList.toggle('active', b === rg)); run(); return; }

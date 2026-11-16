@@ -2143,6 +2143,18 @@ plans: [],
 };
 }
 
+// One night of one room's asking price, shaped like a Beds24 calendar day (GET/POST /inventory/rooms/calendar:
+// price1, minStay, maxStay, numAvail, multiplier, override). See js/features/priceledger.js for the mapping and sources.
+// id is `${roomKey}:${date}` (one record per room-night). `history` is append-only: one entry each time price, minStay
+// or override actually changes, {at, price, minStay, override, source}, so elasticity can be fitted later.
+function blankPriceLedgerEntry(fields = {}) {
+return {
+id: '', roomKey: '', date: '', price: null, minStay: null, maxStay: null, numAvail: null, multiplier: 1, override: 'none',
+source: 'manual', setAt: '', confirmedAt: '', history: [],
+...fields,
+};
+}
+
 // One row of an Airbnb earnings export (Menu -> Earnings -> Transaction history -> CSV), kept in full so rates,
 // cleaning fees and discounts can be worked out again without the file (js/features/airbnbearnings.js).
 // `type` is the export's own: Reservation, Payout, Adjustment, Resolution Adjustment, Cancellation Fee, ...
@@ -2703,6 +2715,8 @@ airbnbRateProposals: [],
 bookingProjections: [],
 // Every row of every Airbnb earnings export you have imported, in full (blankAirbnbEarning).
 airbnbEarnings: [],
+// The asking-price ledger, one record per room-night (blankPriceLedgerEntry, js/features/priceledger.js).
+priceLedger: [],
 // Every Airbnb booking request and enquiry read from the inbox (js/features/bookingrequests.js),
 // including the ones that never became stays: the demand the booking evaluator calibrates
 // against. See blankBookingRequest.
@@ -2857,6 +2871,8 @@ data.loans = data.loans.filter((l) => l && typeof l === 'object').map((l) => ({ 
 if (!Array.isArray(data.airbnbRateProposals)) data.airbnbRateProposals = [];
 if (!Array.isArray(data.bookingProjections)) data.bookingProjections = [];
 if (!Array.isArray(data.airbnbEarnings)) data.airbnbEarnings = [];
+if (!Array.isArray(data.priceLedger)) data.priceLedger = [];
+data.priceLedger = data.priceLedger.filter((r) => r && typeof r === 'object' && r.roomKey && r.date).map((r) => ({ ...blankPriceLedgerEntry(), ...r, id: `${r.roomKey}:${r.date}`, history: Array.isArray(r.history) ? r.history : [] }));
 data.airbnbEarnings = data.airbnbEarnings.filter((r) => r && typeof r === 'object').map((r) => ({ ...blankAirbnbEarning(), ...r, id: r.id || uid() }));
 data.bookingProjections = data.bookingProjections.filter((p) => p && typeof p === 'object').map((p) => ({ ...blankBookingProjection(), ...p, id: p.id || uid() }));
 if (!Array.isArray(data.bookingRequests)) data.bookingRequests = [];
@@ -4794,7 +4810,7 @@ isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageR
 exportBackup, importBackup, replaceData, DATA_KEY, SYNC_DIRTY_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,
 MAIL_SEARCH_KINDS, mailSearchLabel, blankMailSearch, blankMailTopic, blankMailRule, blankMailDismissal,
 TASK_BUCKETS, DEFAULT_TASK_CONTEXTS, SHOPPING_CONTEXTS, blankTask, blankCaptureBatch, blankPendingImport, blankConnection, blankTelegramThread, blankReadingItem, blankCaptureDraft, blankJob, blankMediaItem, MEDIA_KINDS, MEDIA_STATUSES, blankMediaRecSource, blankMediaRecCandidate,
-blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
+blankPriceLedgerEntry, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS,
 blankLeaveYear, blankCatSittingVisit, blankClaudeApiSpend, blankClaudeSubscriptionUsage, blankAgentInboxEntry,
 blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PACKING_DURATION_TIERS, packingDurationTier, DEFAULT_PACKING_MODULES,
 blankMarriottAvailability, pruneMarriottAvailability,
