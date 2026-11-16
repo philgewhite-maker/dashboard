@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v859</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v860</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -520,6 +520,17 @@
 <span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings" title="Booking evaluator settings (what the model assumes)">&#9881;</span>
 </div>
 <div class="settings-note" style="margin:0 0 10px;">What the booking model expects the free nights to earn, and what to change on Airbnb to fill them. Run the projection, then record any price cut or minimum stay you set on a void so the next run uses it. How well past projections held up is in the <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#model-review">model review</span>, and each owner's Superhost outlook is in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-panel">Letting income</span>.</div>
+</section>
+
+<section class="panel wide" id="price-breakdown-panel" data-tab="finances">
+<div class="panel-head">
+<h2><span class="dot blue"></span>Price breakdown by night</h2>
+<span class="inline-goto-link panel-settings-link" data-goto-tab="settings" data-goto-target="#booking-evaluator-settings" title="Booking evaluator settings (what the model assumes)">&#9881;</span>
+</div>
+<div class="settings-note" style="margin:0 0 10px;">Each of the next nights, step by step: the room's base rate, then season, weekday, rating stage, any event uplift, the booking discounts and, for an empty gap, the cut the booking model would make to fill it. The projection and void plans these come from are in <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#letting-forecast-panel">Letting forecast and pricing</span>.</div>
+<details class="settings-subgroup" id="pb-details"><summary>Show the breakdown (runs the model)</summary>
+<div id="pb-root"></div>
+</details>
 </section>
 
 <section class="panel wide" id="loans-panel" data-tab="finances">

@@ -275,7 +275,7 @@ newListingDiscountPct: 15,
 superhostFrom: '2026-01-01', superhostListings: {},
 // Which listings are your own (record ids): null = worked out, a listing whose owner is called Phil or that has none.
 ownListingIds: null,
-topRatedGuestSharePct: 30,
+topRatedGuestSharePct: 50,
 stagePriors: { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 },
 // Model v7's guest price (js/features/guestprice.js, which holds the same values as its fallback). Per Airbnb listing id:
 // roomTypes 'ensuite' | 'shared'; cleaningFees are the LISTED amounts {perStay, shortStay, shortStayMaxNights}, scaled to
@@ -293,7 +293,7 @@ cleaningFees: {
 // x a month-of-stay multiplier (Jan..Dec), x shortNoticeMult within shortNoticeDays; priorSd = how sure; fits = a
 // listing's own fit from the price ledger {listingId: {value, se, n, fittedOn}}, empty until that phase.
 elasticityPrior: { ensuite: -1.0, shared: -1.8, season: [1.2, 1.2, 1.2, 1.0, 1.0, 0.8, 0.8, 0.8, 1.0, 1.0, 1.2, 1.0], shortNoticeDays: 7, shortNoticeMult: 1.2, priorSd: 0.5, fits: {} },
-gapDiscountPct: 15, gapMaxNights: 2,
+gapDiscountPct: 20, gapMaxNights: 3,
 elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
 // the occupancy the evaluator calibrates demand to.

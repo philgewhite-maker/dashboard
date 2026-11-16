@@ -2364,6 +2364,27 @@ b6 += p * qi * f6; b7 += p * qi * f7; m6 += p * qi * f6 * n; m7 += p * qi * f7 *
 a6 += b6; a7 += b7; worst = Math.max(worst, Math.abs(b7 / b6 - 1));
 }
 check('v7 level over the next 90 days: bookings and nights equal v6\'s, date by date', close(a7, a6, 1e-6) && close(m7, m6, 1e-6) && worst < 1e-6, `bookings x${(a7 / a6).toFixed(6)}, nights x${(m7 / m6).toFixed(6)}, worst date ${(worst * 100).toExponential(1)}%`);
+
+// 29. The per-night breakdown takes basePrice and the booking discounts apart without changing them: its list price is
+// basePrice on every night of a month with a season index, a weekend uplift, a superhost stage and an event, its steps
+// add up to its price, and that price is the list price x the discounts playArrivals would apply to a booking made today.
+const c29 = testContext({ occupancy: 0.5, more: { discounts: { airbnb: { shortNotice: [{ days: 7, pct: 10 }], length: [{ nights: 7, pct: 10 }] }, direct: { shortNotice: [], length: [] } } } });
+c29.rooms[0].priceWeekday = null; c29.rooms[0].priceWeekend = null;
+const p29 = c29.params;
+Object.assign(p29.prices[0], { weekday: null, weekend: null, base: 90, uplift: 1.2, byMonth: p29.prices[0].byMonth.map((_, mi) => (mi === 10 ? 99 : null)) });
+p29.roomStage = ['superhost']; p29.stagePrice = { ...p29.stagePrice, superhost: 1.125 };
+c29.proposals = [{ listingId: 'LA', startDate: '2026-11-06', endDate: '2026-11-07', upliftPct: 20, reason: 'Test concert' }];
+let worst29 = 0; let sum29 = 0; let fac29 = 0; let ev29 = 0;
+for (let n = dayNum('2026-11-02'); n < dayNum('2026-11-12'); n++) {
+const b = nightBreakdown(c29, p29, 0, n);
+worst29 = Math.max(worst29, Math.abs(b.listPrice - basePrice(c29, p29, 0, n)));
+sum29 = Math.max(sum29, Math.abs(b.steps.reduce((a, x) => a + x.amount, 0) - b.price));
+const lead = n - dayNum(c29.today);
+fac29 = Math.max(fac29, Math.abs(b.price - b.listPrice * (1 - stepPct(c29.s.discounts.airbnb.shortNotice, 'days', lead)) * (1 - (b.steps.find((x) => x.key === 'length') || { pct: 0 }).pct / 100)));
+if (b.steps.some((x) => x.key === 'event')) ev29++;
+}
+const base29 = nightBreakdown(c29, p29, 0, dayNum('2026-11-02')).steps[0].amount;
+check('Price breakdown: list price = basePrice, steps add up, discounts as booked today, the event on its 2 nights', worst29 < 1e-9 && sum29 < 1e-9 && fac29 < 1e-9 && ev29 === 2 && Math.abs(base29 - 80) < 1e-9, `worst list ${worst29.toExponential(1)}, steps ${sum29.toExponential(1)}, discounts ${fac29.toExponential(1)}, event nights ${ev29}, rated-footing base ${base29.toFixed(2)}`);
 return results;
 }
 
@@ -2376,5 +2397,65 @@ return { today: ctx.today, stagePrice: params.stagePrice, stagePriceFit: params.
 stages: Object.fromEntries([...params.stages.entries()].map(([id, st]) => [id, { liveOn: st.liveOn == null ? null : dayStr(st.liveOn), ratedOn: st.ratedOn == null ? null : dayStr(st.ratedOn), ratedVia: st.ratedVia, reviews: st.reviews, completedStays: st.stays, superhostOn: st.superhostOn == null ? null : dayStr(st.superhostOn) }])),
 rooms: ctx.rooms.map((room, i) => ({ key: room.key, ...params.prices[i].trace, demandStageAdj: Math.round(sd.adj[i] * 100) / 100, priceThisMonth: Math.round(basePrice(ctx, params, i, dayNum(ctx.today)) * 10) / 10 })) };
 }
+// One night's price, step by step (the per-night price breakdown chart, js/features/pricebreakdown.js). Pure: it only
+// takes apart what basePrice and playArrivals already do, in this order, each step in received £:
+//   base     the room's calibrated rate put back on a rated footing (p.base / the stage multiplier), or your weekday price
+//   season   x the month's price index (p.byMonth / p.base; none when the month has no index or a price is set)
+//   weekday  Fri/Sat: x the room's weekend uplift, or your weekend price
+//   stage    x today's rating-stage multiplier (params.stagePrice), which p.base already carries
+//   event    each actioned rate-review proposal on the date, as basePrice applies it
+// => listPrice, equal to basePrice(ctx, params, ri, n). Then the discounts a booking made on `bookedOn` (default today)
+// takes, as playArrivals applies them: short notice (lead = n - bookedOn), length (expected over the room's stay-length
+// curve, each length weighted by its nights, since a night is more often inside a long stay than its share of stays
+// says), the expected top-rated-guest discount, the new-listing discount while the listing is still new, and an extra
+// cut `extraPct` (a gap discount or a void plan's cut; the caller says which in `extraLabel`).
+// => price = listPrice x factor. The whole stay is priced at its check-in night in the model; this prices each night
+// as if a stay began on it.
+function nightBreakdown(ctx, params, ri, n, { bookedOn = dayNum(ctx.today), extraPct = 0, extraLabel = 'Extra cut' } = {}) {
+const p = params.prices[ri];
+const room = ctx.rooms[ri];
+const s = ctx.s;
+const steps = [];
+const add = (key, label, from, to, reason, extra = {}) => { steps.push({ key, label, amount: to - from, from, to, reason, ...extra }); return to; };
+const stage = (params.roomStage || [])[ri] || 'rated';
+const stageMult = (params.stagePrice || {})[stage] || 1;
+const m = monthOf(n);
+const we = weekendNight(n);
+let v;
+if (p.weekday != null) {
+v = add('base', 'Base', 0, p.weekday, 'your weekday price (Settings, Booking evaluator, Rooms)', { samples: 0, source: 'your setting' });
+v = add('season', 'Season', v, v, 'none: a set price is used as it is');
+v = add('weekday', 'Weekday', v, we ? (p.weekend ?? v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
+v = add('stage', 'Rating stage', v, v, 'none: a set price is used as it is', { stage });
+} else {
+const ix = p.byMonth[m] != null && p.base > 0 ? p.byMonth[m] / p.base : null;
+v = add('base', 'Base', 0, p.base / stageMult, stage === 'rated' ? p.source : `${p.source}, taken back to a rated footing (÷ x${stageMult.toFixed(2)}, re-applied below)`, { samples: p.n, source: p.source });
+v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month (fewer than 3 stays in it)' : `month index x${ix.toFixed(2)}`, { index: ix });
+v = add('weekday', 'Weekday', v, we ? (p.weekend != null ? p.weekend / stageMult : v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
+const fit = (params.stageFit || {})[stage];
+v = add('stage', 'Rating stage', v, v * stageMult, stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${stageMult.toFixed(2)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`, { stage, mult: stageMult });
+}
+const day = dayStr(n);
+ctx.proposals.forEach((pr) => {
+if (!room.listingIds.includes(pr.listingId) || !pr.startDate || day < pr.startDate || day > (pr.endDate || pr.startDate)) return;
+if (Number.isFinite(Number(pr.upliftPct)) && pr.upliftPct != null) v = add('event', 'Event', v, v * (1 + Number(pr.upliftPct) / 100), `${pr.reason || 'event'}: +${Number(pr.upliftPct)}%`, { proposal: pr });
+else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v = add('event', 'Event', v, v + Number(pr.upliftAmount), `${pr.reason || 'event'}: +£${Number(pr.upliftAmount)}`, { proposal: pr });
+});
+const listPrice = v;
+const disc = roomDiscount(ctx, params, ri);
+const lead = n - bookedOn;
+let factor = 1;
+const cut = (key, label, frac, reason) => { if (!(frac > 0)) return; factor *= 1 - frac; v = add(key, label, v, v * (1 - frac), reason, { pct: frac * 100 }); };
+cut('shortNotice', 'Short notice', stepPct(disc.shortNotice, 'days', lead), lead <= 0 ? 'booked today for tonight' : `booked now, ${lead} day${lead === 1 ? '' : 's'} ahead`);
+let wN = 0; let wD = 0;
+for (let k = 1; k <= LOS_MAX; k++) { const pk = (params.losCdf[k] || 0) - (params.losCdf[k - 1] || 0); if (pk > 0) { wN += k * pk; wD += k * pk * stepPct(disc.length, 'nights', k); } }
+cut('length', 'Length of stay', wN > 0 ? wD / wN : 0, 'expected over your stay-length mix (each length weighted by its nights)');
+cut('topRated', 'Top-rated guests', topRatedOf(s, disc), `${disc.topRatedPct}% for top-rated guests x the share of bookings from them`);
+const st = params.stages && params.stages.get((params.roomListing || [])[ri]);
+const newPct = newListingPctOf(s);
+if (stage === 'new' && st && bookedOn < st.newUntil) cut('newListing', 'New-listing promotion', newPct, `until the listing leaves the new stage, about ${dayStr(st.newUntil)}`);
+cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100), `${Number(extraPct) || 0}% off this night`);
+return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
+}
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace };
+export { driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown };
