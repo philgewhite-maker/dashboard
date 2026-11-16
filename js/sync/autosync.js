@@ -181,7 +181,7 @@ return { merged: false, conflicts: [], backup };
 await replaceData(remote.data, { fromRemote: true, persist: false });
 const theirs = JSON.parse(JSON.stringify(data));
 const fromStore = flippedKeys();
-const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs, VOLATILE_KEYS.concat(fromStore));
+const { merged, conflicts } = mergeDocuments(JSON.parse(baseText), ours, theirs, VOLATILE_KEYS.concat(fromStore, ['heatingReading']));
 // Read from the record store, so this device's copy stands (mergeDocuments
 // would otherwise take the server document's older one).
 fromStore.forEach((k) => { if (k in ours) merged[k] = ours[k]; });

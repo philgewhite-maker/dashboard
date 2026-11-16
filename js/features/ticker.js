@@ -30,6 +30,7 @@ import * as letting from './letting.js';
 import { deadVoidsOf } from './bookingprojection.js';
 import { travelStripPrograms, labelKindFor } from './loyaltybalances.js';
 import { matchBankLogo } from '../bankLogos.js';
+import { heatingAlerts } from './heating.js';
 import { CHECKS as SITE_HEALTH_CHECKS, reportCheck as reportSiteHealth } from './sitehealth.js';
 
 // How often the loyalty tile's own rotation advances (see tileFor's
@@ -547,13 +548,20 @@ if (!incomplete.length) return [];
 return [{ id: 'auto-inv-incomplete', kind: 'inv-incomplete', auto: true, count: incomplete.length, sets: incomplete }];
 }
 
+// One tile per heating alert (a zone too cold or too hot, see
+// heatingAlerts() in heating.js for the rules), derived from the synced
+// data.heatingReading each render so it clears when the temperature does.
+function heatingAlertItems() {
+return heatingAlerts(data.heatingReading).map((a) => ({ id: `auto-${a.id}`, kind: 'heatalert', auto: true, alert: a }));
+}
+
 // Your own list plus the travel ones, with duplicates dropped: a trip to
 // Dublin shouldn't give you a second GBP/EUR tile next to the one you
 // already keep.
 function activeItems() {
 const mine = (data.ticker.items || []).filter((i) => !i.hidden);
 const seen = new Set(mine.map(keyFor));
-const extra = [...travelItems(), ...cassBonusItems(), ...yearlyPerkItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...deadVoidItems(), ...claudeUsageItems(), ...incompleteSetItems()].filter((i) => !seen.has(keyFor(i)));
+const extra = [...travelItems(), ...cassBonusItems(), ...yearlyPerkItems(), ...siteHealthFailureItems(), ...modelUpgradeItems(), ...deadVoidItems(), ...claudeUsageItems(), ...incompleteSetItems(), ...heatingAlertItems()].filter((i) => !seen.has(keyFor(i)));
 return [...mine, ...extra];
 }
 
@@ -749,6 +757,14 @@ if (item.kind === 'yearlyperk') {
 return tile('Perk', `${letting.money(item.amount)} · ${item.count} to do`, '',
 `${item.label}: ${item.count} reminder${item.count === 1 ? '' : 's'} due — next: ${item.first.title}. Click to open it.`,
 { auto: true, taskId: item.first.id });
+}
+if (item.kind === 'heatalert') {
+const a = item.alert;
+const hot = a.kind !== 'cold';
+return tile('Heating', `<span class="${hot ? 'tick-down' : 'tick-up'}">${escapeHtml(a.zone)} ${a.temp.toFixed(1)}°</span>`,
+`<span class="tick-flat">${a.kind === 'cold' ? 'cold' : a.kind === 'hot' ? 'hot' : 'hot, heating on'}${a.asOf ? ` · as of ${escapeHtml(a.asOf)}` : ''}</span>`,
+`${a.text}. Click to open the Heating panel.`,
+{ auto: true, gotoTab: 'overview', gotoTarget: '#heating-panel' });
 }
 if (item.kind === 'inv-incomplete') {
 const names = item.sets.map((s) => [s.brand, s.style, s.colour].filter(Boolean).join(' ') || 'Unnamed set');
@@ -1156,6 +1172,7 @@ function initTicker() {
 if (!document.getElementById('ticker')) return;
 renderTicker();
 window.addEventListener('claude-usage-updated', renderTicker);
+window.addEventListener('heating-updated', renderTicker);
 // After first paint and the initial document pull, like the scheduled
 // syncs: a fetch into a half-loaded app just fails and caches nothing.
 setTimeout(() => refreshTicker(), 3000);

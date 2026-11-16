@@ -1,6 +1,6 @@
 {
   "_about": "Machine-readable twin of docs/data-model.html. js check: import('./docs/check-model.js') from the live site's console. Update when state.js gains/changes a key or a reference.",
-  "verifiedAgainst": "v859",
+  "verifiedAgainst": "v862",
   "groups": {
     "people": ["connections","telegramThreads","telegramUnclaimed","pendingImports","importStatus","flagRules","flagRulesSeeded","ratingCategories","reachOutStageDays","dayQueue","myCity","myName","myPhone","myEmail","myAddress"],
     "work": ["tasks","taskContexts","captureInbox","captureDrafts","agentInbox","businessIdeas","enhancementIdeas","readingList","jobs","habits","goals"],
@@ -8,7 +8,7 @@
     "letting": ["airbnbListings","airbnbReservations","airbnbCleaners","airbnbCleanerEvents","airbnbCleanerBlocks","airbnbBlocks","airbnbKeys","airbnbKeyAssignments","airbnbRateProposals","bookingRequests","bookingProjections","airbnbEarnings","airbnbSyncStatus","airbnbCleanerSyncStatus","lettingLedger","loans"],
     "money": ["providers","financeAccounts","subscriptions","switchOffers","switchOffersHistory","accountValueReviews","cassParticipants","annualPerks","cashbackRates","cashbackTracked","ebayResaleEstimates","ticker","tickerCache","proxyRefusals","apOrders","apOrdersLastCheckedAt","apRefundsLastCheckedAt","inventory","setCompletionFinds"],
     "loyalty-vouchers": ["vouchers","loyaltyPrograms","loyaltyBalances","loyaltyLabelKinds","loyaltyProgramsSeeded","loyaltyProgramsSeededV2","loyaltyProgramsSeededV3","loyaltyProgramsSeededV4","loyaltyProgramsSeededV5","loyaltyProgramsSeededV6","loyaltyContentFiltersSeeded","loyaltyLogosSeeded","loyaltyQuidcoTrackedFilterSeeded","voucherProviderBackfilled","providersConsolidated"],
-    "media-home": ["mediaItems","mediaRecSources","mediaRecCandidates","books","recipes","recipeRatingCategories","ingredientReference","ingredientAliases"],
+    "media-home": ["heatingReading","mediaItems","mediaRecSources","mediaRecCandidates","books","recipes","recipeRatingCategories","ingredientReference","ingredientAliases"],
     "health": ["healthDaily","renphoDaily","wellnessDaily"],
     "mail": ["mailSearches","mailTopics","mailRules","mailDismissed","mailLedger"],
     "system": ["settingsVault","schemaVersion","prefs","scheduledRuns","siteHealth","claudeAnswers","claudeApiSpend","claudeSubscriptionUsage","modelCheck"]

@@ -2671,6 +2671,8 @@ items: [
 // than device-local, so a phone opened at a bad moment shows the
 // laptop's morning figures instead of blanks, and says how old they are.
 tickerCache: {},
+// Latest successful neoHub reading {fetchedAt, zones}, js/features/heating.js.
+heatingReading: null,
 // Hosts that refused the web host with a 403 -- {host: {at}}. Remembered
 // so a check goes straight to the home agent for them instead of
 // spending a doomed request and its spacing on every URL first. Re-tried
@@ -2847,6 +2849,7 @@ data.ticker.items.push({ id: 'loyalty', kind: 'loyalty' });
 }
 }
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
+if (data.heatingReading === undefined) data.heatingReading = null;
 if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
 if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
 if (!Array.isArray(data.loans)) data.loans = [];
@@ -4241,7 +4244,7 @@ const onDiskData = await kvGet(DATA_KEY);
 let kept = false;
 if (persistedBase && onDiskData && (opts.retries || 0) < 3) {
 try {
-const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBase), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth']);
+const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBase), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'heatingReading']);
 console.warn(`Disk revision ${onDiskRev} is newer than this session's ${knownRev}: merged this session's edits into it${conflicts.length ? ` (the disk copy won on ${conflicts.join(', ')})` : ''}.`);
 data = merged; kept = true;
 } catch (e) { kept = false; }

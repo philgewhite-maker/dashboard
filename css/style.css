@@ -4729,7 +4729,9 @@ background:var(--slate-bg);color:var(--slate);
 .heat-flags{display:inline-flex;gap:4px;flex:0 0 auto;}
 .heat-flag{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:4px;padding:0 4px;}
 .heat-flag.bad{color:var(--red);border-color:var(--red);}
-.heat-on{font-size:11px;color:var(--amber);flex:0 0 auto;}
+.heat-on{color:var(--amber);flex:0 0 auto;display:inline-flex;align-self:center;}
+.heat-flame{display:block;}
+#heating-list.is-stale{opacity:.55;}
 .heat-actual{font-size:18px;font-variant-numeric:tabular-nums;flex:0 0 auto;min-width:3.2em;text-align:right;}
 .heat-row.warm .heat-actual{color:var(--amber);}
 .heat-row.cool .heat-actual{color:var(--blue);}
