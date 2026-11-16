@@ -45,6 +45,23 @@ const prices = [...html.matchAll(/data-testid="pence-price-integer"[^>]*>(\d+)</
 return prices.length ? Math.min(...prices) : null;
 }
 
+// Booking.com hotel pages (used where the hotel's own site is blocked). Proved 16 Nov 2026 through claude-test, 30 and 90
+// days ahead. NOTE: Booking.com prices include taxes and charges and may differ from the hotel's own rate. The room-list
+// table has one `<tr data-block-id=... data-hotel-rounded-price="N">` per rate (whole GBP, 1 night, 2 adults, taxes
+// included). Genius-only rows (the page says "Sign in for this members-only price") are NOT the public price: for those
+// the row's `data-strikethrough-value` is the public price, so that is read instead. A page with no room rows (sold out
+// for the dates) gives no match, so parse returns null. Both patterns use a bounded look-ahead inside the row, so only
+// the short attribute is returned (the agent caps each match at 300 characters).
+const BOOKING_EXTRACT = [
+String.raw`data-hotel-rounded-price="\d+"(?!(?:(?!<tr |</table>)[\s\S]){0,40000}?members-only price)`,
+String.raw`data-strikethrough-value="\d+(?:\.\d+)?"(?=(?:(?!<tr |</table>)[\s\S]){0,40000}?members-only price)`,
+];
+const bookingUrl = (slug) => (ci) => `https://www.booking.com/hotel/gb/${slug}.en-gb.html?checkin=${ci}&checkout=${dateStrAdd(ci, 1)}&group_adults=2&no_rooms=1&group_children=0&selected_currency=GBP`;
+function parseBooking(html) {
+const prices = [...html.matchAll(/data-(?:hotel-rounded-price|strikethrough-value)="(\d+(?:\.\d+)?)"/g)].map((m) => Math.round(Number(m[1])));
+return prices.length ? Math.min(...prices) : null;
+}
+
 // basket: 'double' = budget (the Double), 'ensuite' = mid-scale (the en-suites).
 // status 'blocked' = proven NOT to work (so not guessed at): the sampler skips it and it counts as a failure for the
 // "two failed" fallback.
@@ -86,18 +103,18 @@ return prices.length ? Math.min(...prices) : null;
 },
 {
 id: 'london-bridge-hotel', name: 'London Bridge Hotel', basket: 'ensuite', home: 'https://www.londonbridgehotel.com/',
-status: 'blocked', blockedReason: 'Its booking engine (bookings.londonbridgehotel.com) renders a date picker that ignored the date parameters tried, so no per-night price could be read.',
-url: () => '', parse: () => null,
+// Source: Booking.com (its prices include taxes and charges and may differ from the hotel's own rate). Blocked on the hotel's own site because: Its booking engine (bookings.londonbridgehotel.com) renders a date picker that ignored the date parameters tried, so no per-night price could be read.
+url: bookingUrl('londonbridgehotel'), extract: BOOKING_EXTRACT, parse: parseBooking,
 },
 {
 id: 'residence-inn-london-bridge', name: 'Residence Inn by Marriott London Bridge', basket: 'ensuite', home: 'https://www.marriott.com/en-gb/hotels/lonri-residence-inn-london-bridge/overview/',
-status: 'blocked', blockedReason: 'marriott.com reservation pages answer Access Denied to the renderer; the hotel pages render but show no prices.',
-url: () => '', parse: () => null,
+// Source: Booking.com (its prices include taxes and charges and may differ from the hotel's own rate). Blocked on the hotel's own site because: marriott.com reservation pages answer Access Denied to the renderer; the hotel pages render but show no prices.
+url: bookingUrl('residence-inn-by-marriott-london-bridge'), extract: BOOKING_EXTRACT, parse: parseBooking,
 },
 {
 id: 'residence-inn-london-tower-bridge', name: 'Residence Inn by Marriott London Tower Bridge', basket: 'ensuite', home: 'https://www.marriott.com/en-gb/hotels/lonbd-residence-inn-london-tower-bridge/overview/',
-status: 'blocked', blockedReason: 'Same Marriott block as the London Bridge Residence Inn (property code LONBD).',
-url: () => '', parse: () => null,
+// Source: Booking.com (its prices include taxes and charges and may differ from the hotel's own rate). Blocked on the hotel's own site because: Same Marriott block as the London Bridge Residence Inn (property code LONBD).
+url: bookingUrl('residence-inn-tower-bridge'), extract: BOOKING_EXTRACT, parse: parseBooking,
 },
 {
 id: 'locke-bermonds', name: 'Bermonds Locke', basket: 'ensuite', home: 'https://www.lockeliving.com/en/london/bermonds-locke/your-stay/city-studio',
@@ -107,8 +124,8 @@ id: 'locke-bermonds', name: 'Bermonds Locke', basket: 'ensuite', home: 'https://
 // renderer's page serialisation leaves out (body is an empty iframe + cookie banner, no price text), and the prices
 // come from a POST GraphQL API (booking-engine.services.mews.com/graphql) that page.render/page.fetch cannot call. The
 // lockeliving.com room page itself carries no dated price. Revisit if the renderer can read child frames.
-status: 'blocked', blockedReason: 'Locke books through Mews, whose booking app renders inside an iframe the page renderer does not capture, and the prices come from a POST-only API, so no dated nightly price can be read.',
-url: () => '', parse: () => null,
+// Source: Booking.com (its prices include taxes and charges and may differ from the hotel's own rate). Blocked on the hotel's own site because: Locke books through Mews, whose booking app renders inside an iframe the page renderer does not capture, and the prices come from a POST-only API, so no dated nightly price can be read.
+url: bookingUrl('bermonds-locke'), extract: BOOKING_EXTRACT, parse: parseBooking,
 },
 ];
 const BASKET_TEXT = { double: 'Budget hotels nearby', ensuite: 'Mid-scale hotels nearby' };
@@ -165,7 +182,7 @@ async function sampleOne(hotel, point, sampledAt) {
 const rec = blankHotelPrice({ id: `${hotel.id}:${point.checkin}:${dayOf(sampledAt)}`, hotel: hotel.id, basket: hotel.basket, checkin: point.checkin, sampledAt });
 // `extract` (agent 1.16+): only the matching snippets come back, never the ~0.8 MB page, which would otherwise sit in
 // commands.php's single queue file for a day (84 pages a run). sampleNow refuses to run on an older agent.
-const res = await run('page.render', { urls: [hotel.url(point.checkin)], extract: hotel.extract || [] }, { timeoutMs: RENDER_TIMEOUT_MS });
+const res = await run('page.render', { urls: [hotel.url(point.checkin)], extract: hotel.extract || [], ...(hotel.frames ? { frames: true } : {}) }, { timeoutMs: RENDER_TIMEOUT_MS });
 const page = ((res && res.pages) || [])[0];
 if (!page || page.error || !Array.isArray(page.matches)) { rec.error = (page && page.error) || 'the renderer returned no page'; return rec; }
 if (/Access Denied/i.test(page.title || '')) { rec.error = 'the hotel site refused the renderer (Access Denied)'; return rec; }
@@ -186,7 +203,9 @@ try {
 const beat = await agentHeartbeat();
 if (!beat) return { error: 'The home agent has not been seen recently, so nothing was sampled.' };
 const [maj, min] = String(beat.version || '0').split('.').map(Number);
-if (!(maj > 1 || (maj === 1 && min >= 16))) return { error: `The home agent is version ${beat.version || 'unknown'}; hotel sampling needs 1.16 (it sends back only the prices, not whole pages). Update the agent on the NAS.` };
+// 1.17 only if an active hotel reads inside iframes (`frames: true`); every other hotel still needs just 1.16.
+const needMin = activeHotels().some((h) => h.frames) ? 17 : 16;
+if (!(maj > 1 || (maj === 1 && min >= needMin))) return { error: `The home agent is version ${beat.version || 'unknown'}; hotel sampling needs 1.${needMin} (${needMin >= 17 ? 'it reads prices inside iframes and sends back only the prices' : 'it sends back only the prices, not whole pages'}). Update the agent on the NAS.` };
 const sampledAt = new Date().toISOString();
 const points = samplePoints();
 const jobs = [];
