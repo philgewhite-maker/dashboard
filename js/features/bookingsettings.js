@@ -109,7 +109,7 @@ return `<tr><td>${listingLinkHtml(l)}<div class="settings-note" style="margin:0;
 }).join('');
 const e = s.elasticityPrior || {};
 const eBox = (path, v, w = 72, step = 0.1) => numBox(`elasticityPrior.${path}`, v, { step, width: w, min: path === 'ensuite' || path === 'shared' ? -10 : 0 });
-return `<h4 class="be-set-h" id="be-guest-price">Guest price (model v7)</h4>
+return `<h4 class="be-set-h" id="be-guest-price">Guest price (model v7 and later)</h4>
 <div class="settings-note" style="margin:0 0 4px;">Guests respond to the all-in price: the nightly rate after discounts plus the cleaning fee spread over the nights. These are the LISTED Airbnb cleaning fees; the model scales them to the money you actually receive, using what your stays paid. The room type sets how price-sensitive guests are.</div>
 ${listings.length ? `<div style="overflow-x:auto;"><table class="limits-table be-guest-price"><thead><tr><th>Listing</th><th>Room type</th><th title="The cleaning fee Airbnb shows guests on a normal stay. Not set: the room's received cleaning income is used as it is, with no short-stay fee">Cleaning fee per stay</th><th title="Airbnb's lower cleaning fee for short stays. Blank = none">Short-stay cleaning fee</th><th title="Stays of this many nights or fewer pay the short-stay fee">Short stay is up to</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="settings-note" style="margin:0;">No Airbnb listings yet.</div>'}
 <div class="be-set-label" style="margin:8px 0 2px;font-size:12px;" id="be-elasticity-prior">Price sensitivity to the all-in price</div>
@@ -349,7 +349,7 @@ ${row('Hidden 1-night demand', `${numBox('oneNightDemandPct', s.oneNightDemandPc
 <h4 class="be-set-h">Discounts and price</h4>
 ${discountsHtml(s)}
 ${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}
-${row('Price sensitivity (v6 level)', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'The older model\'s single figure (1.5: 10% dearer, about 15% fewer bookings). The live model (v7) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
+${row('Price sensitivity (v6 level)', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'The older model\'s single figure (1.5: 10% dearer, about 15% fewer bookings). The live model (v8) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
 ${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
 ${guestPriceHtml(s)}
 <h4 class="be-set-h" id="be-ratings">Ratings and Superhost</h4>

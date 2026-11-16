@@ -1,9 +1,9 @@
-# The booking model (v7)
+# The booking model (v8)
 
 What the dashboard's booking model does, what it learns from your own records, what it simply assumes, and what you
 need to keep up to date for it to stay right. Written for checking the assumptions, not for reading the code.
 
-Code: `js/features/bookingmodel.js` (the live model, v7). `js/features/guestprice.js` holds the guest-price maths.
+Code: `js/features/bookingmodel.js` (the live model, v8). `js/features/guestprice.js` holds the guest-price maths.
 `js/features/bookingmodel-v6.js` is a frozen copy of the previous model, kept only so the self-test and backtests can
 compare the two; nothing in the app runs it.
 
@@ -61,7 +61,7 @@ Airbnb guest or host fee is modelled.
 | Discounts (shared and per listing) | As read from Airbnb on 14 Nov 2026 | Airbnb settings |
 | Gap discount | 15% on gaps of 2 nights or fewer | Your setting |
 | New-listing discount | 15% before the 3rd review | Airbnb's promotion |
-| Top-rated guests' share of bookings | 30% | A guess |
+| Top-rated guests' share of bookings | 50% | Your estimate (probably 50% or more) |
 | Stage priors: nightly rate with no rating / as Superhost | −16% / +14% against a rated listing | Unsourced third-party ranges (midpoints) |
 | v6 price sensitivity | 1.5 | A guess. v7 uses it only to keep demand at today's discounts where v6 put it |
 | **Room type per listing** | Double: shared bathroom; the other two: en-suite | Airbnb settings 14 Nov 2026 and your answer |
@@ -119,13 +119,22 @@ discounts already were. The demand level is unaffected (it is solved to equal v6
 to a price change, and every room's short-stay cleaning fee, now count as intended. The live backtest ran before this
 fix.
 
+## What changed from v7 to v8, and why
+
+**v7** priced a simulated stay, in the guest's all-in price, at its check-in night's rate for every night.
+**v8** prices it night by night: the nightly part of the all-in price is the mean of the stay's own nights' rates (the
+same per-night figure the price breakdown shows), plus the cleaning fee over the nights. A stay across a weekend or into
+a dearer month now looks dearer to the guest. The reference price for each stay length is solved on the same basis, so
+at today's settings the demand level and stay-length mix are still v6's for every check-in date (self-test). What
+moves: the cleaning fee and discounts weigh a little less in a dearer stay's all-in price, so its response to a change
+in them differs slightly, and the random draws part from v7's (the largest multiplier changes). The fallback
+top-rated-guest share is now 50% (the saved setting already was).
+
 ## Known limitations
 
 - **A change to the nightly rate itself does not move demand.** The reference price follows the base price, so raising
   or lowering the nightly rate changes income per booking but not how many bookings arrive. That waits for the hotel
   reference prices (phase 6 of PRICING-PLAN.md). Discounts, the cleaning fee and what-ifs do move demand.
-- **The whole stay is priced at its check-in night.** A stay that runs from a cheap month into a dear one, or across a
-  weekend, is priced at the first night's rate.
 - **Top-rated-guest and new-listing discounts are not in the guest price.** They are undone on past stays to get the
   raw rate, but the price a simulated guest responds to leaves them out.
 - **The extra-guest fee is folded into the received nightly rate** until guest counts are captured on each stay. A
