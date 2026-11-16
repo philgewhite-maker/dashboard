@@ -4736,3 +4736,16 @@ background:var(--slate-bg);color:var(--slate);
 .heat-row.heating .heat-actual{color:var(--amber);}
 .heat-target{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto;min-width:3.6em;}
 .heat-foot{align-items:center;justify-content:space-between;margin-top:8px;}
+
+/* ---- Booking evaluator settings: long-let offer check + per-listing discounts (bookingsettings.js) ---- */
+.llc-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px;font-size:12px;}
+.llc-form label{display:flex;flex-direction:column;gap:2px;color:var(--muted);}
+.llc-form label.llc-check{flex-direction:row;align-items:center;gap:5px;padding-bottom:6px;}
+.llc-result{margin:8px 0 2px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;}
+.llc-verdict{display:inline-block;font-size:12px;font-weight:600;border-radius:999px;padding:2px 10px;margin-bottom:4px;}
+.llc-verdict.take{color:var(--sage);background:var(--sage-bg);}
+.llc-verdict.marginal{color:var(--amber);background:var(--amber-bg);}
+.llc-verdict.decline{color:var(--red);background:var(--red-bg);}
+.llc-caveat{margin:4px 0 0;color:var(--amber);}
+.llc-why{margin-top:6px;font-size:12px;}
+.llc-why summary{cursor:pointer;color:var(--muted);}

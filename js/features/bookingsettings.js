@@ -4,7 +4,7 @@
 // each with your own data as it builds up.
 import { data, queueSave, DEFAULT_PREFS, blankAirbnbReservation } from '../state.js';
 import { CHANNEL_GROUPS, CHANNEL_GROUP_LABEL, BUILTIN_CHANNEL_IDS, normaliseChannels, newChannelId, longLetCandidates, planLongLet, createLongLet, adjoiningPayments, extendLongLet, ledgerRowSpan, channelName } from '../channels.js';
-import { escapeHtml, uid } from '../utils.js';
+import { escapeHtml, uid, todayStr, dateStrAdd } from '../utils.js';
 import { nightRateRooms } from './letting.js';
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -18,7 +18,7 @@ if (s.leadMedian === d.leadMedian) s.leadMedian = [...d.leadMedian];
 const dd = s.discounts || {};
 const copySteps = (xs) => (Array.isArray(xs) ? xs.map((x) => ({ ...x })) : []);
 s.discounts = { airbnb: { shortNotice: copySteps((dd.airbnb || {}).shortNotice), length: copySteps((dd.airbnb || {}).length) }, direct: { shortNotice: copySteps((dd.direct || {}).shortNotice), length: copySteps((dd.direct || {}).length) },
-// Per-listing steps (model v6) have no boxes here yet: carried through untouched, as own copies.
+// Per-listing steps (model v6): own copies too.
 listings: Object.fromEntries(Object.entries(dd.listings && typeof dd.listings === 'object' ? dd.listings : {}).map(([id, l]) => [id, { ...l, shortNotice: copySteps(l && l.shortNotice), length: copySteps(l && l.length) }])) };
 if (s.rooms === d.rooms) s.rooms = {};
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
@@ -47,16 +47,35 @@ const row = (label, inner, note = '') => `<div class="be-set-row"><span class="b
 
 // Discounts, one block per channel, mirroring Airbnb: a list of short-notice steps (booked within N days of arrival
 // takes P%) and a list of length steps (a stay of at least N nights takes P%). The largest of each applies.
-function discountsHtml(s) {
-const block = (channel, label, note) => {
-const d = s.discounts[channel];
-const list = (kind, steps, unit, text) => `<div class="be-disc-kind"><span class="settings-note" style="margin:0;">${text}</span>${steps.map((st, i) => `<div class="be-set-row"><span>${unit === 'days' ? 'within' : 'at least'} ${numBox(`discounts.${channel}.${kind}.${i}.${unit}`, st[unit], { width: 52 })} ${unit === 'days' ? 'days' : 'nights'} takes ${numBox(`discounts.${channel}.${kind}.${i}.pct`, st.pct, { width: 52, step: 0.5 })}%</span><span class="del-x" data-be-disc-del="${channel}.${kind}.${i}" title="Remove this step">&times;</span></div>`).join('')}<button class="sync-btn sm inline" type="button" data-be-disc-add="${channel}.${kind}">Add a step</button></div>`;
-return `<div class="be-disc"><div style="font-size:12px;font-weight:600;margin:6px 0 2px;">${label}</div>${note ? `<div class="settings-note" style="margin:0 0 2px;">${note}</div>` : ''}${list('shortNotice', d.shortNotice, 'days', 'Short notice')}${list('length', d.length, 'nights', 'Longer stays')}</div>`;
+// The same block serves an Airbnb listing's own steps: `scope` is the path under discounts ('airbnb', or 'listings.<key>').
+const discBlock = (scope, d, label, note, extra = '') => {
+const sc = escapeHtml(scope);
+const list = (kind, steps, unit, text) => `<div class="be-disc-kind"><span class="settings-note" style="margin:0;">${text}</span>${steps.map((st, i) => `<div class="be-set-row"><span>${unit === 'days' ? 'within' : 'at least'} ${numBox(`discounts.${scope}.${kind}.${i}.${unit}`, st[unit], { width: 52 })} ${unit === 'days' ? 'days' : 'nights'} takes ${numBox(`discounts.${scope}.${kind}.${i}.pct`, st.pct, { width: 52, step: 0.5 })}%</span><span class="del-x" data-be-disc-del="${sc}.${kind}.${i}" title="Remove this step">&times;</span></div>`).join('')}<button class="sync-btn sm inline" type="button" data-be-disc-add="${sc}.${kind}">Add a step</button></div>`;
+return `<div class="be-disc"><div style="font-size:12px;font-weight:600;margin:6px 0 2px;">${label}</div>${note ? `<div class="settings-note" style="margin:0 0 2px;">${note}</div>` : ''}${list('shortNotice', d.shortNotice || [], 'days', 'Short notice')}${list('length', d.length || [], 'nights', 'Longer stays')}${extra}</div>`;
 };
+// A listing's entry in discounts.listings is keyed by its Airbnb id (the digits before ".ics" in its calendar link) or its record id.
+const listingKeys = (l) => { const m = /(\d{6,})\.ics/i.exec(String(l.icsUrl || '')); return [l.id, m ? m[1] : null].filter(Boolean); };
+const listingLabel = (l) => l.label || l.prefix || 'Listing';
+function discountsHtml(s) {
+const listings = data.airbnbListings || [];
+const stored = s.discounts.listings || {};
+const seen = new Set();
+const topBox = (key, d, btn) => `<div class="be-set-row"><span>Top-rated guests take ${numBox(`discounts.listings.${key}.topRatedPct`, d.topRatedPct ?? 0, { width: 52, step: 0.5 })}% off</span>${btn}</div>`;
+const perListing = listings.map((l) => {
+const key = listingKeys(l).find((k) => stored[k]);
+if (key) { seen.add(key); const d = stored[key];
+return discBlock(`listings.${key}`, d, escapeHtml(listingLabel(l)), '', topBox(key, d, `<button class="sync-btn sm inline" type="button" data-be-lst-del="${escapeHtml(key)}" title="Remove this listing's own steps, so it uses the shared Airbnb steps again">Use the shared steps</button>`)); }
+const ks = listingKeys(l);
+return `<div class="be-disc"><div style="font-size:12px;font-weight:600;margin:6px 0 2px;">${escapeHtml(listingLabel(l))}</div><div class="be-set-row"><span class="settings-note" style="margin:0;">Uses the shared Airbnb steps.</span><button class="sync-btn sm inline" type="button" data-be-lst-new="${escapeHtml(ks[ks.length - 1])}">Give it its own steps</button></div></div>`;
+}).join('');
+const orphans = Object.keys(stored).filter((k) => !seen.has(k)).map((k) => discBlock(`listings.${k}`, stored[k], `Airbnb listing ${escapeHtml(k)} (not matched to a listing here)`, '', topBox(k, stored[k], `<button class="sync-btn sm inline" type="button" data-be-lst-del="${escapeHtml(k)}">Remove</button>`))).join('');
 return `<h4 class="be-set-h">Discounts</h4>
-<div class="settings-note" style="margin:0 0 4px;">As on Airbnb: the nightly rate you set is cut by the largest short-notice step and the largest length step that apply to a booking. The model uses them two ways: it undoes them on past stays to get back to a raw nightly rate, and applies them to the bookings it simulates. These are the shared steps. An Airbnb listing with its own steps on record (including its discount for top-rated guests, counted at the share of bookings assumed to take it) uses those instead: they are listed under each room in the evaluator's assumptions and have no boxes here yet.</div>
-${block('airbnb', 'Airbnb', '')}
-${block('direct', 'Direct bookings (your own site)', 'Not used until bookings come through your own site.')}`;
+<div class="settings-note" style="margin:0 0 4px;">As on Airbnb: the nightly rate you set is cut by the largest short-notice step and the largest length step that apply to a booking. The model uses them two ways: it undoes them on past stays to get back to a raw nightly rate, and applies them to the bookings it simulates. These are the shared steps; a listing with its own steps (below) uses those instead.</div>
+${discBlock('airbnb', s.discounts.airbnb, 'Airbnb', '')}
+${discBlock('direct', s.discounts.direct, 'Direct bookings (your own site)', 'Not used until bookings come through your own site.')}
+<h4 class="be-set-h" id="be-listing-discounts">Discounts, per Airbnb listing</h4>
+<div class="settings-note" style="margin:0 0 4px;">Airbnb's settings differ by listing. "Top-rated guests" is the extra discount a listing gives guests with a good record, counted at the share of bookings you assume take it (see Ratings and Superhost below).</div>
+${perListing}${orphans}`;
 }
 
 // ---- Channels and long lets ---------------------------------------------------------------------------------------
@@ -118,6 +137,85 @@ ${made.length ? `<div class="settings-note" style="margin:8px 0 2px;">Long lets 
 }
 function renderLongLet() { const el = document.getElementById('ll-merge-box'); if (el) el.innerHTML = longLetHtml(); import('./airbnb.js').then((m) => m.bindStayChips()).catch(() => {}); }
 
+// ---- Long-let offer check ------------------------------------------------------------------------------------------
+// The form: kept in module state so a re-render of the whole section (every number box does one) doesn't lose it.
+const llc = { roomKey: '', from: '', to: '', rent: '', channelId: '', bills: '0', clean: true, busy: false, result: null, error: '' };
+function llcDefaults() {
+const rooms = evaluatorRooms();
+if (!rooms.some((r) => r.key === llc.roomKey)) llc.roomKey = rooms.length ? rooms[0].key : '';
+if (!llc.from) { llc.from = dateStrAdd(todayStr(), 14); llc.to = dateStrAdd(llc.from, 90); }
+const chs = channels().filter((c) => c.active);
+if (!chs.some((c) => c.id === llc.channelId)) llc.channelId = (chs.find((c) => c.longLetDefault) || chs[0] || {}).id || '';
+}
+const llcVerdict = { take: 'Take the long let', marginal: 'Too close to call on money', decline: 'Keep it short-let' };
+function llcResultHtml() {
+if (llc.error) return `<div class="sync-status">${escapeHtml(llc.error)}</div>`;
+const r = llc.result;
+if (!r) return '';
+if (r.error && !r.longLet) return `<div class="sync-status">${escapeHtml(r.error)}</div>`;
+const sl = r.shortLet;
+const gbp = (v) => `${v < 0 ? '-' : ''}£${Math.abs(Math.round(v)).toLocaleString('en-GB')}`;
+const far = llc.from > dateStrAdd(todayStr(), 45) ? `<div class="settings-note llc-caveat">This starts more than 45 days ahead. The model has only been checked against real outcomes over 90-day windows, so the short-let figure this far out is less reliable.</div>` : '';
+if (!sl) return `<div class="sync-status">${escapeHtml(r.error || '')}</div>${far}`;
+const rows = [
+['Long let, net', `<b>${gbp(r.longLet.net)}</b> <span class="settings-note" style="margin:0;">${gbp(r.longLet.gross)} rent, less ${gbp(r.longLet.fee)} fee, ${gbp(r.longLet.bills)} bills, ${gbp(r.longLet.cleaning)} clean</span>`],
+['Short let, expected', `<b>${gbp(sl.median)}</b> <span class="settings-note" style="margin:0;">range ${gbp(sl.low)} to ${gbp(sl.high)} &middot; about ${Math.round(sl.nightsBooked)} of ${r.nights} nights booked (${Math.round(sl.occupancy * 100)}%)</span>`],
+['Break-even rent', r.breakEvenMonthlyRent == null ? 'n/a' : `<b>${gbp(r.breakEvenMonthlyRent)}</b> a month`],
+];
+return `<div class="llc-result"><div class="llc-verdict ${escapeHtml(r.verdict)}">${escapeHtml(llcVerdict[r.verdict] || r.verdict)}</div>${rows.map(([k, v]) => `<div class="be-set-row"><span class="be-set-label">${k}</span><span>${v}</span></div>`).join('')}${far}
+<details class="llc-why"><summary>How this was worked out</summary>${(r.reasons || []).map((x) => `<div class="settings-note" style="margin:2px 0;">${escapeHtml(x)}</div>`).join('')}<div class="settings-note" style="margin:6px 0 2px;">Assumptions</div>${(r.assumptions || []).map((x) => `<div class="settings-note" style="margin:2px 0;">${escapeHtml(x)}</div>`).join('')}</details></div>`;
+}
+function longLetCheckHtml() {
+llcDefaults();
+const rooms = evaluatorRooms();
+const chs = channels().filter((c) => c.active);
+if (!rooms.length) return `<h4 class="be-set-h" id="long-let-check">Long-let offer check</h4><div class="settings-note" style="margin:0;">No guest rooms set up yet.</div>`;
+return `<h4 class="be-set-h" id="long-let-check">Long-let offer check</h4>
+<div class="settings-note" style="margin:0 0 4px;">Someone offers a monthly rent for a room over a period. This sets what the rent nets against what the model expects the same room to earn as short lets over the same nights. The fee comes from <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#letting-channels">Channels</span> above.</div>
+<div class="sync-row llc-form">
+<label>Room <select class="settings-input" data-llc="roomKey">${rooms.map((r) => `<option value="${escapeHtml(r.key)}"${r.key === llc.roomKey ? ' selected' : ''}>${escapeHtml(r.label)}</option>`).join('')}</select></label>
+<label>From <input type="date" class="settings-input" data-llc="from" value="${escapeHtml(llc.from)}"></label>
+<label>To <input type="date" class="settings-input" data-llc="to" value="${escapeHtml(llc.to)}" title="The move-out day: its night is not charged"></label>
+<label>Rent &pound; a month <input type="number" class="settings-input" data-llc="rent" value="${escapeHtml(String(llc.rent))}" min="0" step="10" style="width:84px;"></label>
+<label>Channel <select class="settings-input" data-llc="channelId">${chs.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === llc.channelId ? ' selected' : ''}>${escapeHtml(c.name)}</option>`).join('')}</select></label>
+<label>Bills &pound; a month <input type="number" class="settings-input" data-llc="bills" value="${escapeHtml(String(llc.bills))}" min="0" step="10" style="width:84px;"></label>
+<label class="llc-check"><input type="checkbox" data-llc="clean"${llc.clean ? ' checked' : ''}> Clean at the end</label>
+<button class="sync-btn sm inline" type="button" id="llc-run"${llc.busy ? ' disabled' : ''}>${llc.busy ? 'Checking…' : 'Check'}</button>
+</div>
+<div id="llc-out">${llc.busy ? '<div class="settings-note" style="margin:4px 0;">Simulating the short-let side, this can take a few seconds…</div>' : llcResultHtml()}</div>`;
+}
+function renderLongLetCheck() { const el = document.getElementById('llc-box'); if (el) el.innerHTML = longLetCheckHtml(); }
+async function runLongLetCheck() {
+if (llc.busy) return;
+if (!llc.from || !llc.to || llc.to <= llc.from) { llc.result = null; llc.error = 'Pick a start date and an end date after it.'; renderLongLetCheck(); return; }
+if (!(Number(llc.rent) > 0)) { llc.result = null; llc.error = 'Enter the monthly rent offered.'; renderLongLetCheck(); return; }
+llc.busy = true; llc.error = ''; llc.result = null; renderLongLetCheck();
+await new Promise((res) => setTimeout(res, 50)); // let the busy state paint before the simulation blocks the thread
+try {
+const m = await import('./longletcheck.js');
+llc.result = m.checkLongLet({ roomKey: llc.roomKey, from: llc.from, to: llc.to, monthlyRent: Number(llc.rent), channelId: llc.channelId, billsPerMonth: Number(llc.bills) || 0, cleanAtEnd: llc.clean, runs: 800 });
+} catch (err) { console.error('Long-let check failed:', err); llc.error = `The check failed: ${err.message || err}`; }
+llc.busy = false; renderLongLetCheck();
+}
+
+// Which listings are yours: checkboxes, with "auto" (ownListingIds null) shown as the model's own guess, ticked as it would be.
+async function renderOwnListings() {
+const el = document.getElementById('be-own-listings');
+if (!el) return;
+const listings = data.airbnbListings || [];
+if (!listings.length) { el.innerHTML = '<div class="settings-note" style="margin:0;">No Airbnb listings yet.</div>'; return; }
+try {
+const { buildContext } = await import('./bookingmodel.js');
+const own = buildContext().ownListings || {};
+const s = settings();
+const auto = !Array.isArray(s.ownListingIds);
+el.innerHTML = `<div class="be-set-label" style="margin:6px 0 2px;font-size:12px;">Which listings are yours</div>
+<div class="settings-note" style="margin:0 0 2px;">${auto ? 'Auto: worked out from each listing\'s owner (none, or called Phil). Tick or untick one to set the list yourself.' : 'Set by hand.'} The Superhost date above applies to these.</div>
+${listings.map((l) => `<label class="be-set-row" style="display:flex;gap:6px;align-items:center;"><input type="checkbox" data-own-id="${escapeHtml(l.id)}"${own[l.id] ? ' checked' : ''}> ${escapeHtml(listingLabel(l))}</label>`).join('')}
+${auto ? '' : '<button class="sync-btn sm inline" type="button" id="be-own-auto">Use auto</button>'}`;
+} catch (err) { console.error('Own listings failed:', err); el.innerHTML = `<div class="settings-note" style="margin:0;">Couldn't work them out: ${escapeHtml(err.message || String(err))}</div>`; }
+}
+
 function earningsDataHtml() {
 const rows = data.airbnbEarnings || [];
 if (!rows.length) return `<div class="settings-note" style="margin:0;">No Airbnb earnings stored yet. <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#airbnb-earnings-import">Import an earnings CSV</span> in Letting income: its rows are kept in full, and the raw nightly rates and cleaning fees below are worked out from them.</div>`;
@@ -158,6 +256,7 @@ el.innerHTML = `
 <div class="settings-note" style="margin:0 0 8px;">The booking evaluator weighs accepting a booking request against keeping its dates open. Each figure here is a starting assumption; the model blends it with your own stays and requests as they build up, and shows which it used.</div>
 <div id="ch-box">${channelsHtml()}</div>
 <div id="ll-merge-box">${longLetHtml()}</div>
+<div id="llc-box">${longLetCheckHtml()}</div>
 <h4 class="be-set-h">Earnings data</h4>
 ${earningsDataHtml()}
 <h4 class="be-set-h">Estimated rates</h4>
@@ -206,8 +305,14 @@ ${discountsHtml(s)}
 ${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}
 ${row('Price sensitivity', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'How much demand falls as price rises: 1.5 means 10% dearer gets about 15% fewer bookings. A guess until your request history says otherwise.')}
 ${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
+<h4 class="be-set-h" id="be-ratings">Ratings and Superhost</h4>
+${row('New-listing discount', `${numBox('newListingDiscountPct', s.newListingDiscountPct, { width: 56, step: 0.5 })}% off`, 'What a new listing takes off for bookings made before its third review. Undone on those past stays to get back to the raw rate.')}
+${row('Superhost since', `<input type="date" class="settings-input" data-be="superhostFrom" value="${escapeHtml(s.superhostFrom || '')}">`, 'The date your own listings gained Superhost. Clear it if they never did.')}
+${row('Top-rated guests', `${numBox('topRatedGuestSharePct', s.topRatedGuestSharePct, { width: 56 })}% of bookings`, 'The share of bookings assumed to come from guests who get a listing\'s top-rated-guest discount. A guess: nothing on record says which guests did.')}
+<div id="be-own-listings"></div>
 <button class="sync-btn sm inline" type="button" id="be-reset" style="margin-top:8px;">Reset to starting assumptions</button>`;
 renderEstimatedRates();
+renderOwnListings();
 }
 
 function setPath(obj, path, value) {
@@ -237,6 +342,22 @@ else if (f === 'feePct') { const v = Number(chIn.value); if (!(v >= 0)) { chIn.v
 else c[f] = chIn.checked;
 queueSave(); renderLongLet(); return;
 }
+const llcIn = e.target.closest('[data-llc]');
+if (llcIn) { const f = llcIn.dataset.llc; llc[f] = llcIn.type === 'checkbox' ? llcIn.checked : llcIn.value; return; }
+const ownIn = e.target.closest('[data-own-id]');
+if (ownIn) {
+(async () => {
+// Read the auto guess first: anything awaited can re-save the prefs object, so settings() is fetched after it.
+let auto = null;
+if (!Array.isArray(settings().ownListingIds)) { const { buildContext } = await import('./bookingmodel.js'); const own = buildContext().ownListings || {}; auto = (data.airbnbListings || []).filter((l) => own[l.id]).map((l) => l.id); }
+const s = settings();
+if (!Array.isArray(s.ownListingIds)) s.ownListingIds = auto || [];
+const id = ownIn.dataset.ownId;
+s.ownListingIds = ownIn.checked ? [...new Set([...s.ownListingIds, id])] : s.ownListingIds.filter((x) => x !== id);
+queueSave(); renderOwnListings();
+})();
+return;
+}
 if (e.target.id === 'll-guest') { llGuest = e.target.value; llOff = new Set(); llMsg = ''; renderLongLet(); return; }
 if (e.target.dataset.llRow) { if (e.target.checked) llOff.delete(e.target.dataset.llRow); else llOff.add(e.target.dataset.llRow); renderLongLet(); return; }
 const input = e.target.closest('[data-be]');
@@ -244,6 +365,7 @@ if (!input) return;
 const path = input.dataset.be;
 let value;
 if (input.type === 'checkbox') value = input.checked;
+else if (input.type === 'date') value = input.value;
 else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian/i.test(path) ? null : undefined;
 else value = Number(input.value);
 if (value === undefined || (typeof value === 'number' && !Number.isFinite(value))) { renderBookingEvaluatorSettings(); return; }
@@ -276,6 +398,8 @@ if (used) { document.getElementById('ch-status').textContent = `${used} stay${us
 data.prefs.lettingChannels = channels().filter((c) => c.id !== id);
 queueSave(); document.getElementById('ch-box').innerHTML = channelsHtml(); return;
 }
+if (e.target.closest('#llc-run')) { runLongLetCheck(); return; }
+if (e.target.closest('#be-own-auto')) { settings().ownListingIds = null; queueSave(); renderOwnListings(); return; }
 if (e.target.closest('#ll-merge')) {
 const rows = longLetCandidates(data).filter((x) => guestOf(x).toLowerCase() === llGuest.toLowerCase() && !llOff.has(x.id));
 const picked = rows.map((x) => x.id);
@@ -311,16 +435,32 @@ llMsg = ''; queueSave(); renderLongLet();
 import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {});
 return;
 }
+const scopeOf = (path) => path.split('.').reduce((o, k) => (o == null ? o : o[k]), settings().discounts);
 const addStep = e.target.closest('[data-be-disc-add]');
 if (addStep) {
-const [channel, kind] = addStep.dataset.beDiscAdd.split('.');
-settings().discounts[channel][kind].push(kind === 'shortNotice' ? { days: 7, pct: 5 } : { nights: 7, pct: 10 });
+const parts = addStep.dataset.beDiscAdd.split('.'); const kind = parts.pop();
+const sc = scopeOf(parts.join('.'));
+if (!sc) return;
+if (!Array.isArray(sc[kind])) sc[kind] = [];
+sc[kind].push(kind === 'shortNotice' ? { days: 7, pct: 5 } : { nights: 7, pct: 10 });
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 const delStep = e.target.closest('[data-be-disc-del]');
 if (delStep) {
-const [channel, kind, idx] = delStep.dataset.beDiscDel.split('.');
-settings().discounts[channel][kind].splice(Number(idx), 1);
+const parts = delStep.dataset.beDiscDel.split('.'); const idx = parts.pop(); const kind = parts.pop();
+const sc = scopeOf(parts.join('.'));
+if (!sc || !Array.isArray(sc[kind])) return;
+sc[kind].splice(Number(idx), 1);
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+const lstNew = e.target.closest('[data-be-lst-new]');
+if (lstNew) {
+settings().discounts.listings[lstNew.dataset.beLstNew] = { shortNotice: [], length: [], topRatedPct: 0 };
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+const lstDel = e.target.closest('[data-be-lst-del]');
+if (lstDel) {
+delete settings().discounts.listings[lstDel.dataset.beLstDel];
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 const del = e.target.closest('[data-be-unavail-del]');
