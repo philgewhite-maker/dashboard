@@ -169,10 +169,14 @@ const backup = backupFirst ? await offerBackup("This device's data is about to b
 // the whole document's to overwrite: this device's copy came from the store.
 const kept = {};
 flippedKeys().forEach((k) => { if (k in data) kept[k] = data[k]; });
-await replaceData(remote.data, { fromRemote: true });
+// replaceData() swaps `data` synchronously, before its first await: the baseline is taken from that adopted
+// document right away, so a local edit made while the write and setKnownRev() run is not folded into the
+// baseline (which would make the push it triggers look like "nothing changed" and skip it).
+const replacing = replaceData(remote.data, { fromRemote: true });
+const adopted = baselineOf(Object.assign({}, data, kept));
+await replacing;
 Object.assign(data, kept);
 await setKnownRev(remote.rev);
-const adopted = baselineOf(data);
 await saveBase(adopted.text, adopted.sigs);
 redrawAfterRemote();
 settingsAfterRemote();

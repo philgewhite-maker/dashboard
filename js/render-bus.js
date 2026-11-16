@@ -16,7 +16,7 @@
 //    debounced, and the nudges are only redrawn when you open their tab
 //    (their redraw re-shuffles and can make a paid AI call).
 import { data, onDataChange, baselineDataSignatures } from './state.js';
-import { renderAll } from './render-all.js';
+import { renderAll, prewarmStaleTabs } from './render-all.js';
 import { renderHabits } from './features/habits.js';
 import { renderGoals } from './features/goals.js';
 import { renderJobs } from './features/jobs.js';
@@ -199,14 +199,15 @@ Object.keys(next).forEach((k) => { if (next[k] !== seen[k]) changed.add(k); });
 Object.keys(seen).forEach((k) => { if (!(k in next)) changed.add(k); });
 seen = next;
 if (!changed.size) return 'none';
-const unknown = [...changed].filter((k) => !RULE_KEYS.has(k) && !NO_DISPLAY_KEYS.has(k));
-if (unknown.length) {
-console.info(`render-bus: remote change to ${unknown.join(', ')} has no rule; redrawing everything.`);
-renderAll();
-return 'all';
-}
-onChanged(changed);
-return 'targeted';
+// A remote change redraws the tab on screen in full and marks every other tab stale (drawn when shown, or in
+// idle time), rather than only the panels whose rule lists a changed key: several renderers read keys their rule
+// doesn't list (a connection card's wants read tasks, etc.; found by review 16 Nov 2026), so the targeted path could
+// leave a panel stale. This keeps v876's per-tab cost without that risk.
+if ([...changed].every((k) => NO_DISPLAY_KEYS.has(k))) return 'none';
+const btn = document.querySelector('.tab-btn.active');
+renderAll({ onlyTab: (btn && btn.dataset.tabBtn) || null });
+prewarmStaleTabs({ delayMs: 1500 });
+return 'tab';
 }
 
 function initRenderBus() {

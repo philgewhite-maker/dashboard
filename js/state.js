@@ -4334,6 +4334,10 @@ onExternalUpdate();
 return;
 }
 knownRev = onDiskRev + 1;
+// The new base must describe what is written below, so take it now, synchronously before the write: one taken
+// after the awaits below would also cover an edit made while they ran, which is then not on disk, and the save
+// that edit queued would find "nothing changed" and never write it (or mark it dirty, or push it).
+if (!sigs) { try { sigs = docSignatures(data); } catch (e) { sigs = null; } }
 // A local edit (anything but a remote adopt/merge, which passes notify:false)
 // marks the document dirty in the SAME transaction as the data, so a reload
 // or the service worker can never see the edit without the marker.
