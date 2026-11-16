@@ -374,6 +374,8 @@ function linkProviders(doc) {
     r.providerId = p.id;
     report.linked[list]++;
   }));
+  // A provider made before its brand logo was known (e.g. Ohana) picks it up later; a logo set by hand is never replaced.
+  doc.providers.forEach((p) => { if (!p.logoUrl) { const l = matchBrandLogo(p.name) || matchBankLogo(p.name); if (l) p.logoUrl = l; } });
   report.created = doc.providers.length - before;
   return report;
 }

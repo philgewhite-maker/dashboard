@@ -46,9 +46,10 @@ const BRAND_LOGOS = [
 { names: ['TopCashback'], logoUrl: iconUrl('svaX1_2RqipFdQdY5kuvXxFAN9-ijDULI6sSZpNRISqyZQ68g788kjXSeZC91WllbyycUt3FJ7qOgS-47x0zHw') },
 // Letting channels (js/channels.js), same method, gathered 2026-11-16: Booking.com is com.booking, SpareRoom is
 // "SpareRoom UK" (com.spareroom.spareroomuk); each icon read from its own detail page's Icon image element and
-// verified 200 image/webp. Ohana (the UK room/lodger platform) has NO entry: no Play Store app could be identified
-// with confidence, so its provider has no logo until one is pasted in Settings -> Providers.
+// verified 200 image/webp. Ohana is liveohana.ai (the owner's own listing link, 16 Nov): it has no Play Store app,
+// so its site's own apple-touch-icon is used (verified 200 image/png, 180x180).
 { names: ['Booking.com'], logoUrl: iconUrl('ozdbI6WGLCrPRNmc2TqrxgOx_TBIOB7WSeLE5iPkCuBiLyB0tkBo2o3l-VRdD71aKaY-mTwzLQY8zpeo9rOLkwA') },
+{ names: ['Ohana'], logoUrl: 'https://liveohana.ai/apple-icon.png' },
 { names: ['SpareRoom'], logoUrl: iconUrl('2Ow0MPmfdzeduHWwBdNfa0Sed3jkSvJMRV3RRqytmuqyl8DAzv3vlFGhKldm0OsEWC4NEF9F8QfsdJWAnuxO') },
 { names: ['eBay'], logoUrl: iconUrl('q0_ZVJFuUH3WFZuZrP8JUMC54dwz1q_SZZufBDMqYaE8O2sLPulV1_dF3xGMQ6b102MTBZlluAF8z4AgZ-Isow') },
 ];
