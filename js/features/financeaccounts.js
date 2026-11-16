@@ -6,6 +6,7 @@
 // actually connect them -- the connectivity itself was the ask, not
 // just capturing more fields.
 import { data, queueSave, blankFinanceAccount } from '../state.js';
+import { createViewGate } from '../viewstamp.js';
 import { uid, escapeHtml, bindForm, daysUntil, scrollAndFlash, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBankLogo } from '../bankLogos.js';
 import { providerLogo } from '../providers.js';
@@ -1338,10 +1339,14 @@ svg.innerHTML = defs + parts;
 // alignment pass changes card positions, which the lines then have to
 // measure), so nothing calling for "the diagram needs recomputing" has
 // to remember there are two passes, not one.
+// Skip-on-show gate (js/viewstamp.js): the tabshown redraw below only runs if the data, the mount's size or
+// the theme changed since the diagram was last laid out while visible (or it was last laid out while hidden).
+const flowGate = createViewGate(() => document.getElementById('accounts-flow-mount'));
 function redrawFlowDiagram() {
 const flowMount = document.getElementById('accounts-flow-mount');
 if (flowMount) alignFlowColumnsToPriorRow(flowMount);
 drawFlowLines(flowMode);
+flowGate.mark();
 }
 let resizeTimer = null;
 function scheduleFlowRedraw() {
@@ -1378,7 +1383,7 @@ resizeTimer = setTimeout(redrawFlowDiagram, 120);
 // Bound once at module load (not render time) -- document always
 // exists, no DOM-readiness guard needed the way the old button-lookup
 // version did.
-document.addEventListener('tabshown', (e) => { if (e.detail.tab === 'finances') scheduleFlowRedraw(); });
+document.addEventListener('tabshown', (e) => { if (e.detail.tab === 'finances' && flowGate.stale()) scheduleFlowRedraw(); });
 window.addEventListener('resize', scheduleFlowRedraw);
 
 // Masked like a real card face ("•••• 1234") -- a light, cosmetic touch,
@@ -1840,6 +1845,7 @@ renderFinanceAccounts();
 });
 
 drawFlowLines(flowMode);
+flowGate.mark();
 }
 
 function initFinanceAccountForm() {

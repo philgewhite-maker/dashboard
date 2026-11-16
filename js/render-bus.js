@@ -17,6 +17,7 @@
 //    (their redraw re-shuffles and can make a paid AI call).
 import { data, onDataChange, baselineDataSignatures } from './state.js';
 import { renderAll, prewarmStaleTabs } from './render-all.js';
+import { bumpViewGen } from './viewstamp.js';
 import { renderHabits } from './features/habits.js';
 import { renderGoals } from './features/goals.js';
 import { renderJobs } from './features/jobs.js';
@@ -192,6 +193,7 @@ return sig;
 // changed key no rule covers, or no baseline yet, falls back to renderAll().
 // Returns 'none' | 'targeted' | 'all' (for the console / tests).
 function redrawAfterRemote() {
+bumpViewGen(); // a pulled change must make every skip-on-show chart redraw (js/viewstamp.js)
 if (!seen) { renderAll(); return 'all'; }
 const next = snapshot();
 const changed = new Set();

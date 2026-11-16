@@ -11,6 +11,7 @@
 // Stays come from four places (see collectStays), because a booking leaves
 // the live list the moment it ends or is cancelled.
 import { data, queueSave } from '../state.js';
+import { createViewGate } from '../viewstamp.js';
 import { escapeHtml, dateStrAdd, todayStr, uid } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay, roomBlocks } from '../icsparse.js';
@@ -1192,6 +1193,8 @@ queueSave();
 renderLettingOccupancy();
 }
 
+// Skip-on-show gate (js/viewstamp.js): redraw on tabshown only if data / size / theme changed or the last draw was hidden.
+const occupancyGate = createViewGate(() => document.getElementById('occ-timeline-canvas'));
 function renderLettingOccupancy() {
 if (!document.getElementById('occ-timeline-canvas')) return;
 const roomSel = document.getElementById('occ-room');
@@ -1211,6 +1214,7 @@ renderDeadVoids();
 renderVoidPlans();
 drawTimeline(stays);
 drawPace(stays);
+occupancyGate.mark();
 }
 
 // ---- Projection button -----------------------------------------------------------------------
@@ -1400,7 +1404,7 @@ const pc = document.getElementById('pace-canvas');
 pc.addEventListener('pointermove', paceTip);
 pc.addEventListener('pointerleave', () => { state.hoverDay = null; document.getElementById('pace-tip').hidden = true; drawPace(stayView()); });
 // A canvas on a hidden tab measures 0x0: draw again once Finances is shown, on resize and on a theme change.
-document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderLettingOccupancy(); });
+document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances' && occupancyGate.stale()) renderLettingOccupancy(); });
 let occResizeTimer = null;
 window.addEventListener('resize', () => {
 clearTimeout(occResizeTimer);

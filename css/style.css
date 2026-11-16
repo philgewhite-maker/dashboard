@@ -4481,6 +4481,8 @@ background:var(--slate-bg);color:var(--slate);
    the nightly average. Wraps on a phone instead of scrolling sideways. */
 #letting-list .letting-rec{padding:6px 0;border-top:1px solid var(--line);font-size:12px;}
 #letting-list .letting-rec:first-of-type{border-top:none;}
+/* PERF: the ledger has one row per payout (hundreds on real data, ~26k DOM nodes) and laying them all out made showing the Finances tab cost ~450 ms every time (measured 16 Nov 2026, 791 rows). Off-screen rows now skip layout/paint until scrolled near; 'auto' remembers a row's real height once seen, 56px is the measured one-line height. Rows are still in the DOM, so find-in-page, scrollAndFlash and focus work. */
+#letting-list .letting-rec{content-visibility:auto;contain-intrinsic-size:auto 56px;}
 #letting-list .letting-rec-top{display:flex;align-items:center;gap:6px 8px;flex-wrap:wrap;}
 #letting-list .letting-rec-logo{flex:0 0 18px;display:inline-flex;align-items:center;justify-content:center;}
 #letting-list .letting-rec-date{flex:0 0 auto;}

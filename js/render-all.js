@@ -1,3 +1,4 @@
+import { bumpViewGen } from './viewstamp.js';
 import { renderHabits } from './features/habits.js';
 import { renderGoals } from './features/goals.js';
 import { renderJobs } from './features/jobs.js';
@@ -109,6 +110,7 @@ function safely(fn) { try { fn(); } catch (err) { console.error(`renderAll: ${fn
 //                             other tab stale; onlyTab null/'' draws only the always-visible ones
 //                             (boot: the first switchTab draws the opened tab right after).
 function renderAll(opts) {
+bumpViewGen(); // js/viewstamp.js: whole-app redraw (import, adopt fallback) -> skip-on-show charts must redraw
 const lazy = !!opts && Object.prototype.hasOwnProperty.call(opts, 'onlyTab');
 const only = lazy ? opts.onlyTab : null;
 RENDERERS.forEach(([fn, tab]) => {

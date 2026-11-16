@@ -15,6 +15,7 @@
 // open, so a stay that ended while you were away is picked up the next
 // time you look rather than needing a button.
 import { data, queueSave } from '../state.js';
+import { createViewGate } from '../viewstamp.js';
 import { escapeHtml, uid, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { splitLedgerNote } from '../migrations.js';
@@ -2012,6 +2013,9 @@ lines.forEach((l, i) => ctx.fillText(l, boxX + 8, boxY + 12 + i * 14));
 }
 }
 
+// Skip-on-show gate (js/viewstamp.js): the tabshown redraw only runs if the data, canvas size or theme
+// changed since the last visible draw (or the last draw happened while hidden).
+const lettingChartGate = createViewGate(() => document.getElementById('letting-chart-canvas'));
 function renderLettingChart() {
 const canvas = document.getElementById('letting-chart-canvas');
 if (!canvas) return;
@@ -2019,6 +2023,7 @@ const chartData = lettingChartData();
 syncLettingChartSelection(chartData.groups);
 renderLettingChartGroupPicker(chartData.groups);
 drawLettingChart(canvas, chartData);
+lettingChartGate.mark();
 }
 
 function initLettingChart() {
@@ -2037,7 +2042,7 @@ canvas.addEventListener('pointerleave', () => { lettingChartHoverIndex = null; r
 // A canvas measured while its tab is hidden gets 0x0 -- re-render once the
 // Finances tab is actually shown, same fix updateTabBarHeightVar (app.js)
 // already uses for its own hidden-on-load measurement.
-document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderLettingChart(); });
+document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances' && lettingChartGate.stale()) renderLettingChart(); });
 // PERF C7: debounced, and skipped while Finances is hidden (the tabshown redraw above covers that).
 let lettingChartResizeTimer = null;
 window.addEventListener('resize', () => {
@@ -2898,6 +2903,7 @@ lines.forEach((ln, i) => ctx.fillText(ln, boxX + 8, boxY + 12 + i * 14));
 }
 }
 
+const nightRateChartGate = createViewGate(() => document.getElementById('night-rate-chart-canvas'));
 function renderNightRateChart() {
 const canvas = document.getElementById('night-rate-chart-canvas');
 if (!canvas) return;
@@ -2912,6 +2918,7 @@ drawNightRateCandleChart(canvas, chartData);
 renderNightRateChartLegend(chartData.listings);
 drawNightRateChart(canvas, chartData);
 }
+nightRateChartGate.mark();
 }
 
 function initNightRateChart() {
@@ -2935,7 +2942,7 @@ nightRateChartHoverIndex = null;
 renderNightRateChart();
 });
 });
-document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances') renderNightRateChart(); });
+document.addEventListener('tabshown', (e) => { if (e.detail?.tab === 'finances' && nightRateChartGate.stale()) renderNightRateChart(); });
 let nightRateResizeTimer = null;
 window.addEventListener('resize', () => {
 clearTimeout(nightRateResizeTimer);
