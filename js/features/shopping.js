@@ -292,7 +292,7 @@ bindBackdropClose(dialog, close);
 dialog.querySelector('[data-apreport-close]').addEventListener('click', close);
 }
 
-// `prefill` (optional): {brand, style, piece, size, colour, notes, orderNumber, apOrderLineId} --
+// `prefill` (optional): {brand, style, piece, size, colour, notes, orderNumber, apOrderLineId, acquiredAt, imageUrl} --
 // used by the AP refund check, so a piece AP didn't refund can be added with the order line
 // already picked and the photo/link/holder still to fill in.
 function openAddInventoryDialog(prefill = null) {
@@ -396,6 +396,15 @@ if (message) photoStatus.textContent = message;
 hydratePhotoBackgrounds(dialog);
 }
 
+// An order line's own product picture (from the AP order email) shows in the form straight
+// away. Failure is harmless: the post-save fill-in below tries once more.
+if (prefill && prefill.imageUrl) {
+photoStatus.textContent = 'Fetching the order line’s photo…';
+saveInventoryPhotoFromUrl(prefill.imageUrl)
+.then((id) => { if (!draftPhotoId) setDraftPhoto(id, 'Photo from the order email.'); })
+.catch(() => { photoStatus.textContent = 'Could not fetch the order photo — add one by hand if you like.'; });
+}
+
 dialog.querySelector('[data-inv-new-photo-file]').addEventListener('change', async (e) => {
 const file = e.target.files && e.target.files[0];
 e.target.value = '';
@@ -473,7 +482,7 @@ const newItem = blankInventoryItem({
 brand: val('brand'), style: val('style'), piece: val('piece'),
 size: val('size'), colour: val('colour'), notes: val('notes'),
 holderId: dialog.querySelector('#inv-new-holder')?.value || '',
-acquiredAt: todayStr(), link: linkInput.value.trim(),
+acquiredAt: (prefill && prefill.acquiredAt) || todayStr(), link: linkInput.value.trim(),
 photoId: draftPhotoId, orderNumber: val('orderNumber'),
 apOrderLineId: apLineSelect.value,
 });
@@ -484,6 +493,7 @@ renderInventory();
 if (newItem.apOrderLineId) { renderApOrders(); syncApRefundTasks(); }
 close();
 fillPhotoFromOrderLineIfMissing(newItem);
+requestAnimationFrame(() => scrollAndFlash(`[data-inv-item="${newItem.id}"]`));
 });
 }
 

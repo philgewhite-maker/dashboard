@@ -31,6 +31,7 @@ import { escapeHtml, uid, daysSince, daysUntil, dateStrAdd, scrollAndFlash } fro
 import { fetchMailSearches, getMessageDetail, gmailLink } from '../googlemail.js';
 import { captureTask, toggleTaskDone, revealTask } from './tasks.js';
 import { recordMail, registerRetry } from './mailledger.js';
+import { sensitiveFieldsShown } from './connections.js';
 
 const SENDER = 'clientservices@agentprovocateur.com';
 const CADENCE_DAYS = 28;
@@ -695,6 +696,28 @@ const shown = chk.issues.filter((i) => i !== chk.missingIssue);
 const issues = shown.length ? `<ul style="margin:4px 0 0 18px;padding:0;">${shown.map((i) => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` : '';
 return `${totalsNote}<div class="settings-note" style="margin:0 0 8px;">${badge} Refunded <strong>${money2(chk.value)}</strong>${when}. ${itemsLine}; AP took off ${money2(chk.discount)} discount${discountPct}${chk.delivery ? `, and refunded ${money2(chk.delivery)} delivery` : ''}.${paidNote}${predicted}${issues}</div>${missingLinesHtml(order, chk)}`;
 }
+// Per-line "Add to inventory" (or, once one is linked, "In inventory"). Inventory is behind
+// the sensitive-fields gate, so the button is not offered while that is off.
+function lineInventoryBtnHtml(order, line) {
+if (!sensitiveFieldsShown()) return '';
+const item = data.inventory.find((i) => i.apOrderLineId === line.id);
+if (item) return ` <button type="button" class="sync-btn sm inline" data-ap-inv-goto="${escapeHtml(item.id)}" title="This line is already in your inventory -- jump to that row.">In inventory</button>`;
+return ` <button type="button" class="sync-btn sm inline" data-ap-add-line="${escapeHtml(order.id)}|${escapeHtml(line.id)}" title="Opens the Add to inventory form with this line's name, size, colour, order, date and photo filled in.">Add to inventory</button>`;
+}
+async function openLineInInventory(orderId, lineId, notes) {
+const order = data.apOrders.find((o) => o.id === orderId);
+const line = order && order.lines.find((l) => l.id === lineId);
+if (!line) return;
+const { style, piece } = splitStylePiece(line.name);
+const shopping = await import('./shopping.js');
+shopping.openAddInventoryDialog({
+brand: 'Agent Provocateur', style, piece, size: line.size, colour: line.colour,
+orderNumber: order.orderNumber, apOrderLineId: line.id, sku: skuOf(line),
+acquiredAt: order.orderDate || '', imageUrl: line.imageUrl || '',
+notes: notes || `From AP order #${order.orderNumber}${order.orderDate ? ` (${order.orderDate})` : ''}${line.price != null ? `, list price ${money2(line.price)}` : ''}.`,
+});
+}
+
 function orderCardHtml(order) {
 const kept = keptLinesFor(order);
 const returning = returningLinesFor(order);
@@ -712,11 +735,11 @@ const keptHtml = kept.length
 ? kept.map(({ item, line }) => readingRowHtml(
 escapeHtml(line.name),
 `${escapeHtml(line.colour)}${line.size ? ` &mdash; ${escapeHtml(line.size)}` : ''}${skuSpanHtml(line)}`,
-`Matched to: ${escapeHtml([item.brand, item.style, item.colour, item.size].filter(Boolean).join(' ') || '(untitled inventory item)')}`,
+`Matched to: ${escapeHtml([item.brand, item.style, item.colour, item.size].filter(Boolean).join(' ') || '(untitled inventory item)')}${lineInventoryBtnHtml(order, line)}`,
 )).join('')
 : '<div class="empty">Nothing kept yet &mdash; link a kept inventory item to an order line from the Inventory list above.</div>';
 const returningHtml = returning.length
-? returning.map((l) => readingRowHtml(escapeHtml(l.name), `${escapeHtml(l.colour)}${l.size ? ` &mdash; ${escapeHtml(l.size)}` : ''}${skuSpanHtml(l)}`, `£${l.price.toFixed(2)}`)).join('')
+? returning.map((l) => readingRowHtml(escapeHtml(l.name), `${escapeHtml(l.colour)}${l.size ? ` &mdash; ${escapeHtml(l.size)}` : ''}${skuSpanHtml(l)}`, `£${l.price.toFixed(2)}${lineInventoryBtnHtml(order, l)}`)).join('')
 : '<div class="empty">Nothing returning.</div>';
 return `<div class="account-card" data-ap-order-card="${escapeHtml(order.id)}">
 <div class="account-summary" style="cursor:default;">
@@ -901,15 +924,20 @@ el.querySelectorAll('[data-ap-keep-line]').forEach((btn) => {
 btn.addEventListener('click', async () => {
 const [orderId, lineId] = btn.dataset.apKeepLine.split('|');
 const order = data.apOrders.find((o) => o.id === orderId);
-const line = order && order.lines.find((l) => l.id === lineId);
-if (!line) return;
-const { style, piece } = splitStylePiece(line.name);
-const shopping = await import('./shopping.js');
-shopping.openAddInventoryDialog({
-brand: 'Agent Provocateur', style, piece, size: line.size, colour: line.colour,
-orderNumber: order.orderNumber, apOrderLineId: line.id, sku: skuOf(line),
-notes: `Kept from AP order #${order.orderNumber}: it was not in AP's refund.`,
+await openLineInInventory(orderId, lineId, order ? `Kept from AP order #${order.orderNumber}: it was not in AP's refund.` : '');
 });
+});
+el.querySelectorAll('[data-ap-add-line]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [orderId, lineId] = btn.dataset.apAddLine.split('|');
+openLineInInventory(orderId, lineId);
+});
+});
+el.querySelectorAll('[data-ap-inv-goto]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const sel = `[data-inv-item="${btn.dataset.apInvGoto}"]`;
+if (document.querySelector(sel)) scrollAndFlash(sel);
+else btn.textContent = 'In inventory (with someone)';
 });
 });
 el.querySelectorAll('[data-ap-keep-all]').forEach((btn) => {
