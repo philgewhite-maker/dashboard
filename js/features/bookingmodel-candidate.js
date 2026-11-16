@@ -832,10 +832,19 @@ return Math.pow((1 - lm) * (1 - gap), -(Number(s.elasticity) || 0));
 //   all-in = listed nightly x (1 - short notice) x (1 - length) x (1 - ex) + cleaning fee / los, plus any guest fee
 //   elasticity = the prior for the room type x the month of c x the short-notice multiplier (guestprice.js elasticityFor)
 //   B = the largest mult any request for c could have (so mult / B <= 1), as v6's maxBoost
-// ref (per room and check-in date) solves  sum p(los) q(lead class) (all-in at the BASELINE settings / ref) ^ elasticity
-//   = sum p(los) q(lead class) (v6 discount factor at the baseline) ^ -v6 elasticity,
-// p and q being the room's stay-length and (uncut) lead-time curves for c: the expected multiplier is v6's, so the level
-// is unchanged and only the response differs. Baseline = ctx.priceRefSettings (the stored settings; buildContext keeps
+// ref (per room, check-in date AND stay length n) solves
+//   sum q(lead class) (all-in at the BASELINE settings, n nights / ref_n) ^ elasticity
+//   = sum q(lead class) (v6 discount factor at the baseline, n nights) ^ -v6 elasticity,
+// q being the room's lead-time curve for c CUT to the leads still reachable from the day the arrivals are drawn from
+// (t0, so c - t0 days at most; uncut when there is none, as in the occupancy calibration). So at the baseline every
+// stay length, and every check-in date of a window that starts today, expects v6's bookings: the level, the stay-length
+// mix and so the nights are v6's, and only the response to a price change differs.
+// Why per stay length: the stay-length curve p is what guests booked at today's prices, cleaning fee included, so it
+// already holds today's cleaning fee per night. One ref for all lengths (the first build of v7) re-applied that fee:
+// the bookings count matched v6 but the mix tilted to long stays (a 60 cleaning fee on a 100 night: +18% nights in
+// the selfTest room at v6's own elasticity, and +5% nights on the owner's backtest). Why cut: a window starting
+// today can only draw short leads for its first dates, where v7's short-notice response differs from v6's.
+// Baseline = ctx.priceRefSettings (the stored settings; buildContext keeps
 // them apart from an evaluation's what-ifs), else ctx.s. The nightly base price itself is renormalised with c (ref
 // follows it), so a change to the base price moves demand no more than it did in v6: that waits for the hotel
 // reference prices (phase 6).
@@ -867,20 +876,25 @@ let a = params._v7.get(s); if (!a) { a = new WeakMap(); params._v7.set(s, a); }
 let b = a.get(refS); if (!b) { b = new Map(); a.set(refS, b); }
 return b;
 }
-function guestResponse(ctx, params, ri, c) {
+// `t0`: the day number the arrivals for c are drawn from (leads of at most c - t0 days); null = every lead.
+function guestResponse(ctx, params, ri, c, t0 = null) {
 const cache = responseCache(ctx, params);
 const exMax = Math.max(Number(ctx.s.gapDiscountPct) || 0, Number(ctx.planMaxPct) || 0) / 100;
-const key = `d|${ri}|${c}|${exMax}`;
+// A reach the lead-time curve has all but finished by counts as uncut (shares the build across dates).
+let reach = t0 == null || c - t0 < 0 ? null : c - t0;
+if (reach != null && leadCdf(params, c, reach) >= 1 - 1e-6) reach = null;
+const rk = reach == null ? 'u' : reach;
+const key = `d|${ri}|${c}|${exMax}|${rk}`;
 let r = cache.get(key);
 if (r) return r;
 const base = basePrice(ctx, params, ri, c);
-const shapeKey = `s|${ri}|${monthOf(c)}|${isChristmas(c) ? 1 : 0}|${base}|${exMax}`;
+const shapeKey = `s|${ri}|${monthOf(c)}|${isChristmas(c) ? 1 : 0}|${base}|${exMax}|${rk}`;
 r = cache.get(shapeKey);
-if (!r) { r = buildResponse(ctx, params, ri, c, base, exMax); cache.set(shapeKey, r); }
+if (!r) { r = buildResponse(ctx, params, ri, c, base, exMax, reach); cache.set(shapeKey, r); }
 cache.set(key, r);
 return r;
 }
-function buildResponse(ctx, params, ri, c, base, exMax) {
+function buildResponse(ctx, params, ri, c, base, exMax, reach = null) {
 const s = ctx.s; const refS = ctx.priceRefSettings || s;
 const listingId = (params.roomListing || [])[ri] || null;
 const disc = discountsOf(s, 'airbnb', listingId); const discRef = discountsOf(refS, 'airbnb', listingId);
@@ -895,35 +909,41 @@ const cuts = [...new Set([...disc.shortNotice, ...discRef.shortNotice].map((st) 
 const reps = [...cuts, (cuts.length ? cuts[cuts.length - 1] : 0) + 1];
 const K = reps.length;
 const eps = reps.map((L) => elasticityFor(s, { listingId, month, leadDays: L }).value);
-const cdfAt = (k) => leadCdf(params, c, k);
-const q = reps.map((_, i) => (i < cuts.length ? cdfAt(cuts[i]) : 1) - (i > 0 ? cdfAt(cuts[i - 1]) : 0));
+// The lead-class shares, cut to the leads reachable (at most `reach` days) when there is a reach.
+const cdfAt = (k) => leadCdf(params, c, reach == null ? k : Math.min(k, reach));
+const upTo = (i) => (i < cuts.length ? cdfAt(cuts[i]) : reach == null ? 1 : cdfAt(reach));
+const q = reps.map((_, i) => upTo(i) - (i > 0 ? upTo(i - 1) : 0));
 const cdf = params.losCdf;
 const allIn = (n, i, ex, cur) => allInGuestPrice({ nightly, nights: n, cleaningFee: cleaningFeeFor(cur ? fees : feesRef, n), leadDays: reps[i], disc: cur ? disc : discRef, extraDiscount: ex, guestFeePct: cur ? gf : gfRef }).perNight;
 const eps6 = Number(refS.elasticity) || 0;
-let E6 = 0; const terms = [];
-for (let n = 1; n <= LOS_MAX; n++) {
-const p = (cdf[n] || 0) - (cdf[n - 1] || 0);
-if (!(p > 0)) continue;
+// One ref per stay length n (see the header): every length, not only those on the curve, as a 1-night extra can come.
+const refs = new Float64Array(LOS_MAX + 1);
+let E6 = 0; let logRef = 0; let wRef = 0; let solved = eps.some((e) => e !== 0);
+for (let n = 1; n <= LOS_MAX && solved; n++) {
+let E6n = 0; const terms = [];
 for (let i = 0; i < K; i++) {
-const w = p * q[i];
-if (!(w > 0)) continue;
-E6 += w * Math.pow((1 - stepPct(discRef.shortNotice, 'days', reps[i])) * (1 - stepPct(discRef.length, 'nights', n)), -eps6);
-terms.push({ w, la: Math.log(allIn(n, i, 0, false)), e: eps[i] });
+if (!(q[i] > 0)) continue;
+E6n += q[i] * Math.pow((1 - stepPct(discRef.shortNotice, 'days', reps[i])) * (1 - stepPct(discRef.length, 'nights', n)), -eps6);
+terms.push({ w: q[i], la: Math.log(allIn(n, i, 0, false)), e: eps[i] });
 }
-}
-let ref = null;
-if (eps.some((e) => e !== 0) && terms.length && E6 > 0) {
+if (!terms.length || !(E6n > 0)) { solved = false; break; }
+let x;
 const e0 = terms[0].e;
 if (terms.every((t) => t.e === e0)) {
 let S = 0; terms.forEach((t) => { S += t.w * Math.exp(t.e * t.la); });
-ref = Math.exp((Math.log(S) - Math.log(E6)) / e0);
+x = (Math.log(S) - Math.log(E6n)) / e0;
 } else {
-const g = (x) => { let v = 0; for (const t of terms) v += t.w * Math.exp(t.e * (t.la - x)); return v; };
+const g = (y) => { let v = 0; for (const t of terms) v += t.w * Math.exp(t.e * (t.la - y)); return v; };
 let lo = Math.min(...terms.map((t) => t.la)) - 20; let hi = Math.max(...terms.map((t) => t.la)) + 20;
-for (let it = 0; it < 100; it++) { const mid = (lo + hi) / 2; if (g(mid) < E6) lo = mid; else hi = mid; }
-ref = Math.exp((lo + hi) / 2);
+for (let it = 0; it < 80; it++) { const mid = (lo + hi) / 2; if (g(mid) < E6n) lo = mid; else hi = mid; }
+x = (lo + hi) / 2;
 }
+refs[n] = Math.exp(x);
+const p = (cdf[n] || 0) - (cdf[n - 1] || 0);
+if (p > 0) { E6 += p * E6n; logRef += p * x; wRef += p; }
 }
+// `ref`, for display and the selfTest: the stay-length-weighted (geometric) mean of the per-length refs.
+const ref = solved && wRef > 0 ? Math.exp(logRef / wRef) : null;
 const classOf = (lead) => { for (let i = 0; i < cuts.length; i++) if (lead <= cuts[i]) return i; return K - 1; };
 const tab = new Float64Array((LOS_MAX + 1) * K).fill(1);
 let B = 1;
@@ -931,18 +951,18 @@ if (ref != null) {
 B = 0;
 for (let n = 1; n <= LOS_MAX; n++) {
 for (let i = 0; i < K; i++) {
-const m0 = demandMultiplier(allIn(n, i, 0, true), ref, eps[i]);
+const m0 = demandMultiplier(allIn(n, i, 0, true), refs[n], eps[i]);
 tab[n * K + i] = m0;
-B = Math.max(B, m0, exMax > 0 ? demandMultiplier(allIn(n, i, exMax, true), ref, eps[i]) : 0);
+B = Math.max(B, m0, exMax > 0 ? demandMultiplier(allIn(n, i, exMax, true), refs[n], eps[i]) : 0);
 }
 }
 }
 const mult = (los, lead, ex = 0) => {
 if (ref == null) return 1;
 const n = Math.min(LOS_MAX, Math.max(1, los)); const i = classOf(lead);
-return ex > 0 ? demandMultiplier(allIn(n, i, ex, true), ref, eps[i]) : tab[n * K + i];
+return ex > 0 ? demandMultiplier(allIn(n, i, ex, true), refs[n], eps[i]) : tab[n * K + i];
 };
-return { ref, B, base, nightly, eps, cuts, q, E6, mult, fees, guestFee: gf, listingId };
+return { ref, refs, reach, B, base, nightly, eps, cuts, q, E6, mult, fees, guestFee: gf, listingId };
 }
 
 // ---- One simulated future -------------------------------------------------------------------
@@ -978,13 +998,13 @@ const out = [];
 const oneNight = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
 rooms.forEach((ri) => {
 for (let c = Math.max(from, todayN); c < to; c++) {
-const boost = guestResponse(ctx, params, ri, c).B; // v7: per check-in date (v6: maxBoost per room)
+const boost = guestResponse(ctx, params, ri, c, todayN).B; // v7: per check-in date and reach (v6: maxBoost per room)
 const daysLeft = todayN == null ? null : c - todayN;
 const share = daysLeft == null ? 1 : leadCdf(params, c, daysLeft);
 const k = poisson(rng, lam(ri, c) * params.dowW[dowOf(c)] * boost * share);
 for (let j = 0; j < k; j++) {
 const L = sampleLead(params, c, daysLeft, rng);
-out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng() });
+out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng(), t0: todayN }); // v7: t0, the reach guestResponse was cut to
 }
 const planLow = ctx.plans && ctx.plans.length ? planAt(ctx.plans, ri, c) : null;
 const exFrac = (extra && extra[ri]) || (planLow && planLow.minNights != null && planLow.minNights < (Number(ctx.rooms[ri].minNights) || 1) ? oneNight : 0);
@@ -995,7 +1015,7 @@ const rx = rngX || rng;
 const k1 = poisson(rx, lam(ri, c) * params.dowW[dowOf(c)] * boost * share * exFrac);
 for (let j = 0; j < k1; j++) {
 const L = sampleLead(params, c, daysLeft, rx);
-out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx() });
+out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx(), t0: todayN });
 }
 }
 }
@@ -1049,7 +1069,7 @@ if (orphan && a.lead > 7) continue;
 const inGap = boundedL && boundedR && ge - gs <= gapMax;
 const factor = (1 - stepPct(discs[a.room].shortNotice, 'days', a.lead)) * (1 - stepPct(discs[a.room].length, 'nights', a.los)) * (plan && plan.pct > 0 ? 1 - plan.pct / 100 : inGap ? 1 - gapPct : 1);
 // v7: the guest responds to the all-in price (see guestResponse); the extra cut is the same one `factor` takes.
-const gr = guestResponse(ctx, params, a.room, a.c);
+const gr = guestResponse(ctx, params, a.room, a.c, a.t0); // the same response the arrival was drawn under
 const ex = plan && plan.pct > 0 ? plan.pct / 100 : inGap ? gapPct : 0;
 if (a.u > gr.mult(a.los, a.lead, ex) / gr.B) continue; // the guest doesn't take it at this price
 for (let i = i0; i < i1 && i < len; i++) o[i] = 1;
@@ -1651,7 +1671,7 @@ return [
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}), each set against the stay lengths that could be booked when it arrived; a length you have rarely or never allowed follows a rule of thumb instead (a stay twice as long is half as common)` : 'a rule of thumb (a stay twice as long is half as common)' },
 { id: 'dow', label: 'Busiest check-in day', value: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][params.dowW.indexOf(Math.max(...params.dowW))], source: params.dowN ? `your requests and stays (${Math.round(params.dowN)})` : 'assumption' },
 { id: 'cancel', label: 'Bookings cancelled', value: `${Math.round(params.cancelRate * 100)}% (${Math.round(params.lateShare * 100)}% of those late)`, source: params.nAll ? `your stays (${params.nCancel} of ${params.nAll}) blended with an assumption` : 'assumption', editable: 'cancel' },
-(() => { const gr = guestResponse(ctx, params, ri, ci); const el = elasticityFor(s, { listingId: gr.listingId, month: m, leadDays: 30 }); return { id: 'elasticity', label: 'Price sensitivity (to the all-in guest price, v7 candidate)', value: `${el.value.toFixed(2)} (${el.roomType || 'room type unknown'}, ${mon}, 30 days ahead)`, source: `${el.source}. Reference all-in price ${gr.ref == null ? 'n/a' : `£${gr.ref.toFixed(0)}`} a night, set so demand at today's discounts and cleaning fee matches v6 (v6 sensitivity ${s.elasticity}); received prices, no platform fee modelled` }; })(),
+(() => { const gr = guestResponse(ctx, params, ri, ci); const el = elasticityFor(s, { listingId: gr.listingId, month: m, leadDays: 30 }); return { id: 'elasticity', label: 'Price sensitivity (to the all-in guest price, v7 candidate)', value: `${el.value.toFixed(2)} (${el.roomType || 'room type unknown'}, ${mon}, 30 days ahead)`, source: `${el.source}. Reference all-in price ${gr.ref == null ? 'n/a' : `£${gr.ref.toFixed(0)}`} a night (averaged over stay lengths; one per length), set so demand at today's discounts and cleaning fee matches v6 for every stay length (v6 sensitivity ${s.elasticity}); received prices, no platform fee modelled` }; })(),
 { id: 'ownUse', label: 'Empty night worth to you', value: `£${s.ownUseWeekday} Sun–Thu, £${s.ownUseWeekend} Fri–Sat × ${ctx.rooms[ri].weight || 1}`, source: 'your setting', editable: 'ownUse' },
 { id: 'clean', label: 'Cleaning', value: `£${ctx.firstClean} first room, +£${s.cleanExtra} each extra the same day`, source: 'your setting' },
 { id: 'hassle', label: 'Changeover hassle', value: `£${s.hassleWeekday} Mon–Fri, £${s.hassleWeekend} Sat–Sun`, source: 'your setting' },
@@ -2298,6 +2318,31 @@ const near = g26.mult(3, 5, 0.15) / g26.mult(3, 5, 0); const far = g26.mult(3, 3
 check('v7 lead time: a cut moves demand more at short notice', near > far && far > 1, `15% off: 5 days ahead x${near.toFixed(4)}, 30 days x${far.toFixed(4)}`);
 // 27. Seeds: the settings v7 adds are left out, so they do not reshuffle the draws.
 check('v7 seeds ignore the new settings', JSON.stringify(seedSettings(s24)) === JSON.stringify(seedSettings(c23.s)) && JSON.stringify(seedSettings(c23.s)) === JSON.stringify(c23.s), 'seedSettings');
+// 28. No level shift over a window that starts today (what the backtest projects): a shared-bathroom room (-1.8),
+// November (x1.2), a 60 cleaning fee on a 100 night, short-notice and length discounts. For each check-in date of the
+// next 90 days, the expected bookings and nights, over the stay lengths and the leads still reachable from today, equal
+// v6's (computed here from v6's own discount factor). The first build of v7 (one ref for every stay length, uncut lead
+// curve) gave +1.1% bookings and +30% nights on this window.
+const disc28 = { airbnb: { shortNotice: [{ days: 5, pct: 10 }, { days: 10, pct: 5 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 18 }] }, direct: { shortNotice: [], length: [] } };
+const c28 = testContext({ occupancy: 0.5, more: { discounts: disc28, guestPrice: { cleaningFees: { LA: { perStay: 60 } }, roomTypes: { LA: 'shared' } } } });
+c28.params.prices[0].clean = 60;
+const T28 = dayNum(c28.today); const eps28 = Number(c28.s.elasticity) || 0; const d28 = discountsOf(c28.s, 'airbnb', 'LA');
+let a6 = 0; let a7 = 0; let m6 = 0; let m7 = 0; let worst = 0;
+for (let c = T28; c < T28 + 90; c++) {
+const gr = guestResponse(c28, c28.params, 0, c, T28);
+let b6 = 0; let b7 = 0;
+for (let n = 1; n <= LOS_MAX; n++) {
+const p = (c28.params.losCdf[n] || 0) - (c28.params.losCdf[n - 1] || 0);
+gr.q.forEach((qi, i) => {
+const lead = i < gr.cuts.length ? gr.cuts[i] : gr.cuts[gr.cuts.length - 1] + 1;
+const f6 = Math.pow((1 - stepPct(d28.shortNotice, 'days', lead)) * (1 - stepPct(d28.length, 'nights', n)), -eps28);
+const f7 = gr.mult(n, lead);
+b6 += p * qi * f6; b7 += p * qi * f7; m6 += p * qi * f6 * n; m7 += p * qi * f7 * n;
+});
+}
+a6 += b6; a7 += b7; worst = Math.max(worst, Math.abs(b7 / b6 - 1));
+}
+check('v7 level over the next 90 days: bookings and nights equal v6\'s, date by date', close(a7, a6, 1e-6) && close(m7, m6, 1e-6) && worst < 1e-6, `bookings x${(a7 / a6).toFixed(6)}, nights x${(m7 / m6).toFixed(6)}, worst date ${(worst * 100).toExponential(1)}%`);
 return results;
 }
 
