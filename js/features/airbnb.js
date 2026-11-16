@@ -8,8 +8,9 @@
 // FEED-sourced reservation's guestName is only ever filled in after the
 // fact, by hand or from the booking email. A hand-typed external event
 // is the exception -- its title carries the name, and that's read off it.
-import { safeHref } from '../utils.js';
-import { channelChoices, channelName, applyStayChannel } from '../channels.js';
+import { safeHref, bindLogoFallbacks } from '../utils.js';
+import { channelChoices, channelName, channelById, applyStayChannel } from '../channels.js';
+import { channelBadgeHtml } from '../providers.js';
 import { data, queueSave, blankAirbnbListing, blankAirbnbReservation, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, uid, MISSING_KEY_LINK_HTML, pickChipHtml, scrollAndFlash } from '../utils.js';
 import { owners, ownerNameFor, ownerKeyFor, shareRuleAt, money, CAP_KEEPS_FROM } from './letting.js';
@@ -871,7 +872,7 @@ return `<div class="cal-row stay-row" data-airbnb-row="${r.id}">
 </div>
 <div class="cal-turn-row">
 ${isLong ? `<span class="settings-note" style="margin:0;" title="One let paid by a schedule of income entries in Letting income. The entries are unchanged; this stay only says the nights are one let.">Long let &middot; ${r.paymentIds.length} payments</span>` : `<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:86px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">`}
-${r.platform !== 'other' ? (reservationPageUrl(r) ? `<a href="${escapeHtml(safeHref(reservationPageUrl(r)))}" target="_blank" rel="noopener noreferrer" title="Open this reservation on Airbnb">${AIRBNB_LOGO}</a>` : AIRBNB_LOGO) : `<span class="settings-note" style="margin:0;" title="Not booked through Airbnb">${escapeHtml(channelName(data.prefs.lettingChannels, r.channel))}</span>`}
+${r.platform !== 'other' ? (reservationPageUrl(r) ? `<a href="${escapeHtml(safeHref(reservationPageUrl(r)))}" target="_blank" rel="noopener noreferrer" title="Open this reservation on Airbnb">${AIRBNB_LOGO}</a>` : AIRBNB_LOGO) : `<span class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;" title="Not booked through Airbnb">${channelBadgeHtml(channelById(data.prefs.lettingChannels, r.channel) || { name: channelName(data.prefs.lettingChannels, r.channel) })}${escapeHtml(channelName(data.prefs.lettingChannels, r.channel))}</span>`}
 ${pushed}
 ${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}
 <button type="button" class="stay-more-btn" data-airbnb-more="${r.id}" aria-expanded="${more}" title="Listing, notes, the booking date, the day the guest paid, and the channel${r.notes ? `. Notes: ${escapeHtml(r.notes)}` : ''}">${r.notes ? '&#9998; ' : ''}<span class="stay-more-caret">&#9662;</span></button>
@@ -881,7 +882,7 @@ ${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class=
 ${data.airbnbListings.length > 1 ? `<label>Listing <select data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></label>` : ''}
 <label>Booked <input type="date" class="tag-add-input" data-airbnb-res-field="confirmedOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.confirmedOn || '')}" style="max-width:130px;" title="The day this booking was made (the confirmation email's date). Lead times in the booking model and the Nights booked chart are worked out from it. Sync fills it in when the confirmation email is in your inbox."></label>
 <label>Guest paid <input type="date" class="tag-add-input" data-airbnb-res-field="paidOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.paidOn || '')}" style="max-width:130px;" title="The day the guest paid. Only used for a capped owner's monthly limit, never as the booking date. A capped owner's monthly limit is counted in this month; blank falls back to the checkout month."></label>
-<label>Channel <select data-airbnb-stay-channel="${r.id}" title="Where this stay came from (channels are edited in Settings). The Letting income chart on Finances draws Airbnb solid and every other channel striped. A channel that is a long let by default also sets the let type to long.">${channelChoices(data.prefs.lettingChannels, r.channel).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === r.channel ? ' selected' : ''}>${escapeHtml(c.name)}${c.active ? '' : ' (inactive)'}</option>`).join('')}</select></label>
+<label>Channel ${channelBadgeHtml(channelById(data.prefs.lettingChannels, r.channel) || { name: r.channel || '?' })} <select data-airbnb-stay-channel="${r.id}" title="Where this stay came from (channels are edited in Settings). The Letting income chart on Finances draws Airbnb solid and every other channel striped. A channel that is a long let by default also sets the let type to long.">${channelChoices(data.prefs.lettingChannels, r.channel).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === r.channel ? ' selected' : ''}>${escapeHtml(c.name)}${c.active ? '' : ' (inactive)'}</option>`).join('')}</select></label>
 <label>Let <select data-airbnb-stay-lettype="${r.id}"${isLong ? ' disabled' : ''} title="${isLong ? 'Fixed while payments are linked. ' : ''}A long let takes the room off the market for the whole run and is not a short-let request. To fold a run of income entries into one long let, use Merge into one long let in Settings."><option value="short"${r.letType !== 'long' ? ' selected' : ''}>Short let</option><option value="long"${r.letType === 'long' ? ' selected' : ''}>Long let</option></select></label>
 <input type="text" autocomplete="off" class="tag-add-input stay-notes" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}">
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
@@ -1058,6 +1059,7 @@ el.innerHTML = errorsHtml + refundsPendingHtml() + (upcoming.length
 : (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync.</div>'));
 
 bindRefundsPending(el);
+bindLogoFallbacks(el);
 import('./bookingrequests.js').then((m) => m.renderBookingRequests()).catch((err) => console.error('Booking requests render failed:', err));
 el.querySelectorAll('[data-airbnb-eval]').forEach((btn) => {
 btn.addEventListener('click', () => import('./bookingevaluator.js').then((m) => m.openEvaluator({ reservationId: btn.dataset.airbnbEval })));

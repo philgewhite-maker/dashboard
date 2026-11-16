@@ -5,16 +5,16 @@
 // provider and keeps the old name as an alias, so typing it again resolves.
 import { data, queueSave } from '../state.js';
 import { escapeHtml, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
-import { linkProviders, PROVIDER_FIELDS } from '../migrations.js';
+import { linkProviders, PROVIDER_FIELDS, providerList, isDirectChannel } from '../migrations.js';
 import { voucherChipHtml, bindVoucherChips } from './vouchers.js';
 
-const KIND_LABEL = { vouchers: ['voucher', 'vouchers'], loyaltyPrograms: ['loyalty program', 'loyalty programs'], subscriptions: ['subscription', 'subscriptions'], financeAccounts: ['bank account', 'bank accounts'] };
+const KIND_LABEL = { vouchers: ['voucher', 'vouchers'], loyaltyPrograms: ['loyalty program', 'loyalty programs'], subscriptions: ['subscription', 'subscriptions'], financeAccounts: ['bank account', 'bank accounts'], lettingChannels: ['letting channel', 'letting channels'] };
 // Where each kind of record lives, for the "used by" links.
 const KIND_GOTO = { loyaltyPrograms: ['finances', '#loyalty-balances-panel'] };
 
 function usesOf(p) {
   const out = {};
-  PROVIDER_FIELDS.forEach(([list]) => { out[list] = (data[list] || []).filter((r) => r.providerId === p.id); });
+  PROVIDER_FIELDS.forEach(([list]) => { out[list] = providerList(data, list).filter((r) => r.providerId === p.id); });
   return out;
 }
 
@@ -30,6 +30,8 @@ function usedByHtml(uses) {
     const label = list === 'financeAccounts' ? [r.bank, r.name].filter(Boolean).join(' ') : r.name;
     parts.push(`<span class="airuns-link" data-provider-open="${list}:${escapeHtml(r.id)}" title="Open this ${KIND_LABEL[list][0]}">${escapeHtml(label || KIND_LABEL[list][0])}</span>`);
   }));
+  // A channel links to its own row in Settings -> Booking evaluator -> Channels.
+  uses.lettingChannels.forEach((c) => parts.push(`<span class="inline-goto-link" data-goto-tab="settings" data-goto-target='[data-ch-row="${escapeHtml(c.id)}"]' title="Open this letting channel">${escapeHtml(c.name)}</span>`));
   if (uses.loyaltyPrograms.length) {
     const [tab, target] = KIND_GOTO.loyaltyPrograms;
     parts.push(uses.loyaltyPrograms.map((r) => `<span class="inline-goto-link" data-goto-tab="${tab}" data-goto-target="${target}">${escapeHtml(r.name)}</span>`).join(' '));
@@ -67,8 +69,9 @@ ${total ? '' : `<button class="sync-btn sm inline" type="button" data-provider-r
 
 // Rewrites the displayed name on every record linked to the provider.
 function rewriteLinked(providerId, name) {
-  PROVIDER_FIELDS.forEach(([list, field]) => (data[list] || []).forEach((r) => {
-    if (r.providerId === providerId) r[field] = name;
+  PROVIDER_FIELDS.forEach(([list, field]) => providerList(data, list).forEach((r) => {
+    // A direct channel keeps its own name ("Direct site: room first"); only its provider is "Direct".
+    if (r.providerId === providerId && !(list === 'lettingChannels' && isDirectChannel(r))) r[field] = name;
   }));
 }
 
@@ -77,6 +80,8 @@ function rerenderUsers() {
   import('./subscriptions.js').then((m) => m.renderSubscriptions && m.renderSubscriptions()).catch(() => {});
   import('./loyaltybalances.js').then((m) => m.renderLoyaltyBalances && m.renderLoyaltyBalances()).catch(() => {});
   import('./financeaccounts.js').then((m) => m.renderFinanceAccounts && m.renderFinanceAccounts()).catch(() => {});
+  import('./bookingsettings.js').then((m) => m.renderBookingEvaluatorSettings && m.renderBookingEvaluatorSettings()).catch(() => {});
+  import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {});
 }
 
 function initProvidersSettings() {
@@ -108,8 +113,8 @@ function initProvidersSettings() {
       const into = (data.providers || []).find((x) => x.id === t.value);
       if (!from || !into) return;
       if (!confirm(`Merge "${from.name}" into "${into.name}"? Everything using ${from.name} will use ${into.name}.`)) { t.value = ''; return; }
-      PROVIDER_FIELDS.forEach(([list, field]) => (data[list] || []).forEach((r) => {
-        if (r.providerId === from.id) { r.providerId = into.id; r[field] = into.name; }
+      PROVIDER_FIELDS.forEach(([list, field]) => providerList(data, list).forEach((r) => {
+        if (r.providerId === from.id) { r.providerId = into.id; if (!(list === 'lettingChannels' && isDirectChannel(r))) r[field] = into.name; }
       }));
       into.aliases = [...new Set([...(into.aliases || []), from.name, ...(from.aliases || [])])].filter((a) => a !== into.name);
       if (!into.logoUrl && from.logoUrl) into.logoUrl = from.logoUrl;

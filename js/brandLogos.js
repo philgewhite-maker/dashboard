@@ -44,6 +44,12 @@ const BRAND_LOGOS = [
 { names: ['Mastercard'], logoUrl: iconUrl('hXzjxehVU5aOtGvIvcwVOgUsqQv16U0vIVJRhIz4HUtBcn1-Lu229OXmmSVdRv6Y3taFWj4CBD5lhSeovmnXdA') },
 { names: ['Quidco'], logoUrl: iconUrl('7qUaKxz8H2MfUs0ytJVXFtgfkcaxf4FCu1_dJj1dTadJ6avFF6hUcB5LMP4Myeq5NQ3ybvyGf4WBsND8mlTZDw') },
 { names: ['TopCashback'], logoUrl: iconUrl('svaX1_2RqipFdQdY5kuvXxFAN9-ijDULI6sSZpNRISqyZQ68g788kjXSeZC91WllbyycUt3FJ7qOgS-47x0zHw') },
+// Letting channels (js/channels.js), same method, gathered 2026-11-16: Booking.com is com.booking, SpareRoom is
+// "SpareRoom UK" (com.spareroom.spareroomuk); each icon read from its own detail page's Icon image element and
+// verified 200 image/webp. Ohana (the UK room/lodger platform) has NO entry: no Play Store app could be identified
+// with confidence, so its provider has no logo until one is pasted in Settings -> Providers.
+{ names: ['Booking.com'], logoUrl: iconUrl('ozdbI6WGLCrPRNmc2TqrxgOx_TBIOB7WSeLE5iPkCuBiLyB0tkBo2o3l-VRdD71aKaY-mTwzLQY8zpeo9rOLkwA') },
+{ names: ['SpareRoom'], logoUrl: iconUrl('2Ow0MPmfdzeduHWwBdNfa0Sed3jkSvJMRV3RRqytmuqyl8DAzv3vlFGhKldm0OsEWC4NEF9F8QfsdJWAnuxO') },
 { names: ['eBay'], logoUrl: iconUrl('q0_ZVJFuUH3WFZuZrP8JUMC54dwz1q_SZZufBDMqYaE8O2sLPulV1_dF3xGMQ6b102MTBZlluAF8z4AgZ-Isow') },
 ];
 
@@ -92,4 +98,10 @@ if (!best) return null;
 return { provider: best.entry.names[0], logoUrl: best.entry.logoUrl, what: best.rest };
 }
 
-export { BRAND_LOGOS, matchBrandLogo, matchBrandEntry, splitProvider, normProv };
+// The one provider every direct route (own site, word of mouth, any channel in group ownsite/personal) shares.
+// Deliberately NOT in BRAND_LOGOS: its prefix matching would turn "Direct Line" into "Direct" + "Line". A
+// self-contained inline SVG (house with a key hole) on a mid-tone tile, so it reads on light and dark.
+const DIRECT_PROVIDER_NAME = 'Direct';
+const DIRECT_LOGO_URL = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48"><rect width="48" height="48" rx="10" fill="#5b7f6e"/><path d="M24 10 8 24h5v14h22V24h5z" fill="#fff"/><circle cx="24" cy="26" r="3.2" fill="#5b7f6e"/><path d="M22.6 28h2.8l1 7h-4.8z" fill="#5b7f6e"/></svg>');
+
+export { DIRECT_PROVIDER_NAME, DIRECT_LOGO_URL, BRAND_LOGOS, matchBrandLogo, matchBrandEntry, splitProvider, normProv };

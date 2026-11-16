@@ -9,7 +9,7 @@
 // eVoucher and a Companion Voucher side by side.
 import { data } from './state.js';
 import { BRAND_LOGOS, splitProvider, normProv } from './brandLogos.js';
-import { escapeHtml } from './utils.js';
+import { escapeHtml, logoBadgeHtml } from './utils.js';
 
 const WHAT_SUGGESTIONS = ['Avios', 'eVoucher', 'Companion Voucher', 'Points', 'Miles', 'Cashback', 'Gift card'];
 
@@ -76,4 +76,12 @@ const p = providerFor(rec);
 return (p && p.logoUrl) || '';
 }
 
-export { resolveProvider, allProviderNames, allWhatValues, refreshProviderDatalists, providerFor, providerLogo };
+// A letting channel's logo badge (its provider's logo, else initials) and its label, for the stay row and editor.
+// Callers run bindLogoFallbacks() over the container afterwards, like every other logoBadgeHtml use.
+function channelBadgeHtml(ch, extra = 'sm') {
+const name = (ch && ch.name) || '?';
+const ini = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('') || '?';
+return logoBadgeHtml(providerLogo(ch), ini, extra);
+}
+
+export { channelBadgeHtml, resolveProvider, allProviderNames, allWhatValues, refreshProviderDatalists, providerFor, providerLogo };

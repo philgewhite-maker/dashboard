@@ -6,7 +6,7 @@
 // older code can push the old shape back once after another device migrated.
 // New ids are deterministic for the same reason: two devices migrating the same
 // record separately must produce the same id, or a sync merge would keep both.
-import { splitProvider, normProv, matchBrandLogo } from './brandLogos.js';
+import { splitProvider, normProv, matchBrandLogo, DIRECT_PROVIDER_NAME, DIRECT_LOGO_URL } from './brandLogos.js';
 import { matchBankLogo } from './bankLogos.js';
 
 const SCHEMA_VERSION = 1;
@@ -341,7 +341,15 @@ function ensureProvider(doc, name, logoHint) {
 }
 
 // The four collections that name a provider, and the text field each uses.
-const PROVIDER_FIELDS = [['vouchers', 'provider'], ['loyaltyPrograms', 'provider'], ['subscriptions', 'provider'], ['financeAccounts', 'bank']];
+const PROVIDER_FIELDS = [['vouchers', 'provider'], ['loyaltyPrograms', 'provider'], ['subscriptions', 'provider'], ['financeAccounts', 'bank'], ['lettingChannels', 'name']];
+
+// The list a PROVIDER_FIELDS entry names. Letting channels live in prefs, not at the top level.
+function providerList(doc, list) { return list === 'lettingChannels' ? ((doc.prefs && doc.prefs.lettingChannels) || []) : (doc[list] || []); }
+// Direct routes (own site, word of mouth: any channel not in group 'platform') all share ONE "Direct" provider,
+// whatever the channel is called; a platform channel's provider is named after it.
+const isDirectChannel = (c) => !!c && c.group !== undefined && c.group !== 'platform';
+// The provider text a record is linked by: its field, except a direct channel which always reads "Direct".
+function providerTextOf(list, r, field) { return list === 'lettingChannels' && isDirectChannel(r) ? DIRECT_PROVIDER_NAME : String(r[field] || '').trim(); }
 
 function providerMatches(p, text) {
   const key = normProv(canonicalName(text));
@@ -354,14 +362,14 @@ function providerMatches(p, text) {
 // registry's own rename and merge rewrite the text of every linked record, so
 // they never look like a mismatch. Run on every load; cheap and idempotent.
 function linkProviders(doc) {
-  const report = { created: 0, linked: { vouchers: 0, loyaltyPrograms: 0, subscriptions: 0, financeAccounts: 0 } };
+  const report = { created: 0, linked: { vouchers: 0, loyaltyPrograms: 0, subscriptions: 0, financeAccounts: 0, lettingChannels: 0 } };
   if (!Array.isArray(doc.providers)) doc.providers = [];
   const before = doc.providers.length;
-  PROVIDER_FIELDS.forEach(([list, field]) => (doc[list] || []).forEach((r) => {
-    const text = String(r[field] || '').trim();
+  PROVIDER_FIELDS.forEach(([list, field]) => providerList(doc, list).forEach((r) => {
+    const text = providerTextOf(list, r, field);
     if (!text) { if (r.providerId) r.providerId = ''; return; }
     if (r.providerId && providerMatches(doc.providers.find((x) => x.id === r.providerId), text)) return;
-    const p = ensureProvider(doc, text, r.logoUrl);
+    const p = ensureProvider(doc, text, list === 'lettingChannels' && isDirectChannel(r) ? DIRECT_LOGO_URL : r.logoUrl);
     if (!p || r.providerId === p.id) return;
     r.providerId = p.id;
     report.linked[list]++;
@@ -422,4 +430,4 @@ function migrateConnections(doc) {
   return report;
 }
 
-export { SCHEMA_VERSION, splitLedgerNote, splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, canonicalName, providerIdFor, VOUCHER_UNITS };
+export { SCHEMA_VERSION, splitLedgerNote, splitLedgerNotes, migrateStays, dedupeStays, unlinkCopiedCodes, repairMigratedBookingDates, dedupeAccruals, migrateVouchers, migrateProviders, linkProviders, providerMatches, PROVIDER_FIELDS, migrateConnections, parseVoucherValue, ensureProvider, providerList, providerTextOf, isDirectChannel, canonicalName, providerIdFor, VOUCHER_UNITS };

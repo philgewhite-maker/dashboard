@@ -4,7 +4,9 @@
 // each with your own data as it builds up.
 import { data, queueSave, DEFAULT_PREFS, blankAirbnbReservation } from '../state.js';
 import { CHANNEL_GROUPS, CHANNEL_GROUP_LABEL, BUILTIN_CHANNEL_IDS, normaliseChannels, newChannelId, longLetCandidates, planLongLet, createLongLet, adjoiningPayments, extendLongLet, ledgerRowSpan, channelName } from '../channels.js';
-import { escapeHtml, uid, todayStr, dateStrAdd } from '../utils.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, bindLogoFallbacks } from '../utils.js';
+import { channelBadgeHtml } from '../providers.js';
+import { linkProviders } from '../migrations.js';
 import { nightRateRooms } from './letting.js';
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -84,12 +86,15 @@ data.prefs.lettingChannels = normaliseChannels(data.prefs.lettingChannels);
 return data.prefs.lettingChannels;
 }
 
+const isDirect = (c) => c.group !== 'platform';
+// Re-link channels to the providers registry after a name/group change or a new row, then redraw the table.
+function relinkChannels() { linkProviders(data); const box = document.getElementById('ch-box'); if (box) { box.innerHTML = channelsHtml(); bindLogoFallbacks(box); } }
 function channelsHtml() {
 const cb = (id, field, on, title) => `<input type="checkbox" data-ch="${escapeHtml(id)}" data-ch-field="${field}"${on ? ' checked' : ''} title="${escapeHtml(title)}">`;
 return `<h4 class="be-set-h" id="letting-channels">Channels</h4>
 <div class="settings-note" style="margin:0 0 4px;">Where a stay came from. Pick one on each stay. "Counts as demand" is whether its bookings respond to your listed price (word of mouth and long lets do not). "Long let" makes a stay on that channel a long let by default. A built-in channel can be switched off but not removed.</div>
-<table class="limits-table be-channels"><thead><tr><th>Channel</th><th>Group</th><th title="Percent of a booking this channel takes. Left at 0 until you enter your own figure.">Fee %</th><th>Counts as demand</th><th>Long let</th><th>Active</th><th></th></tr></thead><tbody>${channels().map((c) => `<tr>
-<td><input type="text" class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="name" value="${escapeHtml(c.name)}" style="width:150px;"></td>
+<table class="limits-table be-channels"><thead><tr><th>Channel</th><th>Group</th><th title="Percent of a booking this channel takes. Left at 0 until you enter your own figure.">Fee %</th><th>Counts as demand</th><th>Long let</th><th>Active</th><th></th></tr></thead><tbody>${channels().map((c) => `<tr data-ch-row="${escapeHtml(c.id)}">
+<td><span style="display:inline-flex;align-items:center;gap:6px;">${channelBadgeHtml(c)}<input type="text" class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="name" value="${escapeHtml(c.name)}" style="width:150px;" title="${isDirect(c) ? 'Shares the Direct provider' : 'Provider: renaming it in Settings -> Finances -> Providers renames this too'}"></span></td>
 <td><select class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="group">${CHANNEL_GROUPS.map((g) => `<option value="${g}"${c.group === g ? ' selected' : ''}>${CHANNEL_GROUP_LABEL[g]}</option>`).join('')}</select></td>
 <td><input type="number" class="settings-input" data-ch="${escapeHtml(c.id)}" data-ch-field="feePct" value="${escapeHtml(String(c.feePct))}" min="0" step="0.1" style="width:60px;"></td>
 <td style="text-align:center;">${cb(c.id, 'countsAsDemand', c.countsAsDemand, 'Its bookings count as market demand')}</td>
@@ -135,6 +140,7 @@ ${body}
 ${llMsg ? `<div class="sync-status">${llMsg}</div>` : ''}
 ${made.length ? `<div class="settings-note" style="margin:8px 0 2px;">Long lets already made</div>${made.map((r) => `<div class="be-set-row"><span class="stay-link" data-open-stay="${escapeHtml(r.id)}" title="Open this stay">${escapeHtml(r.guestName || 'Long let')} &middot; ${escapeHtml(r.checkin)} &rarr; ${escapeHtml(r.checkout)} &middot; ${r.paymentIds.length} payments &middot; ${escapeHtml(channelName(channels(), r.channel))}</span> ${(() => { const adj = adjoiningPayments(data, r); return adj.length ? `<button class="sync-btn sm inline" type="button" data-ll-extend="${escapeHtml(r.id)}" title="Same guest, starting the day this let ends (or ending the day it starts): add to this let. The income entries are untouched.">Add ${adj.length} adjoining payment${adj.length === 1 ? '' : 's'}</button> ` : ''; })()}<button class="sync-btn sm inline" type="button" data-ll-split="${escapeHtml(r.id)}" title="Delete this stay and show its payments as separate stays again. The income entries are untouched.">Split back</button></div>`).join('')}` : ''}`;
 }
+function renderChannelLogos() { bindLogoFallbacks(document.getElementById('ch-box')); }
 function renderLongLet() { const el = document.getElementById('ll-merge-box'); if (el) el.innerHTML = longLetHtml(); import('./airbnb.js').then((m) => m.bindStayChips()).catch(() => {}); }
 
 // ---- Long-let offer check ------------------------------------------------------------------------------------------
@@ -313,6 +319,7 @@ ${row('Top-rated guests', `${numBox('topRatedGuestSharePct', s.topRatedGuestShar
 <button class="sync-btn sm inline" type="button" id="be-reset" style="margin-top:8px;">Reset to starting assumptions</button>`;
 renderEstimatedRates();
 renderOwnListings();
+renderChannelLogos();
 }
 
 function setPath(obj, path, value) {
@@ -340,7 +347,7 @@ if (f === 'name') { if (!chIn.value.trim()) { chIn.value = c.name; return; } c.n
 else if (f === 'group') c.group = CHANNEL_GROUPS.includes(chIn.value) ? chIn.value : c.group;
 else if (f === 'feePct') { const v = Number(chIn.value); if (!(v >= 0)) { chIn.value = c.feePct; return; } c.feePct = v; }
 else c[f] = chIn.checked;
-queueSave(); renderLongLet(); return;
+queueSave(); if (f === 'name' || f === 'group') relinkChannels(); renderLongLet(); import('./airbnb.js').then((m) => m.renderAirbnb && m.renderAirbnb()).catch(() => {}); return;
 }
 const llcIn = e.target.closest('[data-llc]');
 if (llcIn) { const f = llcIn.dataset.llc; llc[f] = llcIn.type === 'checkbox' ? llcIn.checked : llcIn.value; return; }
@@ -386,8 +393,8 @@ queueSave();
 el.addEventListener('click', (e) => {
 if (e.target.closest('#ch-add')) {
 const list = channels();
-list.push({ id: newChannelId(list, 'New channel'), name: 'New channel', group: 'platform', feePct: 0, countsAsDemand: false, longLetDefault: false, active: true });
-queueSave(); document.getElementById('ch-box').innerHTML = channelsHtml(); return;
+list.push({ id: newChannelId(list, 'New channel'), name: 'New channel', group: 'platform', feePct: 0, countsAsDemand: false, longLetDefault: false, active: true, providerId: '' });
+queueSave(); relinkChannels(); return;
 }
 const chDel = e.target.closest('[data-ch-del]');
 if (chDel) {
@@ -396,7 +403,7 @@ const used = (data.airbnbReservations || []).filter((r) => r.channel === id).len
 if (BUILTIN_CHANNEL_IDS.includes(id)) return;
 if (used) { document.getElementById('ch-status').textContent = `${used} stay${used === 1 ? ' uses' : 's use'} this channel, so it can only be switched off, not removed.`; return; }
 data.prefs.lettingChannels = channels().filter((c) => c.id !== id);
-queueSave(); document.getElementById('ch-box').innerHTML = channelsHtml(); return;
+queueSave(); relinkChannels(); return;
 }
 if (e.target.closest('#llc-run')) { runLongLetCheck(); return; }
 if (e.target.closest('#be-own-auto')) { settings().ownListingIds = null; queueSave(); renderOwnListings(); return; }

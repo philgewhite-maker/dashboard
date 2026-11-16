@@ -3699,6 +3699,8 @@ data.prefs = { ...DEFAULT_PREFS, ...(data.prefs || {}) };
 // One level deeper for the booking evaluator's settings object, so a setting added later
 // reaches a device whose prefs already hold an older copy of it.
 data.prefs.lettingChannels = normaliseChannels(data.prefs.lettingChannels);
+// Channels are normalised after the providers pass above ran, so link them to the registry here (idempotent).
+linkProviders(data);
 const savedEvaluator = (data.prefs.bookingEvaluator || {});
 data.prefs.bookingEvaluator = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}) };
 // The old three-step "last-minute" setting became the short-notice array of the Airbnb discounts, once: kept when you

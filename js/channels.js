@@ -39,6 +39,7 @@ function cleanChannel(c, seed) {
     countsAsDemand: c.countsAsDemand === undefined ? !!s.countsAsDemand : !!c.countsAsDemand,
     longLetDefault: c.longLetDefault === undefined ? !!s.longLetDefault : !!c.longLetDefault,
     active: c.active === undefined ? s.active !== false : !!c.active,
+    providerId: String(c.providerId || ''),
   };
 }
 
@@ -52,7 +53,7 @@ function normaliseChannels(list) {
     seen.add(c.id);
     out.push(cleanChannel(c, DEFAULT_LETTING_CHANNELS.find((d) => d.id === c.id)));
   });
-  DEFAULT_LETTING_CHANNELS.forEach((d) => { if (!seen.has(d.id)) out.push({ ...d }); });
+  DEFAULT_LETTING_CHANNELS.forEach((d) => { if (!seen.has(d.id)) out.push({ ...d, providerId: '' }); });
   return out;
 }
 

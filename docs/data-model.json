@@ -1,6 +1,6 @@
 {
   "_about": "Machine-readable twin of docs/data-model.html. js check: import('./docs/check-model.js') from the live site's console. Update when state.js gains/changes a key or a reference.",
-  "verifiedAgainst": "v855",
+  "verifiedAgainst": "v857",
   "groups": {
     "people": ["connections","telegramThreads","telegramUnclaimed","pendingImports","importStatus","flagRules","flagRulesSeeded","ratingCategories","reachOutStageDays","dayQueue","myCity","myName","myPhone","myEmail","myAddress"],
     "work": ["tasks","taskContexts","captureInbox","captureDrafts","agentInbox","businessIdeas","enhancementIdeas","readingList","jobs","habits","goals"],
@@ -27,7 +27,7 @@
     ["bookingRequests","listingId","airbnbListings"],["bookingRequests","reservationId","airbnbReservations"],["airbnbEarnings","listingId","airbnbListings"],["airbnbEarnings","ownerKey","connections"],
     ["vouchers","sourceLoyaltyReadingIds","loyaltyBalances"],["loyaltyBalances","programId","loyaltyPrograms"],["loyaltyLabelKinds","programId","loyaltyPrograms"],
     ["subscriptions","accountId","financeAccounts"],
-    ["vouchers","providerId","providers"],["loyaltyPrograms","providerId","providers"],["subscriptions","providerId","providers"],["financeAccounts","providerId","providers"],
+    ["vouchers","providerId","providers"],["loyaltyPrograms","providerId","providers"],["subscriptions","providerId","providers"],["financeAccounts","providerId","providers"],["prefs.lettingChannels","providerId","providers"],
     ["financeAccounts","cassFromAccountId","financeAccounts"],["financeAccounts","repaymentFromAccountId","financeAccounts"],["financeAccounts","fundingFromAccountId","financeAccounts"],
     ["switchOffers","suggestedFromAccountId","financeAccounts"],["switchOffers","taskId","tasks"],
     ["businessIdeas","taskId","tasks"],

@@ -12,9 +12,10 @@ export async function checkModel() {
   const gone = [...documented].filter((k) => !(k in data));
   const dangling = [];
   model.fks.forEach(([src, field, tgt]) => {
-    const targets = new Set((data[tgt] || []).map((x) => x.id));
+    const at = (p) => p.split('.').reduce((o, k) => (o == null ? o : o[k]), data);
+    const targets = new Set((at(tgt) || []).map((x) => x.id));
     let refs = 0; let bad = 0;
-    (data[src] || []).forEach((r) => {
+    (at(src) || []).forEach((r) => {
       [].concat(r[field]).forEach((v) => {
         if (v === undefined || v === null || v === '') return;
         refs++;
