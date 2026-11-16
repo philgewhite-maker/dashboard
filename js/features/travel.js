@@ -8,7 +8,7 @@
 // export has to work fully offline.
 import { safeHref } from '../utils.js';
 import { data, queueSave, blankTrip, blankTripLeg, LEG_KINDS, LEG_FIELD_DEFS, LEG_SOFT_FIELDS, LEG_FIELD_LABELS, LEG_STATUSES, LEG_STATUS_LABELS, LEG_DATE_FIELDS, STAY_TYPE_SUGGESTIONS } from '../state.js';
-import { escapeHtml, uid, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash, isCardCollapsed, cardToggleHtml } from '../utils.js';
+import { escapeHtml, uid, todayStr, dateStrAdd, daysAgoStr, hydratePhotoBackgrounds, parseLooseDateTime, scrollAndFlash, isCardCollapsed, cardToggleHtml } from '../utils.js';
 import { deleteAttachment, formatBytes, openAttachment } from '../files.js';
 
 function tripById(id) { return data.trips.find((t) => t.id === id); }
@@ -594,6 +594,7 @@ ${cardToggleHtml(trip.id)}
 <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
 <input type="date" data-trip-start="${trip.id}" value="${escapeHtml(trip.startDate)}">
 <input type="date" data-trip-end="${trip.id}" value="${escapeHtml(trip.endDate)}" min="${escapeHtml(trip.startDate)}">
+${trip.startDate && (trip.endDate || trip.startDate) >= todayStr() ? `<span class="inline-goto-link" data-goto-tab="planner" data-goto-target="[data-planner-trip='${trip.id}']">Show in Planner</span>` : ''}
 </div>
 <div data-leave-mount="${trip.id}"></div>
 <div style="display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:8px;">

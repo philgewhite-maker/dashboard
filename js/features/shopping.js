@@ -19,7 +19,7 @@
 // a link to buy it from the right place," not a manual step. The result is
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
-import { safeHref } from '../utils.js';
+import { safeHref, scrollAndFlash } from '../utils.js';
 import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds, resizeImageToBlob, openLightbox, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
@@ -536,7 +536,7 @@ bindBackdropClose(dialog, close);
 dialog.querySelector('[data-owned-cancel]').addEventListener('click', close);
 dialog.querySelector('[data-owned-save]').addEventListener('click', () => {
 const val = (n) => dialog.querySelector(`[data-owned-new="${n}"]`).value.trim();
-data.inventory.push(blankInventoryItem({
+const newOwned = blankInventoryItem({
 brand: val('brand'), style: val('style'), piece: val('piece'),
 size: val('size'), colour: val('colour'),
 // Held by her only if the "Given to her" box is ticked. Bought but
@@ -549,9 +549,12 @@ acquiredAt: todayStr(), fromTaskId: t.id,
 // real product page attached still lost that trail the moment it
 // turned into an owned item.
 link: t.link || '',
-}));
+});
+data.inventory.push(newOwned);
 queueSave();
 close();
+renderInventory();
+requestAnimationFrame(() => scrollAndFlash(`[data-inv-item="${newOwned.id}"]`));
 });
 }
 
@@ -1380,7 +1383,7 @@ const fitsHtml = fits.length
 const linkHtml = o.link
 ? `<a class="inv-link" href="${escapeHtml(safeHref(affiliateLink(o.link)))}" target="_blank" rel="noopener noreferrer" title="Open the product page this was bought from">&#128279;</a>`
 : '';
-return `<div class="shop-row inv-row">
+return `<div class="shop-row inv-row" data-inv-item="${escapeHtml(o.id)}">
 ${invPhotoHtml(o)}
 ${field(o, 'brand', 'Brand', '110px')}
 ${field(o, 'style', 'Range', '100px')}

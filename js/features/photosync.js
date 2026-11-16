@@ -160,7 +160,15 @@ function initPhotoSync() {
 const btn = document.getElementById('photosync-refresh');
 if (!btn) return;
 btn.addEventListener('click', render);
-render();
+// The scan reads every referenced photo out of IndexedDB, so it runs on demand
+// only: the first time the enclosing Settings accordion opens, or Re-check.
+const body = document.getElementById('photosync-body');
+const host = body && body.closest('details');
+if (!host) return;
+let scanned = false;
+const first = () => { if (scanned || !host.open) return; scanned = true; render(); };
+host.addEventListener('toggle', first);
+first();
 }
 
 export { initPhotoSync, scanPhotos, migrateAll, photoRefs };

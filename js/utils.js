@@ -664,7 +664,7 @@ function setPhotoFallback(fn) { photoFallback = fn; }
 // square looks identical to "no photo was ever added", which is the wrong
 // thing to conclude.
 async function hydratePhotoBackgrounds(root) {
-const nodes = [...root.querySelectorAll('[data-photo-bg]')].filter((el) => !el.classList.contains('photo-bg-done'));
+const nodes = [...root.querySelectorAll('[data-photo-bg]')].filter((el) => !el.classList.contains('photo-bg-done') && !el.closest('details.match-details:not([open])'));
 await Promise.all(nodes.map(async (el) => {
 const id = el.dataset.photoBg;
 let url = await photoUrl(id);

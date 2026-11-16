@@ -497,7 +497,7 @@ return `<div class="photo-gallery">${thumbs}${videoThumbs}<label class="gallery-
 // (local cache first, then the server), same resolve order
 // hydratePhotoBackgrounds uses for photos.
 async function hydrateConnectionVideos(root) {
-const vids = [...root.querySelectorAll('video[data-conn-video]')].filter((el) => !el.dataset.connVideoDone);
+const vids = [...root.querySelectorAll('video[data-conn-video]')].filter((el) => !el.dataset.connVideoDone && !el.closest('details.match-details:not([open])'));
 await Promise.all(vids.map(async (el) => {
 const id = el.dataset.connVideo;
 let url = null;
@@ -516,9 +516,11 @@ if (url) { el.src = url; el.dataset.connVideoDone = '1'; }
 // hydratePhotoBackgrounds, which this runs alongside).
 async function flagLowResThumbnails(root) {
 hydrateConnectionVideos(root);
-const thumbs = [...root.querySelectorAll('[data-gallery-thumb]')];
+// Collapsed cards skip this: the expand handler re-renders and re-runs it for the opened card.
+const thumbs = [...root.querySelectorAll('[data-gallery-thumb]')].filter((el) => !el.dataset.lowresChecked && !el.closest('details.match-details:not([open])'));
 await Promise.all(thumbs.map(async (el) => {
 try {
+el.dataset.lowresChecked = '1';
 const url = await photoUrl(el.dataset.galleryThumb);
 if (!url) return;
 const img = await loadImage(url);
