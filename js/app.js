@@ -287,6 +287,8 @@ await Promise.all([initSensitiveFields(), initOverviewPrefs(), initHideArchivedF
 renderAll();
 
 initTabs();
+// Reveal the board (see the boot gate in css/style.css) now that the first paint's content is in.
+document.documentElement.dataset.booted = '';
 initGoogleAccount();
 initMail();
 initHabitForm();

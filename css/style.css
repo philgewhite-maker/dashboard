@@ -4834,3 +4834,13 @@ background:var(--slate-bg);color:var(--slate);
 
 /* ---- Inventory 'Fits' filter ---- */
 .inv-set-near{opacity:.75;}
+
+/* Panels with nothing to show (questions, agent inbox) stay hidden through switchTab()'s inline display:block, so they never flash open on tab return. */
+[data-tab][data-empty]{display:none !important;}
+
+/* Boot gate: .board is invisible (still laid out) until app.js's first renderAll()+initTabs() has filled
+   and tab-filtered the panels, then it sets html[data-booted]. Without it the first paint shows every tab's
+   empty panels and then jumps when they fill (boot CLS ~0.57). The animation is a no-JS-needed safety net:
+   if boot never finishes, the board appears after 2.5s anyway. */
+html:not([data-booted]) .board{visibility:hidden;animation:board-boot-reveal 0s 2.5s forwards;}
+@keyframes board-boot-reveal{to{visibility:visible;}}

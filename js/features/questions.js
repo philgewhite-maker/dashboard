@@ -45,8 +45,8 @@ const visible = showAnswered ? questions : unanswered;
 
 // Nothing to ask and nothing answered yet — keep the panel out of the way
 // entirely rather than showing an empty box on every load.
-if (questions.length === 0) { panel.style.display = 'none'; return; }
-panel.style.display = '';
+if (questions.length === 0) { panel.setAttribute('data-empty', ''); return; }
+panel.removeAttribute('data-empty');
 document.getElementById('questions-count').textContent = unanswered.length
 ? `${unanswered.length} waiting` : 'all answered';
 

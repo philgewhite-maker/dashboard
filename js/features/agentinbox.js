@@ -121,7 +121,7 @@ if (!el) return; // panel not in this build's DOM
 const countEl = document.getElementById('agent-inbox-count');
 if (countEl) countEl.textContent = data.agentInbox.length ? String(data.agentInbox.length) : '';
 const panel = document.getElementById('agent-inbox-panel');
-if (panel) panel.style.display = data.agentInbox.length ? '' : 'none';
+if (panel) panel.toggleAttribute('data-empty', !data.agentInbox.length);
 el.innerHTML = data.agentInbox.length
 ? data.agentInbox.map(entryCardHtml).join('')
 : '';
