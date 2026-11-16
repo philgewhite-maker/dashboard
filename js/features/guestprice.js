@@ -1,29 +1,27 @@
-// Guest price, elasticity prior and the cleaning-fee scenario (PRICING-PLAN.md section E, phase 5).
+// Guest price, elasticity prior and the cleaning-fee scenario (PRICING-PLAN.md section E, phase 5), used by the live
+// booking model (bookingmodel.js v7).
 // RECEIVED MONEY, NO PLATFORM FEES: every income figure in the dashboard is already what was received after ALL Airbnb
-// fees, so this model works in received amounts and models no guest or host fee (both default to 0 below). A fee that is
-// a constant share of what the guest pays cancels in the price ratios the elasticity acts on. The fee parameters still
-// exist (allInGuestPrice's guestFeePct, the scenario's guestFeePct/hostFeePct) and work if given, for callers that read
-// them, but nothing here sets them non-zero. The one place listed money meets received money is the cleaning fee: the
-// cleaningFees below are the LISTED amounts guests see; bookingmodel-candidate.js (receivedCleaningFees) scales them to
-// received money by one factor per room (calibrated received cleaning income / baseline listed per-stay fee). The
-// scenario helpers here take the same kind of factor as `cleaningScale` (default 1 = fees used as listed).
+// fees, so this model works in received amounts and models no guest or host fee (both 0 below). A fee that is a
+// constant share of what the guest pays cancels in the price ratios the elasticity acts on. The fee parameters still
+// exist (allInGuestPrice's guestFeePct, the scenario's guestFeePct/hostFeePct) and work if given, but nothing sets them
+// non-zero. The one place listed money meets received money is the cleaning fee: the cleaningFees are the LISTED amounts
+// guests see; bookingmodel.js (receivedCleaningFees) scales them to received money by one factor per room (calibrated
+// received cleaning income / baseline listed per-stay fee). The scenario helpers here take the same kind of factor as
+// `cleaningScale` (default 1 = fees used as listed).
 // Pure maths: no DOM, no stored data read or written. Settings come in as the booking evaluator's settings object
-// (data.prefs.bookingEvaluator, keys `guestPrice` and `elasticityPrior`); anything missing falls back to the defaults
-// below, which live ONLY here for now. They are deliberately not in DEFAULT_PREFS.bookingEvaluator yet: bookingmodel.js
-// seeds its random draws with JSON.stringify(settings), so any new key there reshuffles every v6 evaluation and
-// projection. Add them to DEFAULT_PREFS (with a deep-fill like stagePriors) in the same change that wires this module
-// into the model and bumps MODEL_VERSION.
-//
-// NOT yet wired into the booking model's simulation (bookingmodel.js v6 still uses its single `elasticity: 1.5`,
-// applied only to discounts). Doing so changes model outputs, so per the plan it waits for a backtest of the live
-// against the candidate model (PRICING-PLAN.md, "How each phase is proved", 3 and 5).
+// (data.prefs.bookingEvaluator, keys `guestPrice` {roomTypes, cleaningFees} and `elasticityPrior`), which js/state.js
+// seeds from DEFAULT_PREFS.bookingEvaluator and the owner edits in Settings -> Booking evaluator. The constants below
+// are the FALLBACK only, for a key the settings lack (and the fee keys, which are not in the settings); selfTest checks
+// they match DEFAULT_PREFS. bookingmodel.js leaves both keys out of its random seeds, so editing them does not
+// reshuffle the draws.
 //
 // Sign convention here: elasticity is NEGATIVE (a dearer all-in price means fewer bookings). The v6 model's
-// `elasticity` setting is the same idea as a positive magnitude.
+// `elasticity` setting is the same idea as a positive magnitude; v7 still reads it, only to match v6's demand level.
 
+import { DEFAULT_PREFS } from '../state.js';
 import { stepPct, discountsOf } from './bookingmodel.js';
 
-// ---- Defaults (see the header: not yet in js/state.js DEFAULT_PREFS) ---------------------------------------
+// ---- Fallback defaults (the saved settings, seeded from js/state.js DEFAULT_PREFS, take precedence) -----------
 const DEFAULT_GUEST_PRICE = {
   // 0 because prices here are in received money (after all Airbnb fees): no fee is modelled. Keep it 0 unless the owner
   // says otherwise; the key stays so callers that read it do not break.
@@ -39,7 +37,7 @@ const DEFAULT_GUEST_PRICE = {
     '1437224781619025669': 'ensuite',
     '1651495519889440619': 'ensuite',
   },
-  // Cleaning fee guests pay, per listing: LISTED amounts, not received money (bookingmodel-candidate.js scales them to
+  // Cleaning fee guests pay, per listing: LISTED amounts, not received money (bookingmodel.js scales them to
   // received money, see the header). Source: PRICING-PLAN.md, "Airbnb settings as read Sat 14 Nov 2026".
   // shortStayMaxNights: ASSUMPTION, Airbnb's short-stay cleaning fee taken to apply to stays of 1-2 nights (not read
   // from the settings page; check the fee page's own wording).
@@ -79,7 +77,8 @@ const clampPct = (v, d) => Math.min(90, Math.max(0, num(v, d))) / 100;
 function guestPriceSettings(s = {}) {
   const g = (s && s.guestPrice) || {};
   return {
-    ...DEFAULT_GUEST_PRICE, ...g,
+    ...DEFAULT_GUEST_PRICE,
+    // The fee keys always come from the constants (0): settings saved by an earlier build may hold non-zero ones.
     roomTypes: { ...DEFAULT_GUEST_PRICE.roomTypes, ...(g.roomTypes || {}) },
     cleaningFees: { ...DEFAULT_GUEST_PRICE.cleaningFees, ...(g.cleaningFees || {}) },
   };
@@ -190,7 +189,7 @@ function demandMultiplier(allIn, reference, elasticity) {
 // Income: payout = (nightly after discounts x nights + cleaning fee) x (1 - hostFeePct), hostFeePct 0 by default (all
 // money is received money); net = payout less cleanCost per booking (your own cost of a changeover).
 // cleaningScale (default 1) multiplies every cleaning fee, to turn LISTED fees into received money the way
-// bookingmodel-candidate.js does; nightly / nightlyAdd are taken as received already.
+// bookingmodel.js does; nightly / nightlyAdd are taken as received already.
 // Not modelled: capacity (more short stays can crowd out others; the booking model's simulation handles that once this
 // is wired in), and any change in how many guests search a listing whose fee is shown differently.
 function cleaningFeeScenario({ nightly, mix, current, alternatives = [], elasticity, disc = null, guestFeePct = 0, hostFeePct = 0, cleanCost = 0, extraDiscount = 0, cleaningScale = 1 }) {
@@ -244,7 +243,7 @@ function foldedAlternative({ mix, current, disc = null, extraDiscount = 0, keep 
 
 // The scenario for one Airbnb listing, from settings: its cleaning fees, discounts, the (default 0) guest and host fees
 // and the elasticity prior by month and lead time. `cleaningScale` (default 1) turns the LISTED cleaning fees into
-// received money, as bookingmodel-candidate.js does. `nightly` (raw, before discounts) and `mix` come from the caller (the booking
+// received money, as bookingmodel.js does. `nightly` (raw, before discounts) and `mix` come from the caller (the booking
 // model's base price and stay-length draws). Alternatives default to: fee folded into the nightly price, and no
 // short-stay fee (every stay pays the per-stay fee).
 function cleaningFeeScenarioFor(s, listingId, { nightly, mix, alternatives = null, cleanCost = 0, channel = 'airbnb', cleaningScale = 1 }) {
@@ -356,6 +355,12 @@ function selfTest() {
   const fs = cleaningFeeScenarioFor(s, D, { nightly: 125, mix: [{ nights: 3, bookings: 4, month: 0, leadDays: 30 }] });
   ok('Scenario from settings: shared January elasticity', fs.options[0].byLength[0].elasticity, -2.16);
   ok('Scenario from settings: current payout (375 + 75) x 4', fs.current.payout, 1800);
+
+  // 12. The fallbacks here match the seeded settings in js/state.js DEFAULT_PREFS.bookingEvaluator.
+  const dp = (DEFAULT_PREFS.bookingEvaluator || {});
+  const gp = dp.guestPrice || {};
+  ok('Fallback room types and cleaning fees match DEFAULT_PREFS', JSON.stringify(gp.roomTypes) === JSON.stringify(DEFAULT_GUEST_PRICE.roomTypes) && JSON.stringify(gp.cleaningFees) === JSON.stringify(DEFAULT_GUEST_PRICE.cleaningFees), true);
+  ok('Fallback elasticity prior matches DEFAULT_PREFS', JSON.stringify(dp.elasticityPrior) === JSON.stringify(DEFAULT_ELASTICITY_PRIOR), true);
 
   const failed = out.filter((t) => !t.pass);
   return { ok: failed.length === 0, passed: out.length - failed.length, total: out.length, failed };

@@ -880,6 +880,7 @@ ${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class=
 <div class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</div>
 <div class="stay-more"${more ? '' : ' hidden'}>
 ${data.airbnbListings.length > 1 ? `<label>Listing <select data-airbnb-res-move="${r.id}" title="Which listing this stay belongs to. Change it when someone else rented the room out this time, e.g. you took the booking yourself, so the income and occupancy go to the right listing and owner.">${data.airbnbListings.map((l) => `<option value="${escapeHtml(l.id)}"${l.id === r.listingId ? ' selected' : ''}>${escapeHtml(l.label || l.prefix || 'Listing')}</option>`).join('')}</select></label>` : ''}
+<label>Guests <input type="number" min="1" max="30" step="1" class="tag-add-input" data-airbnb-res-field="guests" data-airbnb-res-id="${r.id}" value="${r.guests != null ? escapeHtml(String(r.guests)) : ''}" style="max-width:64px;" title="Paying guests on this stay (adults and children; infants don't count). Read from the confirmation email by Sync; correct it here if it is wrong. Airbnb's extra-guest fee is part of the payout and depends on this."></label>
 <label>Booked <input type="date" class="tag-add-input" data-airbnb-res-field="confirmedOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.confirmedOn || '')}" style="max-width:130px;" title="The day this booking was made (the confirmation email's date). Lead times in the booking model and the Nights booked chart are worked out from it. Sync fills it in when the confirmation email is in your inbox."></label>
 <label>Guest paid <input type="date" class="tag-add-input" data-airbnb-res-field="paidOn" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.paidOn || '')}" style="max-width:130px;" title="The day the guest paid. Only used for a capped owner's monthly limit, never as the booking date. A capped owner's monthly limit is counted in this month; blank falls back to the checkout month."></label>
 <label>Channel ${channelBadgeHtml(channelById(data.prefs.lettingChannels, r.channel) || { name: r.channel || '?' })} <select data-airbnb-stay-channel="${r.id}" title="Where this stay came from (channels are edited in Settings). The Letting income chart on Finances draws Airbnb solid and every other channel striped. A channel that is a long let by default also sets the let type to long.">${channelChoices(data.prefs.lettingChannels, r.channel).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === r.channel ? ' selected' : ''}>${escapeHtml(c.name)}${c.active ? '' : ' (inactive)'}</option>`).join('')}</select></label>
@@ -1083,7 +1084,11 @@ const field = input.dataset.airbnbResField;
 // it up, and a cleared box means "not known" rather than zero.
 r[field] = field === 'income'
 ? (input.value.trim() === '' ? null : Number(input.value))
+: field === 'guests'
+? (input.value.trim() === '' || !(Number(input.value) >= 1) ? null : Math.round(Number(input.value)))
 : input.value;
+// A hand-corrected count no longer matches the email's adults/children breakdown.
+if (field === 'guests' && r.guestDetail && r.guests !== (r.guestDetail.adults || 0) + (r.guestDetail.children || 0)) r.guestDetail = null;
 // Typing the new payout is the answer to a "check the payout" flag.
 if (field === 'income' && r.payoutCheck) { r.payoutCheck = false; renderAirbnb(); }
 queueSave();
@@ -1549,6 +1554,38 @@ const m = GUEST_PARTY_RE.exec(bodyText || '');
 if (!m) return 0;
 const kids = /(\d+)\s+(?:children|child)\b/i.exec(m[2] || '');
 return Math.max(0, Number(m[1]) + (kids ? Number(kids[1]) : 0) - 1);
+}
+// Guest count from a confirmation/request email body: {guests, guestDetail} or null (never guessed).
+// `guests` = adults + children (infants don't count towards Airbnb's extra-guest fee). Forms tried, most
+// specific first: the "GUESTS / 2 adults, 1 child, 1 infant" block (the wording GUEST_PARTY_RE and
+// bookingrequests.js already rely on), then "Guests: 2" / "Guests 2", then "2 guests". Anything else -> null.
+const GUEST_UNIT_RE = /(\d+)\s+(adults?|children|child|infants?|pets?)\b/gi;
+function guestCountFrom(bodyText) {
+const text = String(bodyText || '');
+const block = /\bguests?\b\s*[:\-]?\s*((?:\d+\s+(?:adults?|children|child|infants?|pets?)\b[\s,·&]*(?:and\s+)?)+)/i.exec(text);
+if (block) {
+const d = { adults: 0, children: 0, infants: 0 };
+let seen = false;
+for (const [, n, unit] of block[1].matchAll(GUEST_UNIT_RE)) {
+const k = unit.toLowerCase();
+if (k.startsWith('adult')) { d.adults += Number(n); seen = true; } else if (k === 'child' || k === 'children') { d.children += Number(n); seen = true; } else if (k.startsWith('infant')) { d.infants += Number(n); seen = true; }
+}
+const total = d.adults + d.children;
+if (seen && total > 0 && total < 40) return { guests: total, guestDetail: d };
+return null;
+}
+const plain = /\bguests?\b\s*[:\-]?\s*(\d{1,2})\b(?!\s*(?:adult|child|infant|pet|[:/£.]))/i.exec(text) || /\b(\d{1,2})\s+guests?\b/i.exec(text);
+const n = plain ? Number(plain[1]) : 0;
+return n > 0 && n < 40 ? { guests: n, guestDetail: null } : null;
+}
+// Fills guests only when none is on the stay yet, so a count typed by hand is never overwritten.
+function applyGuestCount(reservation, bodyText) {
+if (!reservation || reservation.guests != null) return false;
+const g = guestCountFrom(bodyText);
+if (!g) return false;
+reservation.guests = g.guests;
+if (g.guestDetail) reservation.guestDetail = g.guestDetail;
+return true;
 }
 const MONTH_NAMES = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
 
@@ -2098,13 +2135,46 @@ try {
 const detail = await getMessageDetail(m.id);
 const code = confirmationCodeFrom(`${detail.bodyText || ''} ${detail.bodyHtml || ''}`);
 // A code is one booking's: never put it on a second stay.
-if (code && !data.airbnbReservations.some((r) => r.id !== candidates[0].id && r.confirmationCode === code)) { candidates[0].confirmationCode = code; codes++; }
+if (code && !data.airbnbReservations.some((r) => r.id !== candidates[0].id && r.confirmationCode === code)) { candidates[0].confirmationCode = code; codes++; applyGuestCount(candidates[0], detail.bodyText || ''); }
 } catch (err) {
 console.error('Reading a booking email for its code failed:', err);
 }
 }
 if (codes) queueSave();
 return { codes };
+}
+
+// One-off (owner-requested, 16 Nov): guest counts for stays that already had a code and name, so the
+// code backfill above never re-read them. Same confirmation emails; a body is fetched only when some
+// stay missing a count arrives on that email's day and month, and the email's booking code then
+// picks the stay (by date only when exactly one candidate has no code to compare). Never overwrites.
+async function backfillGuestCounts({ max = 150 } = {}) {
+const need = () => data.airbnbReservations.filter((r) => r.guests == null && (r.source || 'ics') === 'ics' && r.checkin && r.status !== 'cancelled');
+if (!need().length || !(await canAttemptGoogleAction())) return { filled: 0, read: 0, missing: need().length };
+const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
+const sections = await fetchMailSearches([{ kind: 'query', value: GUEST_NAME_QUERY, maxDays: 0, maxEvents: max }], max);
+let filled = 0;
+let read = 0;
+for (const m of sections[0]?.messages || []) {
+const sm = GUEST_NAME_SUBJECT_RE.exec(String(m.subject || '').trim());
+const arrival = sm && parseArrivalDayMonth(sm[2]);
+if (!arrival) continue;
+const candidates = need().filter((r) => { const d = new Date(`${r.checkin}T00:00:00`); return d.getDate() === arrival.day && d.getMonth() + 1 === arrival.month; });
+if (!candidates.length) continue;
+try {
+const detail = await getMessageDetail(m.id);
+read++;
+const body = detail.bodyText || '';
+const code = confirmationCodeFrom(`${body} ${detail.bodyHtml || ''}`);
+const byCode = code ? candidates.find((r) => r.confirmationCode === code) : null;
+const target = byCode || (candidates.length === 1 && (!code || !candidates[0].confirmationCode) ? candidates[0] : null);
+if (target && applyGuestCount(target, body)) filled++;
+} catch (err) {
+console.error('Reading a booking email for its guest count failed:', err);
+}
+}
+if (filled) queueSave();
+return { filled, read, missing: need().length };
 }
 
 // Booking dates for stays that have none. Every "Reservation confirmed - Name arrives 27 Nov"
@@ -2240,6 +2310,7 @@ const extra = extraGuestsFrom(bodyText);
 // A name already naming two people ("Ben & Sam") needs no marker.
 if (extra > 0 && !/[&+]|\band\b/i.test(name)) name = `${name} +${extra}`;
 reservation.guestName = name;
+applyGuestCount(reservation, bodyText);
 // The confirmation email's own date is when this was booked (not paid -- that
 // can land much later). The earliest one wins, so a later change email
 // can't move it. Feeds the booking-pace chart on Letting income.
@@ -2667,4 +2738,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName, findCleanerMatch };
+export { guestCountFrom, backfillGuestCounts, backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName, findCleanerMatch };

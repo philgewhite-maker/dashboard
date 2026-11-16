@@ -23,6 +23,12 @@ s.discounts = { airbnb: { shortNotice: copySteps((dd.airbnb || {}).shortNotice),
 // Per-listing steps (model v6): own copies too.
 listings: Object.fromEntries(Object.entries(dd.listings && typeof dd.listings === 'object' ? dd.listings : {}).map(([id, l]) => [id, { ...l, shortNotice: copySteps(l && l.shortNotice), length: copySteps(l && l.length) }])) };
 if (s.rooms === d.rooms) s.rooms = {};
+// Model v7's guest price and elasticity prior: own copies when they are still the defaults' objects.
+if (!s.guestPrice || typeof s.guestPrice !== 'object' || s.guestPrice === d.guestPrice) s.guestPrice = structuredClone(s.guestPrice && typeof s.guestPrice === 'object' ? s.guestPrice : d.guestPrice);
+if (!s.guestPrice.roomTypes || typeof s.guestPrice.roomTypes !== 'object') s.guestPrice.roomTypes = {};
+if (!s.guestPrice.cleaningFees || typeof s.guestPrice.cleaningFees !== 'object') s.guestPrice.cleaningFees = {};
+if (!s.elasticityPrior || typeof s.elasticityPrior !== 'object' || s.elasticityPrior === d.elasticityPrior) s.elasticityPrior = structuredClone(s.elasticityPrior && typeof s.elasticityPrior === 'object' ? s.elasticityPrior : d.elasticityPrior);
+if (!Array.isArray(s.elasticityPrior.season) || s.elasticityPrior.season.length !== 12) s.elasticityPrior.season = [...d.elasticityPrior.season];
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
 data.prefs.bookingEvaluator = s;
@@ -78,6 +84,40 @@ ${discBlock('direct', s.discounts.direct, 'Direct bookings (your own site)', 'No
 <h4 class="be-set-h" id="be-listing-discounts">Discounts, per Airbnb listing</h4>
 <div class="settings-note" style="margin:0 0 4px;">Airbnb's settings differ by listing. "Top-rated guests" is the extra discount a listing gives guests with a good record, counted at the share of bookings you assume take it (see Ratings and Superhost below).</div>
 ${perListing}${orphans}`;
+}
+
+// Model v7's guest price, per Airbnb listing (keyed like the per-listing discounts: its Airbnb id, the digits before
+// ".ics" in its calendar link, else its record id; the model re-keys them to record ids), and the elasticity prior.
+const ROOM_TYPE_LABEL = { ensuite: 'En-suite', shared: 'Shared bathroom' };
+const gpKeyOf = (l, stored) => { const ks = listingKeys(l); return ks.find((k) => stored[k] != null) || ks[ks.length - 1]; };
+const gpBox = (key, field, value, { step = 1, width = 60, placeholder = '' } = {}) => `<input type="number" class="settings-input" data-gp-key="${escapeHtml(key)}" data-gp-field="${field}" value="${value == null ? '' : escapeHtml(String(value))}" step="${step}" min="0" style="width:${width}px;" placeholder="${escapeHtml(placeholder)}">`;
+// A listing named here links back to its row in Settings -> Airbnb listings.
+const listingLinkHtml = (l) => `<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="${escapeHtml(`[data-airbnb-listing-id="${l.id}"][data-airbnb-listing-field="label"]`)}" title="Open this listing in Airbnb listings">${escapeHtml(listingLabel(l))}</span>`;
+function guestPriceHtml(s) {
+const listings = data.airbnbListings || [];
+const g = s.guestPrice || {};
+const types = g.roomTypes || {}; const fees = g.cleaningFees || {};
+const rows = listings.map((l) => {
+const tk = gpKeyOf(l, types); const fk = gpKeyOf(l, fees);
+const t = types[tk]; const f = fees[fk] || {};
+const m = /(\d{6,})\.ics/i.exec(String(l.icsUrl || ''));
+return `<tr><td>${listingLinkHtml(l)}<div class="settings-note" style="margin:0;">${m ? `Airbnb ${escapeHtml(m[1])}` : 'no Airbnb calendar link'}</div></td>
+<td><select class="settings-input" data-gp-key="${escapeHtml(tk)}" data-gp-field="roomType">${t === 'ensuite' || t === 'shared' ? '' : '<option value="" selected>Not set (taken as en-suite)</option>'}${Object.entries(ROOM_TYPE_LABEL).map(([v, lab]) => `<option value="${v}"${t === v ? ' selected' : ''}>${lab}</option>`).join('')}</select></td>
+<td>£${gpBox(fk, 'perStay', f.perStay, { placeholder: 'not set' })}</td>
+<td>£${gpBox(fk, 'shortStay', f.shortStay, { placeholder: 'none' })}</td>
+<td>${gpBox(fk, 'shortStayMaxNights', f.shortStayMaxNights, { width: 50 })} nights</td></tr>`;
+}).join('');
+const e = s.elasticityPrior || {};
+const eBox = (path, v, w = 72, step = 0.1) => numBox(`elasticityPrior.${path}`, v, { step, width: w, min: path === 'ensuite' || path === 'shared' ? -10 : 0 });
+return `<h4 class="be-set-h" id="be-guest-price">Guest price (model v7)</h4>
+<div class="settings-note" style="margin:0 0 4px;">Guests respond to the all-in price: the nightly rate after discounts plus the cleaning fee spread over the nights. These are the LISTED Airbnb cleaning fees; the model scales them to the money you actually receive, using what your stays paid. The room type sets how price-sensitive guests are.</div>
+${listings.length ? `<div style="overflow-x:auto;"><table class="limits-table be-guest-price"><thead><tr><th>Listing</th><th>Room type</th><th title="The cleaning fee Airbnb shows guests on a normal stay. Not set: the room's received cleaning income is used as it is, with no short-stay fee">Cleaning fee per stay</th><th title="Airbnb's lower cleaning fee for short stays. Blank = none">Short-stay cleaning fee</th><th title="Stays of this many nights or fewer pay the short-stay fee">Short stay is up to</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<div class="settings-note" style="margin:0;">No Airbnb listings yet.</div>'}
+<div class="be-set-label" style="margin:8px 0 2px;font-size:12px;" id="be-elasticity-prior">Price sensitivity to the all-in price</div>
+<div class="settings-note" style="margin:0 0 4px;">Unsourced starting figures, to be replaced by fits from the price ledger once it has history. Negative: dearer means fewer bookings (-1.8 means 10% dearer gets about 16% fewer).</div>
+${row('By room type', `En-suite ${eBox('ensuite', e.ensuite)} Shared bathroom ${eBox('shared', e.shared)}`)}
+<div class="settings-note" style="margin:4px 0 2px;">Multiplier on it by month of stay (below 1 = less sensitive, as in peak season).</div>
+<div class="be-lead-grid">${MONTH_SHORT.map((mn, i) => `<label>${mn}${eBox(`season.${i}`, (e.season || [])[i], 60)}</label>`).join('')}</div>
+${row('Short notice', `booked within ${eBox('shortNoticeDays', e.shortNoticeDays, 50, 1)} days of arrival ×${eBox('shortNoticeMult', e.shortNoticeMult)}`)}`;
 }
 
 // ---- Channels and long lets ---------------------------------------------------------------------------------------
@@ -309,8 +349,9 @@ ${row('Hidden 1-night demand', `${numBox('oneNightDemandPct', s.oneNightDemandPc
 <h4 class="be-set-h">Discounts and price</h4>
 ${discountsHtml(s)}
 ${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}
-${row('Price sensitivity', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'How much demand falls as price rises: 1.5 means 10% dearer gets about 15% fewer bookings. A guess until your request history says otherwise.')}
+${row('Price sensitivity (v6 level)', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'The older model\'s single figure (1.5: 10% dearer, about 15% fewer bookings). The live model (v7) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
 ${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
+${guestPriceHtml(s)}
 <h4 class="be-set-h" id="be-ratings">Ratings and Superhost</h4>
 ${row('New-listing discount', `${numBox('newListingDiscountPct', s.newListingDiscountPct, { width: 56, step: 0.5 })}% off`, 'What a new listing takes off for bookings made before its third review. Undone on those past stays to get back to the raw rate.')}
 ${row('Superhost since', `<input type="date" class="settings-input" data-be="superhostFrom" value="${escapeHtml(s.superhostFrom || '')}">`, 'The date your own listings gained Superhost. Clear it if they never did.')}
@@ -367,6 +408,24 @@ return;
 }
 if (e.target.id === 'll-guest') { llGuest = e.target.value; llOff = new Set(); llMsg = ''; renderLongLet(); return; }
 if (e.target.dataset.llRow) { if (e.target.checked) llOff.delete(e.target.dataset.llRow); else llOff.add(e.target.dataset.llRow); renderLongLet(); return; }
+const gpIn = e.target.closest('[data-gp-key]');
+if (gpIn) {
+const g = settings().guestPrice;
+const key = gpIn.dataset.gpKey; const f = gpIn.dataset.gpField;
+if (f === 'roomType') {
+if (gpIn.value === 'ensuite' || gpIn.value === 'shared') g.roomTypes[key] = gpIn.value; else delete g.roomTypes[key];
+} else {
+const raw = gpIn.value.trim();
+const v = raw === '' ? null : Number(raw);
+// The per-stay fee is required once set (blank puts the box back); a blank short-stay fee means none.
+if ((v == null && f === 'perStay') || (v != null && !(Number.isFinite(v) && v >= 0))) { renderBookingEvaluatorSettings(); return; }
+const fee = { ...(g.cleaningFees[key] || {}) };
+if (f === 'shortStayMaxNights') fee[f] = v == null ? 0 : Math.round(v);
+else fee[f] = v;
+g.cleaningFees[key] = fee;
+}
+queueSave(); return;
+}
 const input = e.target.closest('[data-be]');
 if (!input) return;
 const path = input.dataset.be;

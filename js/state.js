@@ -277,6 +277,22 @@ superhostFrom: '2026-01-01', superhostListings: {},
 ownListingIds: null,
 topRatedGuestSharePct: 30,
 stagePriors: { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 },
+// Model v7's guest price (js/features/guestprice.js, which holds the same values as its fallback). Per Airbnb listing id:
+// roomTypes 'ensuite' | 'shared'; cleaningFees are the LISTED amounts {perStay, shortStay, shortStayMaxNights}, scaled to
+// received money by the model. No platform fee is modelled: all income is received money. Read 14 Nov 2026;
+// shortStayMaxNights 2 is an assumption. Left out of the model's random seeds, so editing them does not reshuffle draws.
+guestPrice: {
+roomTypes: { '1635499706498185151': 'shared', '1437224781619025669': 'ensuite', '1651495519889440619': 'ensuite' },
+cleaningFees: {
+'1635499706498185151': { perStay: 75, shortStay: 55, shortStayMaxNights: 2 },
+'1437224781619025669': { perStay: 95, shortStay: 75, shortStayMaxNights: 2 },
+'1651495519889440619': { perStay: 95, shortStay: 75, shortStayMaxNights: 2 },
+},
+},
+// Elasticity of bookings to the all-in guest price (negative): UNSOURCED priors (PRICING-PLAN.md E), by room type,
+// x a month-of-stay multiplier (Jan..Dec), x shortNoticeMult within shortNoticeDays; priorSd = how sure; fits = a
+// listing's own fit from the price ledger {listingId: {value, se, n, fittedOn}}, empty until that phase.
+elasticityPrior: { ensuite: -1.0, shared: -1.8, season: [1.2, 1.2, 1.2, 1.0, 1.0, 0.8, 0.8, 0.8, 1.0, 1.0, 1.2, 1.0], shortNoticeDays: 7, shortNoticeMult: 1.2, priorSd: 0.5, fits: {} },
 gapDiscountPct: 15, gapMaxNights: 2,
 elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
@@ -1712,6 +1728,8 @@ guestName: '', notes: '',
 // link): the one key that ties an email to this exact stay. Read from the
 // booking confirmation email; empty for manual/external bookings.
 confirmationCode: '',
+// Paying guests (adults + children, infants not counted) from the confirmation email, or typed by hand; null = unknown.
+guests: null, guestDetail: null, // guestDetail: {adults, children, infants} when the email gave a breakdown
 // Each time the feed moved this booking's dates: [{at, oldCheckin,
 // oldCheckout, newCheckin, newCheckout}]. The dates above are always the
 // current ones.
@@ -3715,6 +3733,20 @@ delete data.prefs.bookingEvaluator.lastMinute;
 const savedListings = (data.prefs.bookingEvaluator.discounts || {}).listings;
 data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).airbnb || {}) }, direct: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).direct || {}) }, listings: { ...DEFAULT_PREFS.bookingEvaluator.discounts.listings, ...(savedListings && typeof savedListings === 'object' ? savedListings : {}) } };
 data.prefs.bookingEvaluator.stagePriors = { ...DEFAULT_PREFS.bookingEvaluator.stagePriors, ...(data.prefs.bookingEvaluator.stagePriors || {}) };
+// Model v7's guest price and elasticity prior: the seeded listings and keys reach a device whose saved copy predates
+// them; a saved value wins (per listing, per key).
+{
+const be = data.prefs.bookingEvaluator; const dg = DEFAULT_PREFS.bookingEvaluator.guestPrice; const de = DEFAULT_PREFS.bookingEvaluator.elasticityPrior;
+const g = be.guestPrice && typeof be.guestPrice === 'object' ? be.guestPrice : {};
+const savedFees = g.cleaningFees && typeof g.cleaningFees === 'object' ? g.cleaningFees : {};
+const fees = {};
+new Set([...Object.keys(dg.cleaningFees), ...Object.keys(savedFees)]).forEach((id) => { fees[id] = { ...(dg.cleaningFees[id] || {}), ...(savedFees[id] || {}) }; });
+// Only room types and cleaning fees are kept: platform fee keys an earlier build may have saved are dropped (all income
+// is received money, no fee is modelled).
+be.guestPrice = { roomTypes: { ...dg.roomTypes, ...(g.roomTypes && typeof g.roomTypes === 'object' ? g.roomTypes : {}) }, cleaningFees: fees };
+const e = be.elasticityPrior && typeof be.elasticityPrior === 'object' ? be.elasticityPrior : {};
+be.elasticityPrior = { ...de, ...e, season: Array.isArray(e.season) && e.season.length === 12 ? e.season : de.season.slice(), fits: { ...(e.fits && typeof e.fits === 'object' ? e.fits : {}) } };
+}
 // The spread above is shallow -- an ALREADY-PRESENT array key (shareUrlRules/
 // captureRules have both existed since v300/v310) keeps its own contents
 // wholesale, never gaining new entries from a later DEFAULT_PREFS. Confirmed

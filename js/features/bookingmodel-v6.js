@@ -1,3 +1,7 @@
+// FROZEN COPY OF MODEL v6 -- not the live model. The live model is bookingmodel.js (v7). Kept unchanged only so
+// bookingmodel.js's selfTest can check v7 against v6 and a backtest (modelbacktest.js, `model` option) can run v6;
+// nothing else in the app imports it. Do not edit or extend it.
+//
 // The booking evaluator's engine: should this booking request be accepted?
 //
 // It compares two futures over a window of nights around the request:
@@ -22,18 +26,6 @@
 //
 // Pure: no DOM. evaluate() takes a context (buildContext() reads the live data; selfTest()
 // builds made-up ones).
-//
-// ---- CANDIDATE v7 (not live; for backtesting against v6, PRICING-PLAN.md "How each phase is proved", 5) ----------
-// A copy of bookingmodel.js v6 with one change: a simulated guest responds to the ALL-IN guest price
-// (guestprice.js: nightly after discounts + cleaning fee / nights + platform guest fee), with the elasticity prior by
-// room type, month and lead time, instead of v6's single `elasticity` applied to the discount factor only. See
-// "Guest response (v7)" below for the maths. Everything else (calibration, demand level, income) is v6's.
-// Reference price: solved per room and check-in date so that, at the baseline settings (today's discounts and cleaning
-// fees) and the room's own stay-length and lead-time curves, the expected booking multiplier equals v6's. So the
-// demand LEVEL is v6's; what differs is how demand moves with discounts, lead time, stay length (cleaning fee per night)
-// and season. Random seeds are built exactly as v6's (same version number in the seed, new settings left out), so a
-// v6/v7 difference comes from the model, not reshuffled randomness (the streams still part once a draw differs).
-// Same exports as bookingmodel.js, so modelbacktest.js can take this module as `model`.
 import { data, DEFAULT_PREFS } from '../state.js';
 import { todayStr } from '../utils.js';
 import { roomBlocks } from '../icsparse.js';
@@ -41,14 +33,8 @@ import { activeListingId } from '../roomowner.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
 import { MARKET_SEASON, MARKET_CREDIT } from './marketdata.js';
-import { allInGuestPrice, elasticityFor, demandMultiplier, guestPriceSettings, elasticitySettings, cleaningFeeFor, roomTypeOf } from './guestprice.js';
-import * as v6model from './bookingmodel.js'; // selfTest only: the v6-equivalence case runs both
 
-const MODEL_VERSION = 7;
-// v7: the random seeds are built with v6's number, and without the settings v7 adds, so v6 and v7 draw the same
-// randomness for the same inputs.
-const SEED_VERSION = 6;
-const seedSettings = (s) => { const { guestPrice, elasticityPrior, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
+const MODEL_VERSION = 6;
 // Rating stage (see listingStages) and the price calibration built on it. Every figure here is an assumption.
 const LIVE_BEFORE_FIRST_ASK = 7; // a listing went live this many days before its first request or booking
 const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after checkout (the review's own date is not stored)
@@ -77,8 +63,7 @@ const MONTH_SHRINK_K = 5;
 const LAMBDA_MAX = 4;
 // The review's demand factor multiplies the request rate. One fitted under an earlier model version meant something else
 // (it divided the empty nights of an occupancy target), so it is not carried over.
-// v7: a factor fitted under v6 is carried over, because v7's demand level is v6's by construction (see the header).
-const demandFactorOf = (cal) => (cal && (Number(cal.modelVersion) === MODEL_VERSION || Number(cal.modelVersion) === 6) ? Number(cal.demand) || 1 : 1);
+const demandFactorOf = (cal) => (cal && Number(cal.modelVersion) === MODEL_VERSION ? Number(cal.demand) || 1 : 1);
 const DAY_MS = 86400000;
 // Spread of the lead-time curve (log scale). Lead times are shaped like a wide lognormal on (days ahead + 0.5): the
 // bookings per day keep rising towards arrival, and a narrow curve badly understates the last week (your own stays and
@@ -296,22 +281,15 @@ function buildContext({ today = todayStr(), overrides = {} } = {}) {
 const s = { ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}), ...(overrides.settings || {}) };
 // Per-listing discounts are stored under the listing's Airbnb id (the digits before ".ics" in its calendar link) or its
 // own record id: here they are re-keyed to record ids, which is what every stay carries.
-const rekey = (x) => {
-if (x.discounts && x.discounts.listings && typeof x.discounts.listings === 'object') {
+if (s.discounts && s.discounts.listings && typeof s.discounts.listings === 'object') {
 const byId = {};
 (data.airbnbListings || []).forEach((l) => {
 const m = /(\d{6,})\.ics/i.exec(String(l.icsUrl || ''));
-const own = x.discounts.listings[l.id] || (m && x.discounts.listings[m[1]]);
+const own = s.discounts.listings[l.id] || (m && s.discounts.listings[m[1]]);
 if (own) byId[l.id] = own;
 });
-x.discounts = { ...x.discounts, listings: byId };
+s.discounts = { ...s.discounts, listings: byId };
 }
-return x;
-};
-rekey(s);
-// v7: the prices the demand level was calibrated at are the stored settings, without this evaluation's what-ifs, so a
-// what-if discount or cleaning fee moves demand rather than being renormalised away (see guestResponse).
-const priceRefSettings = overrides.settings ? rekey({ ...DEFAULT_PREFS.bookingEvaluator, ...(data.prefs.bookingEvaluator || {}) }) : s;
 const firstClean = Number.isFinite(Number(overrides.firstClean)) ? Number(overrides.firstClean) : (Number.isFinite(Number(data.prefs.airbnbCleaningCost)) ? Number(data.prefs.airbnbCleaningCost) : 50);
 const rooms = evaluatorRooms().map((room) => ({ key: room.key, label: room.label, listingIds: room.listingIds, ...roomSettings(room.key), ...((overrides.rooms || {})[room.key] || {}) })).filter((r) => r.include !== false);
 // Each stay's confirmation code, where its record has one: asksFor matches a stay to the request it came from by it.
@@ -365,7 +343,7 @@ const scale = { ...ov };
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
 const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
-return { today, s, priceRefSettings, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks, feedListingIds, ownListings };
+return { today, s, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks, feedListingIds, ownListings };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -825,146 +803,6 @@ const gap = Math.max(Number(s.gapDiscountPct) || 0, Number(planPct) || 0) / 100;
 return Math.pow((1 - lm) * (1 - gap), -(Number(s.elasticity) || 0));
 }
 
-// ---- Guest response (v7) ----------------------------------------------------------------------
-// A simulated request for check-in c, `los` nights, `lead` days ahead, with an extra cut `ex` (a void plan or the gap
-// discount, as a fraction) goes ahead with probability mult / B, after arriving at the rate lam x B:
-//   mult = (all-in guest price / ref) ^ elasticity              (guestprice.js demandMultiplier)
-//   all-in = listed nightly x (1 - short notice) x (1 - length) x (1 - ex) + cleaning fee / los, plus any guest fee
-//   elasticity = the prior for the room type x the month of c x the short-notice multiplier (guestprice.js elasticityFor)
-//   B = the largest mult any request for c could have (so mult / B <= 1), as v6's maxBoost
-// ref (per room, check-in date AND stay length n) solves
-//   sum q(lead class) (all-in at the BASELINE settings, n nights / ref_n) ^ elasticity
-//   = sum q(lead class) (v6 discount factor at the baseline, n nights) ^ -v6 elasticity,
-// q being the room's lead-time curve for c CUT to the leads still reachable from the day the arrivals are drawn from
-// (t0, so c - t0 days at most; uncut when there is none, as in the occupancy calibration). So at the baseline every
-// stay length, and every check-in date of a window that starts today, expects v6's bookings: the level, the stay-length
-// mix and so the nights are v6's, and only the response to a price change differs.
-// Why per stay length: the stay-length curve p is what guests booked at today's prices, cleaning fee included, so it
-// already holds today's cleaning fee per night. One ref for all lengths (the first build of v7) re-applied that fee:
-// the bookings count matched v6 but the mix tilted to long stays (a 60 cleaning fee on a 100 night: +18% nights in
-// the selfTest room at v6's own elasticity, and +5% nights on the owner's backtest). Why cut: a window starting
-// today can only draw short leads for its first dates, where v7's short-notice response differs from v6's.
-// Baseline = ctx.priceRefSettings (the stored settings; buildContext keeps
-// them apart from an evaluation's what-ifs), else ctx.s. The nightly base price itself is renormalised with c (ref
-// follows it), so a change to the base price moves demand no more than it did in v6: that waits for the hotel
-// reference prices (phase 6).
-// Everything is in RECEIVED money (after all Airbnb fees), as every income figure the model is calibrated on: nightly =
-// the base price (received, before discounts), cleaning = received cleaning (receivedCleaningFees). No guest or host fee
-// is modelled (guestFeePct 0): a fee that is a constant share of what the guest pays cancels in the price ratio, and the
-// total kept by Airbnb was about the same (~18%) before and after its switch to host-only fees.
-// Received cleaning fee, as {perStay, shortStay, shortStayMaxNights} for cleaningFeeFor. guestprice.js holds the LISTED
-// fees per listing (with the short-stay fee); they are scaled to received money by one factor, the room's calibrated
-// cleaning income (what your earnings rows show you received, or the room's setting) over the BASELINE listed per-stay
-// fee. So at the baseline a normal stay pays exactly the calibrated figure, and a what-if listed fee in
-// s.guestPrice.cleaningFees moves the received fee in proportion. A listing with no listed fee: the calibrated figure,
-// no short-stay fee. No calibrated figure (0): the listed fees as they are.
-function receivedCleaningFees(s, refS, listingId, clean) {
-const listedRef = guestPriceSettings(refS).cleaningFees[listingId];
-const listed = guestPriceSettings(s).cleaningFees[listingId];
-const c = Number(clean) || 0;
-const perRef = listedRef ? Number(listedRef.perStay) || 0 : 0;
-const k = c > 0 && perRef > 0 ? c / perRef : 1;
-if (!listed) return { perStay: c };
-const sc = (v) => (v == null || v === '' ? null : Number(v) * k);
-return { perStay: sc(listed.perStay) || 0, shortStay: sc(listed.shortStay), shortStayMaxNights: listed.shortStayMaxNights };
-}
-// Cached on params (not enumerable, so a structuredClone of a context never meets the WeakMap), by settings object.
-function responseCache(ctx, params) {
-if (!params._v7) Object.defineProperty(params, '_v7', { value: new WeakMap(), enumerable: false });
-const s = ctx.s; const refS = ctx.priceRefSettings || s;
-let a = params._v7.get(s); if (!a) { a = new WeakMap(); params._v7.set(s, a); }
-let b = a.get(refS); if (!b) { b = new Map(); a.set(refS, b); }
-return b;
-}
-// `t0`: the day number the arrivals for c are drawn from (leads of at most c - t0 days); null = every lead.
-function guestResponse(ctx, params, ri, c, t0 = null) {
-const cache = responseCache(ctx, params);
-const exMax = Math.max(Number(ctx.s.gapDiscountPct) || 0, Number(ctx.planMaxPct) || 0) / 100;
-// A reach the lead-time curve has all but finished by counts as uncut (shares the build across dates).
-let reach = t0 == null || c - t0 < 0 ? null : c - t0;
-if (reach != null && leadCdf(params, c, reach) >= 1 - 1e-6) reach = null;
-const rk = reach == null ? 'u' : reach;
-const key = `d|${ri}|${c}|${exMax}|${rk}`;
-let r = cache.get(key);
-if (r) return r;
-const base = basePrice(ctx, params, ri, c);
-const shapeKey = `s|${ri}|${monthOf(c)}|${isChristmas(c) ? 1 : 0}|${base}|${exMax}|${rk}`;
-r = cache.get(shapeKey);
-if (!r) { r = buildResponse(ctx, params, ri, c, base, exMax, reach); cache.set(shapeKey, r); }
-cache.set(key, r);
-return r;
-}
-function buildResponse(ctx, params, ri, c, base, exMax, reach = null) {
-const s = ctx.s; const refS = ctx.priceRefSettings || s;
-const listingId = (params.roomListing || [])[ri] || null;
-const disc = discountsOf(s, 'airbnb', listingId); const discRef = discountsOf(refS, 'airbnb', listingId);
-const nightly = base;
-const feesOf = (x) => receivedCleaningFees(x, refS, listingId, params.prices[ri].clean);
-const fees = feesOf(s); const feesRef = feesOf(refS);
-const gf = 0; const gfRef = 0;
-const month = monthOf(c);
-const snDays = Number(elasticitySettings(s).shortNoticeDays) || 0;
-// Lead classes: within each, every discount step and the short-notice elasticity apply alike.
-const cuts = [...new Set([...disc.shortNotice, ...discRef.shortNotice].map((st) => Number(st.days)).filter((k) => k > 0).concat(snDays > 0 ? [snDays] : []))].sort((x, y) => x - y);
-const reps = [...cuts, (cuts.length ? cuts[cuts.length - 1] : 0) + 1];
-const K = reps.length;
-const eps = reps.map((L) => elasticityFor(s, { listingId, month, leadDays: L }).value);
-// The lead-class shares, cut to the leads reachable (at most `reach` days) when there is a reach.
-const cdfAt = (k) => leadCdf(params, c, reach == null ? k : Math.min(k, reach));
-const upTo = (i) => (i < cuts.length ? cdfAt(cuts[i]) : reach == null ? 1 : cdfAt(reach));
-const q = reps.map((_, i) => upTo(i) - (i > 0 ? upTo(i - 1) : 0));
-const cdf = params.losCdf;
-const allIn = (n, i, ex, cur) => allInGuestPrice({ nightly, nights: n, cleaningFee: cleaningFeeFor(cur ? fees : feesRef, n), leadDays: reps[i], disc: cur ? disc : discRef, extraDiscount: ex, guestFeePct: cur ? gf : gfRef }).perNight;
-const eps6 = Number(refS.elasticity) || 0;
-// One ref per stay length n (see the header): every length, not only those on the curve, as a 1-night extra can come.
-const refs = new Float64Array(LOS_MAX + 1);
-let E6 = 0; let logRef = 0; let wRef = 0; let solved = eps.some((e) => e !== 0);
-for (let n = 1; n <= LOS_MAX && solved; n++) {
-let E6n = 0; const terms = [];
-for (let i = 0; i < K; i++) {
-if (!(q[i] > 0)) continue;
-E6n += q[i] * Math.pow((1 - stepPct(discRef.shortNotice, 'days', reps[i])) * (1 - stepPct(discRef.length, 'nights', n)), -eps6);
-terms.push({ w: q[i], la: Math.log(allIn(n, i, 0, false)), e: eps[i] });
-}
-if (!terms.length || !(E6n > 0)) { solved = false; break; }
-let x;
-const e0 = terms[0].e;
-if (terms.every((t) => t.e === e0)) {
-let S = 0; terms.forEach((t) => { S += t.w * Math.exp(t.e * t.la); });
-x = (Math.log(S) - Math.log(E6n)) / e0;
-} else {
-const g = (y) => { let v = 0; for (const t of terms) v += t.w * Math.exp(t.e * (t.la - y)); return v; };
-let lo = Math.min(...terms.map((t) => t.la)) - 20; let hi = Math.max(...terms.map((t) => t.la)) + 20;
-for (let it = 0; it < 80; it++) { const mid = (lo + hi) / 2; if (g(mid) < E6n) lo = mid; else hi = mid; }
-x = (lo + hi) / 2;
-}
-refs[n] = Math.exp(x);
-const p = (cdf[n] || 0) - (cdf[n - 1] || 0);
-if (p > 0) { E6 += p * E6n; logRef += p * x; wRef += p; }
-}
-// `ref`, for display and the selfTest: the stay-length-weighted (geometric) mean of the per-length refs.
-const ref = solved && wRef > 0 ? Math.exp(logRef / wRef) : null;
-const classOf = (lead) => { for (let i = 0; i < cuts.length; i++) if (lead <= cuts[i]) return i; return K - 1; };
-const tab = new Float64Array((LOS_MAX + 1) * K).fill(1);
-let B = 1;
-if (ref != null) {
-B = 0;
-for (let n = 1; n <= LOS_MAX; n++) {
-for (let i = 0; i < K; i++) {
-const m0 = demandMultiplier(allIn(n, i, 0, true), refs[n], eps[i]);
-tab[n * K + i] = m0;
-B = Math.max(B, m0, exMax > 0 ? demandMultiplier(allIn(n, i, exMax, true), refs[n], eps[i]) : 0);
-}
-}
-}
-const mult = (los, lead, ex = 0) => {
-if (ref == null) return 1;
-const n = Math.min(LOS_MAX, Math.max(1, los)); const i = classOf(lead);
-return ex > 0 ? demandMultiplier(allIn(n, i, ex, true), refs[n], eps[i]) : tab[n * K + i];
-};
-return { ref, refs, reach, B, base, nightly, eps, cuts, q, E6, mult, fees, guestFee: gf, listingId };
-}
-
 // ---- One simulated future -------------------------------------------------------------------
 
 // Void plans: what you set on Airbnb for a stretch of nights (a minimum stay and/or a price cut). `plans` = [{ri, from, to (exclusive),
@@ -995,16 +833,17 @@ return null;
 // been lowered below the one the demand was calibrated under (see ONE_NIGHT_DEMAND_PCT).
 function drawArrivals(ctx, params, { from, to, todayN, lam, rooms, extra = null, rngX = null }, rng) {
 const out = [];
+const boosts = ctx.rooms.map((_, i) => maxBoost(ctx.s, ctx.planMaxPct, roomDiscount(ctx, params, i)));
 const oneNight = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
 rooms.forEach((ri) => {
+const boost = boosts[ri];
 for (let c = Math.max(from, todayN); c < to; c++) {
-const boost = guestResponse(ctx, params, ri, c, todayN).B; // v7: per check-in date and reach (v6: maxBoost per room)
 const daysLeft = todayN == null ? null : c - todayN;
 const share = daysLeft == null ? 1 : leadCdf(params, c, daysLeft);
 const k = poisson(rng, lam(ri, c) * params.dowW[dowOf(c)] * boost * share);
 for (let j = 0; j < k; j++) {
 const L = sampleLead(params, c, daysLeft, rng);
-out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng(), t0: todayN }); // v7: t0, the reach guestResponse was cut to
+out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng() });
 }
 const planLow = ctx.plans && ctx.plans.length ? planAt(ctx.plans, ri, c) : null;
 const exFrac = (extra && extra[ri]) || (planLow && planLow.minNights != null && planLow.minNights < (Number(ctx.rooms[ri].minNights) || 1) ? oneNight : 0);
@@ -1015,7 +854,7 @@ const rx = rngX || rng;
 const k1 = poisson(rx, lam(ri, c) * params.dowW[dowOf(c)] * boost * share * exFrac);
 for (let j = 0; j < k1; j++) {
 const L = sampleLead(params, c, daysLeft, rx);
-out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx(), t0: todayN });
+out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx() });
 }
 }
 }
@@ -1029,7 +868,9 @@ return out;
 // for arrivals before `until` and are freed from then on (a cancellation). Returns the bookings.
 function playArrivals(ctx, params, arrivals, occ, base, { block = null, minNights, len }) {
 const s = ctx.s;
+const eps = Number(s.elasticity) || 0;
 const discs = ctx.rooms.map((_, i) => roomDiscount(ctx, params, i));
+const boosts = discs.map((d) => maxBoost(s, ctx.planMaxPct, d));
 // Discounts that change what a booking pays but are not played as a price cut the guest responds to (the demand
 // level already reflects them): the expected top-rated-guest discount, and the new-listing discount on bookings made
 // while the room's listing is still short of its third review.
@@ -1068,10 +909,7 @@ const orphan = (boundedL && before > 0 && before < min) || (boundedR && after > 
 if (orphan && a.lead > 7) continue;
 const inGap = boundedL && boundedR && ge - gs <= gapMax;
 const factor = (1 - stepPct(discs[a.room].shortNotice, 'days', a.lead)) * (1 - stepPct(discs[a.room].length, 'nights', a.los)) * (plan && plan.pct > 0 ? 1 - plan.pct / 100 : inGap ? 1 - gapPct : 1);
-// v7: the guest responds to the all-in price (see guestResponse); the extra cut is the same one `factor` takes.
-const gr = guestResponse(ctx, params, a.room, a.c, a.t0); // the same response the arrival was drawn under
-const ex = plan && plan.pct > 0 ? plan.pct / 100 : inGap ? gapPct : 0;
-if (a.u > gr.mult(a.los, a.lead, ex) / gr.B) continue; // the guest doesn't take it at this price
+if (a.u > Math.pow(factor, -eps) / boosts[a.room]) continue; // the guest doesn't take it at this price
 for (let i = i0; i < i1 && i < len; i++) o[i] = 1;
 booked.push({ room: a.room, ci: a.c, co: a.c + a.los, factor: factor * topRated[a.room] * (a.at < newUntil[a.room] ? 1 - newPct : 1), at: a.at, lead: a.lead });
 }
@@ -1503,7 +1341,7 @@ return t;
 };
 const total = (t) => existingIncome + t.request + t.before + t.inside + t.after + t.other - t.clean - t.hassle + t.ownUse;
 
-const seed = hashStr(`${SEED_VERSION}|${request.listingId}|${request.checkin}|${request.checkout}|${payout}|${ctx.today}|${JSON.stringify(seedSettings(s))}|${JSON.stringify(ctx.scale)}`);
+const seed = hashStr(`${MODEL_VERSION}|${request.listingId}|${request.checkin}|${request.checkout}|${payout}|${ctx.today}|${JSON.stringify(s)}|${JSON.stringify(ctx.scale)}`);
 const rng = mulberry32(seed);
 const keys = ['request', 'before', 'inside', 'after', 'other', 'clean', 'hassle', 'ownUse', ...DETAIL_KEYS];
 const zero = () => Object.fromEntries(keys.map((k) => [k, 0]));
@@ -1564,7 +1402,7 @@ for (let d = ci; d < co; d++) if (weekendNight(d)) ownUseNights.push({ date: day
 // The nights beyond the free stretch: one projected scenario (a single simulated future, drawn
 // with its own fixed seed), shown in every chart as the same thing. It is not part of the
 // comparison or its totals: it is what the rest of the calendar might look like.
-const bgRng = mulberry32(hashStr(`bg|${SEED_VERSION}|${ctx.today}|${request.listingId}|${JSON.stringify(seedSettings(s))}|${JSON.stringify(ctx.scale)}`));
+const bgRng = mulberry32(hashStr(`bg|${MODEL_VERSION}|${ctx.today}|${request.listingId}|${JSON.stringify(s)}|${JSON.stringify(ctx.scale)}`));
 const bgOcc = occ0.map((o) => o.slice());
 const bgArr = drawArrivals(ctx, params, { from: base, to: dispE + AFTER, todayN: T, lam, rooms: [ri] }, bgRng);
 const bgBooked = playArrivals(ctx, params, bgArr, bgOcc, base, { minNights, len }).filter((b) => b.room === ri && (b.co <= wS || b.ci >= wE) && b.co > dispS && b.ci < dispE);
@@ -1671,7 +1509,7 @@ return [
 { id: 'los', label: 'Average stay length', value: `${params.losMean.toFixed(1)} nights`, source: params.losN ? `your requests and stays (${Math.round(params.losN)}), each set against the stay lengths that could be booked when it arrived; a length you have rarely or never allowed follows a rule of thumb instead (a stay twice as long is half as common)` : 'a rule of thumb (a stay twice as long is half as common)' },
 { id: 'dow', label: 'Busiest check-in day', value: ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][params.dowW.indexOf(Math.max(...params.dowW))], source: params.dowN ? `your requests and stays (${Math.round(params.dowN)})` : 'assumption' },
 { id: 'cancel', label: 'Bookings cancelled', value: `${Math.round(params.cancelRate * 100)}% (${Math.round(params.lateShare * 100)}% of those late)`, source: params.nAll ? `your stays (${params.nCancel} of ${params.nAll}) blended with an assumption` : 'assumption', editable: 'cancel' },
-(() => { const gr = guestResponse(ctx, params, ri, ci); const el = elasticityFor(s, { listingId: gr.listingId, month: m, leadDays: 30 }); return { id: 'elasticity', label: 'Price sensitivity (to the all-in guest price, v7 candidate)', value: `${el.value.toFixed(2)} (${el.roomType || 'room type unknown'}, ${mon}, 30 days ahead)`, source: `${el.source}. Reference all-in price ${gr.ref == null ? 'n/a' : `£${gr.ref.toFixed(0)}`} a night (averaged over stay lengths; one per length), set so demand at today's discounts and cleaning fee matches v6 for every stay length (v6 sensitivity ${s.elasticity}); received prices, no platform fee modelled` }; })(),
+{ id: 'elasticity', label: 'Price sensitivity', value: String(s.elasticity), source: 'assumption (Settings)', editable: 'elasticity' },
 { id: 'ownUse', label: 'Empty night worth to you', value: `£${s.ownUseWeekday} Sun–Thu, £${s.ownUseWeekend} Fri–Sat × ${ctx.rooms[ri].weight || 1}`, source: 'your setting', editable: 'ownUse' },
 { id: 'clean', label: 'Cleaning', value: `£${ctx.firstClean} first room, +£${s.cleanExtra} each extra the same day`, source: 'your setting' },
 { id: 'hassle', label: 'Changeover hassle', value: `£${s.hassleWeekday} Mon–Fri, £${s.hassleWeekend} Sat–Sun`, source: 'your setting' },
@@ -1680,7 +1518,6 @@ return [
 ];
 }
 
-const scaledPrior = (s, k) => { const e = elasticitySettings(s); return { ...(s.elasticityPrior || {}), ensuite: e.ensuite * k, shared: e.shared * k }; };
 // Which assumptions would change the answer. Each re-run is smaller than the main one.
 const SENSITIVITY = [
 { label: 'Bookings arrive twice as far ahead', scale: { lead: 2 } },
@@ -1690,9 +1527,8 @@ const SENSITIVITY = [
 { label: 'Empty nights worth half as much to you', scale: { ownUse: 0.5 } },
 { label: 'Empty nights worth 50% more to you', scale: { ownUse: 1.5 } },
 { label: 'Twice as many cancellations', scale: { cancel: 2 } },
-// v7: the guest-price elasticity prior (both room types) is what is halved and doubled.
-{ label: 'Price sensitivity halved', settings: (s) => ({ elasticityPrior: scaledPrior(s, 0.5) }) },
-{ label: 'Price sensitivity doubled', settings: (s) => ({ elasticityPrior: scaledPrior(s, 2) }) },
+{ label: 'Price sensitivity halved', settings: (s) => ({ elasticity: (Number(s.elasticity) || 0) / 2 }) },
+{ label: 'Price sensitivity doubled', settings: (s) => ({ elasticity: (Number(s.elasticity) || 0) * 2 }) },
 ];
 // Async: yields between re-runs so the page stays responsive. The request rates calibrated for
 // the main answer are reused unless the change alters what they were calibrated to (demand or
@@ -1743,7 +1579,7 @@ function ownerListingOf(ctx, room) { return activeListingId(room.listingIds, ctx
 function makeProjection(ctx = buildContext(), { from, to, runs = PROJECT_RUNS, play = null, params: givenParams = null, roomKeys = null, boostPct = 0 } = {}) {
 const params = givenParams || calibrate(ctx);
 const plans = normalisePlans(ctx);
-const pctx = { ...ctx, s: play && play.s ? { ...ctx.s, ...play.s } : ctx.s, priceRefSettings: ctx.priceRefSettings || ctx.s, plans, planMaxPct: Math.max(Number(boostPct) || 0, ...plans.map((p) => p.pct)) };
+const pctx = { ...ctx, s: play && play.s ? { ...ctx.s, ...play.s } : ctx.s, plans, planMaxPct: Math.max(Number(boostPct) || 0, ...plans.map((p) => p.pct)) };
 const T = dayNum(ctx.today);
 const wS = Math.max(T, dayNum(from || ctx.today));
 const wE = dayNum(to || defaultProjectionEnd(ctx.today));
@@ -1793,8 +1629,8 @@ const minNights = Object.fromEntries(ctx.rooms.map((r, i) => [i, play && play.mi
 const oneNightFrac = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
 const extra = {};
 ctx.rooms.forEach((r, i) => { if (minNights[i] < (Number(r.minNights) || 1)) extra[i] = oneNightFrac; });
-const rng = mulberry32(hashStr(`proj|${SEED_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify({ ...seedSettings(ctx.s), voidPlans: undefined })}|${JSON.stringify(ctx.scale)}`));
-const rngX = mulberry32(hashStr(`projx|${SEED_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify({ ...seedSettings(ctx.s), voidPlans: undefined })}|${JSON.stringify(ctx.scale)}`));
+const rng = mulberry32(hashStr(`proj|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify({ ...ctx.s, voidPlans: undefined })}|${JSON.stringify(ctx.scale)}`));
+const rngX = mulberry32(hashStr(`projx|${MODEL_VERSION}|${ctx.today}|${wS}|${wE}|${JSON.stringify({ ...ctx.s, voidPlans: undefined })}|${JSON.stringify(ctx.scale)}`));
 
 const monthKeys = [];
 for (let d = wS; d < wE; d++) { const ym = dayStr(d).slice(0, 7); if (monthKeys[monthKeys.length - 1] !== ym) monthKeys.push(ym); }
@@ -1983,7 +1819,7 @@ months.push({ lead: Math.round(params.lead[m].median), n: params.lead[m].n });
 }
 return {
 calibration: { demand: ctx.scale.demand || 1, lead: ctx.scale.lead || 1, cancel: ctx.scale.cancel || 1 },
-elasticity: Number(s.elasticity) || 0, elasticityPrior: elasticitySettings(s), leadSigma: Math.round(params.leadSigma * 100) / 100, cancelRate: Math.round(params.cancelRate * 1000) / 1000, lateShare: Math.round(params.lateShare * 1000) / 1000,
+elasticity: Number(s.elasticity) || 0, leadSigma: Math.round(params.leadSigma * 100) / 100, cancelRate: Math.round(params.cancelRate * 1000) / 1000, lateShare: Math.round(params.lateShare * 1000) / 1000,
 meanStay: Math.round(params.losMean * 10) / 10, leadMedianByMonth: months.map((x) => x.lead), christmasLead: Math.round(params.lead[12].median),
 rooms: ctx.rooms.map((room, i) => ({ key: room.key, occupancy: params.occ[i].overall == null ? null : Math.round(params.occ[i].overall * 100) / 100, monthsOnOffer: params.occ[i].months, minNights: Number(room.minNights) || 1, price: Math.round(params.prices[i].base), stage: (params.roomStage || [])[i] || null })),
 stagePrice: params.stagePrice || null,
@@ -1992,15 +1828,14 @@ stagePrice: params.stagePrice || null,
 
 // ---- Self-test: cases with an answer that can be worked out by hand ----------------------------
 
-// v7: `more` adds settings and `cal` picks the calibrate (v6's, for the equivalence case).
-function testContext({ occupancy, today = '2026-11-01', minNights = 1, more = {}, cal = calibrate }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, newListingDiscountPct: 0, ...more };
+function testContext({ occupancy, today = '2026-11-01', minNights = 1 }) {
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, newListingDiscountPct: 0 };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
 stays: [], requests: [], proposals: [], listingLabels: { LA: 'Room A' }, scale: {},
 };
-cal(ctx);
+calibrate(ctx);
 ctx.params.cancelRate = 0;
 ctx.params.occ = [{ byMonth: new Array(12).fill(occupancy), byMonthN: new Array(12).fill(1), byMonthW: new Array(12).fill(1), byMonthBookings: new Array(12).fill(3), overall: occupancy, months: 12 }];
 return ctx;
@@ -2235,7 +2070,7 @@ const raw18 = rawNightlyRate({ amount: 541.485, cleaning: 0, nights: 7, leadDays
 check('Top-rated-guest discount at its expected value, undone with the listing\'s own tiers', Math.abs(tr18 - 0.045) < 1e-12 && Math.abs(raw18.raw - 100) < 1e-9, `${(tr18 * 100).toFixed(2)}% expected; raw ${raw18.raw.toFixed(4)}`);
 // And in a simulated booking: room A let through LA, a certain 7-night request 3 days ahead earns factor 0.9 x 0.9 x 0.955.
 const c18 = testContext({ occupancy: 0.5 });
-c18.s = { ...c18.s, ...s18, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0 } }; // v7: no price response is a zero prior
+c18.s = { ...c18.s, ...s18, elasticity: 0 };
 const booked18 = playArrivals(c18, c18.params, [{ room: 0, c: 10, los: 7, at: 7, lead: 3, u: 0.5, tie: 0 }], [new Uint8Array(40)], 0, { minNights: [1], len: 40 });
 check('Simulated bookings take the listing\'s own discounts', booked18.length === 1 && Math.abs(booked18[0].factor - 0.9 * 0.9 * 0.955) < 1e-12, `factor ${booked18[0] ? booked18[0].factor.toFixed(5) : 'none'}`);
 // 19. Long lets. One three-month let with no booking date and nothing else: no ask, no stay length, no price sample,
@@ -2271,78 +2106,6 @@ st17('b1', '2026-09-07', '2026-09-09', '2026-08-25', 200), st17('b2', '2026-09-1
 ];
 const p21 = calibrate(fresh({ newListingDiscountPct: 0, stagePriors: { newAdrPct: 0, superhostAdrPct: 0 } }, stays21));
 check('Stage fit: a new stage that looks dearer than rated is held at x1', p21.stageFit.new.n === 4 && Math.abs(p21.stageFit.new.observed - 1.2) < 1e-9 && p21.stagePrice.new === 1 && p21.stageFit.new.capped === true, `observed ${p21.stageFit.new.observed.toFixed(3)} on ${p21.stageFit.new.n}, used ${p21.stagePrice.new.toFixed(3)}`);
-// ---- v7 candidate ----
-// 22. With the elasticity forced to v6's (a flat -1.5 for every room type, month and lead time) and no cleaning fee in
-// the price, v7 is v6: (all-in / ref) ^ -1.5 with ref = the base price is the discount factor ^ -1.5, and the largest
-// multiplier is v6's maxBoost. Same seeds, so the same draws: projection and evaluation match v6 run on the same inputs.
-// Discounts, a gap discount and a booking in the window make the response matter.
-const flat = { elasticity: 1.5, elasticityPrior: { ensuite: -1.5, shared: -1.5, season: new Array(12).fill(1), shortNoticeMult: 1 }, gapDiscountPct: 10, gapMaxNights: 3,
-discounts: { airbnb: { shortNotice: [{ days: 3, pct: 15 }, { days: 10, pct: 5 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 20 }] }, direct: { shortNotice: [], length: [] } } };
-const eqCtx = (cal) => { const { elasticityPrior, ...flat6 } = flat; const c = testContext({ occupancy: 0.5, more: cal === calibrate ? flat : flat6, cal }); c.stays = [{ id: 's1', listingId: 'LA', checkin: '2026-11-10', checkout: '2026-11-14', status: 'stay', income: 400, guest: 'X' }]; return c; }; // v6 is given no elasticityPrior: v6 seeds include every setting
-const e7 = eqCtx(calibrate); const e6 = eqCtx(v6model.calibrate);
-const pj7 = projectVoids(e7, { from: '2026-11-01', to: '2027-01-01', runs: 200 });
-const pj6 = v6model.projectVoids(e6, { from: '2026-11-01', to: '2027-01-01', runs: 200 });
-const n7 = pj7.voids.reduce((a, v) => a + v.expectedNights, 0); const n6 = pj6.voids.reduce((a, v) => a + v.expectedNights, 0);
-const close = (x, y, tol) => Math.abs(x - y) <= tol * Math.max(1, Math.abs(y));
-check('v7 at v6\'s elasticity: the projection matches v6', close(pj7.total.expected, pj6.total.expected, 0.005) && close(n7, n6, 0.005) && n6 > 1, `v7 £${pj7.total.expected} ${n7.toFixed(2)} nights / v6 £${pj6.total.expected} ${n6.toFixed(2)} nights${pj7.total.expected === pj6.total.expected ? ' (identical)' : ''}`);
-const ev7 = evaluate(req, eqCtx(calibrate), { runs: 200 }); const ev6 = v6model.evaluate(req, eqCtx(v6model.calibrate), { runs: 200 });
-check('v7 at v6\'s elasticity: the evaluation matches v6', close(ev7.diff, ev6.diff, 0.005) && close(ev7.accept.mean, ev6.accept.mean, 0.005), `diff v7 ${ev7.diff.toFixed(2)} / v6 ${ev6.diff.toFixed(2)}${ev7.diff === ev6.diff ? ' (identical)' : ''}`);
-const gr22 = guestResponse(e7, e7.params, 0, dayNum('2026-11-20'));
-const mb22 = maxBoost(e7.s, 0, roomDiscount(e7, e7.params, 0));
-check('v7 at v6\'s elasticity: reference = base price, largest multiplier = v6 maxBoost', close(gr22.ref, gr22.base, 1e-9) && close(gr22.B, mb22, 1e-9), `ref ${gr22.ref.toFixed(4)} base ${gr22.base}; B ${gr22.B.toFixed(6)} v6 ${mb22.toFixed(6)}`);
-// 23. Level unchanged at today's settings: with the default priors (which vary by lead time and month) and a cleaning
-// fee, the expected multiplier over the room's stay-length and lead-time curves equals v6's (the reference is solved
-// for it), on a weekday in May and a Saturday in January.
-const disc23 = { airbnb: { shortNotice: [{ days: 3, pct: 15 }], length: [{ nights: 7, pct: 10 }, { nights: 28, pct: 20 }] }, direct: { shortNotice: [], length: [] } };
-const c23 = testContext({ occupancy: 0.5, more: { discounts: disc23 } });
-c23.params.prices[0].clean = 60;
-const level = (gr) => { let m = 0; const cdf = c23.params.losCdf; for (let n = 1; n <= LOS_MAX; n++) { const p = (cdf[n] || 0) - (cdf[n - 1] || 0); gr.q.forEach((qi, i) => { const lead = i < gr.cuts.length ? gr.cuts[i] : gr.cuts[gr.cuts.length - 1] + 1; m += p * qi * gr.mult(n, lead); }); } return m; };
-const lv = [dayNum('2027-05-12'), dayNum('2027-01-16')].map((c) => { const gr = guestResponse(c23, c23.params, 0, c); return { got: level(gr), want: gr.E6 }; });
-check('v7 level: expected multiplier at today\'s prices equals v6\'s', lv.every((x) => close(x.got, x.want, 1e-6)), lv.map((x) => `${x.got.toFixed(5)} vs v6 ${x.want.toFixed(5)}`).join('; '));
-// 24. A cleaning-fee rise (listed £60 to £90 for LA, received = listed here) costs short stays more demand than long
-// ones: +£15 a night on 2 nights, +£2.14 on 14. The baseline stays the stored £60 (priceRefSettings).
-const s24 = { ...c23.s, guestPrice: { cleaningFees: { LA: { perStay: 60 } } } };
-const b24 = { ...c23, s: s24, priceRefSettings: s24 };
-const w24 = { ...c23, s: { ...s24, guestPrice: { cleaningFees: { LA: { perStay: 90 } } } }, priceRefSettings: s24 };
-const d24 = dayNum('2027-05-12');
-const g0 = guestResponse(b24, c23.params, 0, d24); const g1 = guestResponse(w24, c23.params, 0, d24);
-const short24 = g1.mult(2, 30) / g0.mult(2, 30); const long24 = g1.mult(14, 30) / g0.mult(14, 30);
-check('v7 cleaning fee: a rise cuts 2-night demand more than 14-night demand', short24 < long24 && long24 < 1 && close(g1.ref, g0.ref, 1e-12), `2 nights x${short24.toFixed(4)}, 14 nights x${long24.toFixed(4)}`);
-// 25. The same 15% cut moves a shared-bathroom room more than an en-suite one (prior -1.8 against -1.0).
-const resp25 = (type) => { const s = { ...s24, guestPrice: { cleaningFees: { LA: { perStay: 60 } }, roomTypes: { LA: type } } }; const g = guestResponse({ ...c23, s, priceRefSettings: s }, c23.params, 0, d24); return g.mult(3, 30, 0.15) / g.mult(3, 30, 0); };
-const sh25 = resp25('shared'); const en25 = resp25('ensuite');
-check('v7 room type: a shared-bathroom room responds more to a price cut than an en-suite one', sh25 > en25 && en25 > 1, `15% off, 3 nights: shared x${sh25.toFixed(4)}, en-suite x${en25.toFixed(4)}`);
-// 26. Short notice: inside the short-notice window (7 days) the same cut moves demand more (x1.2 on the elasticity).
-const g26 = guestResponse(b24, c23.params, 0, d24);
-const near = g26.mult(3, 5, 0.15) / g26.mult(3, 5, 0); const far = g26.mult(3, 30, 0.15) / g26.mult(3, 30, 0);
-check('v7 lead time: a cut moves demand more at short notice', near > far && far > 1, `15% off: 5 days ahead x${near.toFixed(4)}, 30 days x${far.toFixed(4)}`);
-// 27. Seeds: the settings v7 adds are left out, so they do not reshuffle the draws.
-check('v7 seeds ignore the new settings', JSON.stringify(seedSettings(s24)) === JSON.stringify(seedSettings(c23.s)) && JSON.stringify(seedSettings(c23.s)) === JSON.stringify(c23.s), 'seedSettings');
-// 28. No level shift over a window that starts today (what the backtest projects): a shared-bathroom room (-1.8),
-// November (x1.2), a 60 cleaning fee on a 100 night, short-notice and length discounts. For each check-in date of the
-// next 90 days, the expected bookings and nights, over the stay lengths and the leads still reachable from today, equal
-// v6's (computed here from v6's own discount factor). The first build of v7 (one ref for every stay length, uncut lead
-// curve) gave +1.1% bookings and +30% nights on this window.
-const disc28 = { airbnb: { shortNotice: [{ days: 5, pct: 10 }, { days: 10, pct: 5 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 18 }] }, direct: { shortNotice: [], length: [] } };
-const c28 = testContext({ occupancy: 0.5, more: { discounts: disc28, guestPrice: { cleaningFees: { LA: { perStay: 60 } }, roomTypes: { LA: 'shared' } } } });
-c28.params.prices[0].clean = 60;
-const T28 = dayNum(c28.today); const eps28 = Number(c28.s.elasticity) || 0; const d28 = discountsOf(c28.s, 'airbnb', 'LA');
-let a6 = 0; let a7 = 0; let m6 = 0; let m7 = 0; let worst = 0;
-for (let c = T28; c < T28 + 90; c++) {
-const gr = guestResponse(c28, c28.params, 0, c, T28);
-let b6 = 0; let b7 = 0;
-for (let n = 1; n <= LOS_MAX; n++) {
-const p = (c28.params.losCdf[n] || 0) - (c28.params.losCdf[n - 1] || 0);
-gr.q.forEach((qi, i) => {
-const lead = i < gr.cuts.length ? gr.cuts[i] : gr.cuts[gr.cuts.length - 1] + 1;
-const f6 = Math.pow((1 - stepPct(d28.shortNotice, 'days', lead)) * (1 - stepPct(d28.length, 'nights', n)), -eps28);
-const f7 = gr.mult(n, lead);
-b6 += p * qi * f6; b7 += p * qi * f7; m6 += p * qi * f6 * n; m7 += p * qi * f7 * n;
-});
-}
-a6 += b6; a7 += b7; worst = Math.max(worst, Math.abs(b7 / b6 - 1));
-}
-check('v7 level over the next 90 days: bookings and nights equal v6\'s, date by date', close(a7, a6, 1e-6) && close(m7, m6, 1e-6) && worst < 1e-6, `bookings x${(a7 / a6).toFixed(6)}, nights x${(m7 / m6).toFixed(6)}, worst date ${(worst * 100).toExponential(1)}%`);
 return results;
 }
 
