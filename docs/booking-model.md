@@ -33,16 +33,19 @@ Airbnb guest or host fee is modelled.
 | Input | Learnt from | Held towards a starting assumption by |
 |---|---|---|
 | Raw nightly rate per room (weekday / weekend) | What stays paid (the earnings export first), with the cleaning fee taken out and the discounts undone | A room's own price boxes in Settings override it |
-| Cleaning income per stay | Median cleaning fee in your earnings export | The room's own "Cleaning fee guests pay" box overrides it |
-| Request rate (demand level) per room | Requests, enquiries and instant bookings, divided by how many dates were open to be asked for each week (last 104 weeks) | 3 pseudo-requests at an occupancy-based start (`LEVEL_PRIOR_K`); each month held towards London's shape by 5 (`MONTH_SHRINK_K`) |
+| Cleaning income per stay | Median cleaning fee in your earnings export. **v8**: the median of every row, and every simulated booking is credited this one figure whatever its length, while the guest price charges the short-stay fee on short stays (audit finding 3; a room where most rows are short stays gets the short-stay fee as its "per-stay" figure). **v9**: the median of the rows longer than the short-stay limit (3+ of them), and a simulated short stay is credited the short-stay fee | The room's own "Cleaning fee guests pay" box overrides it |
+| Request rate (demand level) per room | Requests and instant bookings, divided by how many dates were open to be asked for each week. **v8**: enquiries count only towards the stay-length and weekday mixes (at 0.3), not the level (audit finding 4); **v9** counts them at that weight in the level, its month adjustment, the lead-time fit and the stage demand. The weeks counted run from the room's first request, 104 at most. **v8** counts every week since then, so a gap between an old listing going quiet and a new one going live reads as weeks nobody wanted the room unless a "not offered" spell covers it (audit finding 2); **v9** leaves out the weeks of a month with no stay and no request, as the occupancy calibration already does | 3 pseudo-requests at an occupancy-based start (`LEVEL_PRIOR_K`); each month held towards London's shape by 5 (`MONTH_SHRINK_K`). **v9**: the other rooms' pooled rate instead of the occupancy start, see the v9 section |
 | Seasonal shape | Your rooms' own months, then your other rooms' months | London's seasonal shape from Inside Airbnb (`marketdata.js`) where neither has evidence |
-| Lead times | Your requests and stays | Settings → "When bookings arrive" medians; spread held at 1.3 by 10 pseudo-requests |
-| Stay lengths | Your requests and stays | A rule of thumb (a stay twice as long is half as common) by 10 pseudo-requests per length |
-| Weekday of check-in | Your stays | 3 pseudo check-ins per weekday |
-| Cancellations | Your cancelled stays | 8% (10 pseudo-stays), 30% of them late |
+| Lead times | Your requests and stays, **all rooms pooled** (one shift and one spread for the house) | Settings → "When bookings arrive" medians; spread held at 1.3 by 10 pseudo-requests |
+| Stay lengths | Your requests and stays, **all rooms pooled** (one curve) | A rule of thumb (a stay twice as long is half as common) by 10 pseudo-requests per length |
+| Weekday of check-in | Your stays, **all rooms pooled** (one mix) | 3 pseudo check-ins per weekday |
+| Cancellations | Your cancelled stays, **all rooms pooled**. The rate applies only to the request the evaluator is judging (late or early, with the late-cancel payout). **v8**: the projection of empty nights never cancels a simulated booking, so its nights run a little above what stays booked (audit finding 6); **v9** cancels simulated bookings at this rate and re-offers their nights | 8% (10 pseudo-stays), 30% of them late |
 | New-listing and Superhost price effect | Your own before/after change, once there are 4+ stays each side | The stage priors (below), 8 pseudo-stays |
 | New-listing and Superhost demand effect | Your request rates before/after, once 10+ each side | No effect (1), 20 pseudo-requests |
 | Review correction | Model review applies a demand factor from recent requests | 1 (no correction) |
+
+Only the demand level, its month adjustment, the price and the seasonal occupancy shape are per room; the rest of the
+table is learnt from all rooms' records pooled (PRICING-PLAN.md section D).
 
 ## What it assumes (every unsourced number)
 
@@ -56,14 +59,14 @@ Airbnb guest or host fee is modelled.
 | Empty night worth to you | £25 Sun–Thu, £40 Fri–Sat; a second empty room 50% | Your estimate |
 | Direct booking weight / guest with no reviews / low-rated guest | ×1, ×0.95, ×0.85 below 4.5 stars | Guesses |
 | Late cancellation | within 5 days still pays 50% | Airbnb policy as you set it |
-| Lead-time medians by month | 17–35 days; Christmas 300 | Guesses, blended with your data |
+| Lead-time medians by month | 17–35 days; Christmas 300 | Guesses, blended with your data. The Christmas figure has a cliff (audit finding 5): 20 Dec – 2 Jan sits on its own curve with a 300-day median that the fitted shift does not move, so from mid-November the model treats those dates as 95% already booked or never to be (a request for them has almost no simulated competition), while 19 Dec and 3 Jan are on the ordinary December / January curves. Check your own Christmas requests' lead times before trusting it; not changed in v9 |
 | Hidden 1-night demand | +10% | A guess: your own history cannot show it |
 | Discounts (shared and per listing) | As read from Airbnb on 14 Nov 2026 | Airbnb settings |
-| Gap discount | 15% on gaps of 2 nights or fewer | Your setting |
+| Gap discount | 20% on gaps of 1 to 3 nights (`gapDiscountPct` 20, `gapMaxNights` 3) | Your setting |
 | New-listing discount | 15% before the 3rd review | Airbnb's promotion |
 | Top-rated guests' share of bookings | 50% | Your estimate (probably 50% or more) |
 | Stage priors: nightly rate with no rating / as Superhost | −16% / +14% against a rated listing | Unsourced third-party ranges (midpoints) |
-| v6 price sensitivity | 1.5 | A guess. v7 uses it only to keep demand at today's discounts where v6 put it |
+| v6 price sensitivity | 1.5 | A guess. v7/v8 use it only to keep demand at today's discounts where v6 put it (which is the double count of audit finding 1, below); v9 does not read it in the guest response at all |
 | **Room type per listing** | Double: shared bathroom; the other two: en-suite | Airbnb settings 14 Nov 2026 and your answer |
 | **Cleaning fees per listing (listed)** | Double £75 (£55 short stay); the other two £95 (£75 short stay) | Airbnb settings 14 Nov 2026 |
 | **Short stay is up to** | 2 nights | An assumption: check Airbnb's fee page wording |
@@ -85,6 +88,8 @@ Airbnb guest or host fee is modelled.
 | `PAST_MIN_NIGHTS` | 5 | Minimum stay assumed before shorter requests started appearing |
 | `LAMBDA_MAX` | 4 | Ceiling on requests per check-in date |
 | `LEAD_SIGMA_PRIOR` | 1.3 | Spread of the lead-time curve (Airbnb-wide figure) |
+| `LEAD_SIGMA_MIN`, `LEAD_SIGMA_MAX` | 0.7, 2 | Clamps on the fitted spread; the fit can sit on them (the seeded preview data sits on the 0.7 floor) |
+| `LEAD_SHIFT_MAX` | 1.2 | Clamp on the fitted shift of the lead-time medians (log scale) |
 | `CANCEL_PRIOR` | 8%, 30% late | Starting cancellation rate |
 | `OCC_PRIOR` | 60% | Starting occupancy with no data |
 | `DEFAULT_PRICE` | £80 | Nightly price with no data at all |
@@ -104,7 +109,16 @@ gap or void-plan discount, plus the cleaning fee spread over the nights. The sen
 **What v7 keeps from v6**: the demand level and the stay-length mix at today's settings. A reference price is solved for
 each room, check-in date and stay length so that, at your stored discounts and cleaning fees, the expected bookings
 equal v6's exactly. Only the response to a *change* in price differs. The backtest on your data confirmed it: v7 sits at
-v6's level (both 1.01), with a marginally higher error. The random draws are seeded as v6's were (the new settings are
+v6's level (both 1.01), with a marginally higher error.
+
+**This is the double count of audit finding 1 (v7 and v8, fixed in v9).** Keeping v6's level means a discounted
+request is kept with a higher probability than an undiscounted one ((1 − discount)^−1.5), but the level, the stay-length
+curve and the lead-time curve were learnt from requests that had already taken those discounts, so the simulation
+applies the discounts' effect a second time: about +11% bookings for the Double (two short-notice steps, three length
+steps), about +5% for En-Suite – Phil, plus a tilt of the mix towards longer and later stays (+7% nights at the Double's
+steps). The monthly review's demand factor absorbs part of it after the fact. In v9 every request is kept alike at the
+stored settings; the level, stay-length and lead-time mix are what your requests showed; only a change from those
+settings (a what-if discount or cleaning fee, the gap discount, a void plan, or the market) moves demand. The random draws are seeded as v6's were (the new settings are
 left out of the seed), so a v6/v7 difference comes from the model, not reshuffled randomness, and editing a cleaning
 fee or the sensitivity does not reshuffle them either.
 
@@ -145,6 +159,18 @@ top-rated-guest share is now 50% (the saved setting already was).
   undervalued: a mild lean towards accepting.
 - **Discounts are taken as always having been today's.** Only today's Airbnb settings are known, so past stays are
   undone as if they had always applied.
+- **The Superhost price prior (×1.14) is unsourced and one-directional** (audit finding 7). Every sample is put on the
+  room's stage today, so with the room Superhost and the fit still at the prior, every earlier stay counts 14% above
+  what it paid; the listing's own before/after is read only once 4+ stays each side of 1 Jan 2026 fall within 180 days
+  of it, and even then it is held by 8 pseudo-samples. Small on the live rooms (recent samples carry most weight).
+- **An accepted request's own booking removes its exposure in its own week** (audit finding 8). Availability is read on
+  the Wednesday of each week while the request is counted on the day it landed, so a request accepted on a Monday has
+  its own nights held by Wednesday. Leans the level up by a few percent; not patched.
+- **The backtest's "actual"** is nights still booked today, booked after the as-of date. A "not offered" spell added
+  later blocks the projection for that window (audit finding 10); true spells are fine, one added to explain a miss
+  flatters the model.
+- **Enquiries, cleaning fee per short stay, exposure weeks, cancellations in projections**: v8 limitations listed in the
+  tables above (audit findings 2, 3, 4, 6), fixed in the v9 candidate only.
 
 ## What keeps it correct
 
@@ -162,9 +188,70 @@ top-rated-guest share is now 50% (the saved setting already was).
 
 ## v9 candidate (not live, backtest only)
 
-`js/features/bookingmodel-candidate.js` (MODEL_VERSION 9). The guest-response reference becomes the market: the nearby-hotel basket median (hotelbasket.js samples) times a per-cell ratio (month × check-in weekday × stay length). At today's prices the ratio is solved so every cell expects exactly v8's bookings (no level shift); with no usable hotel samples it falls back to v8 exactly. Once 8+ past stays have basket samples, the ratio learns your historical price-to-market position, so being dearer against hotels than usual lowers demand. `fitElasticity(ctx)` estimates each room's price sensitivity from price changes in the price ledger (before/after request counts per change, ±14 days, shrunk across rooms); not wired to settings yet.
+`js/features/bookingmodel-candidate.js` (MODEL_VERSION 9; 61 self-test cases). Loaded only by backtests and its own
+self-test; the app runs v8. What it changes from v8:
 
-Unsourced constants (top of the file): 365-day market horizon, MARKET_FIT_MIN 8, MARKET_FIT_K 8, FIT_WINDOW_DAYS 14, FIT_MIN_EVENTS 5, price changes outside ×0.5–×2 dropped, FIT_TAU_MIN 0.25.
+**The market reference.** The guest-response reference becomes the market: the nearby-hotel basket median
+(hotelbasket.js samples) times a per-cell ratio (month × check-in weekday × stay length). At today's prices the ratio is
+solved so every cell expects exactly the no-market bookings (no level shift); with no usable hotel samples for a date
+that date keeps the own-price reference. Once 8+ past stays have basket samples, the ratio learns your historical
+price-to-market position, so being dearer against hotels than usual lowers demand. So a change to the nightly rate
+itself now moves demand where there is a basket (the first known limitation above). `fitElasticity(ctx)` estimates each
+room's price sensitivity from price changes in the price ledger (before/after request counts per change, ±14 days,
+shrunk across rooms); not wired to settings yet.
+
+**Partial pooling of the demand level** (`demandPool`). v8 held each room's level towards an occupancy-based start by 3
+pseudo-requests; for a room with few requests (the Double) that simulated start decided the level. v9's prior for a
+room's log level is the OTHER rooms' pooled request rate (requests over exposure, leave-one-out, as of the context's
+date so a backtest sees no future) times a room-relative factor (its occupancy-based start against theirs, raised to
+W / (W + 6), W its months of occupancy evidence), with a spread estimated across the rooms (floor 0.5 in log, so at most
+4 pseudo-requests). The posterior keeps v8's closed form: L = (n + k) / (X + k / m) with m the house rate × factor and
+k = 1 / (spread² + 1 / house requests). Where the other rooms have fewer than 10 requests, or there is one room, it is
+v8's prior. A room with many requests is barely moved; a one-month-old room at the house's level is recovered far
+better than from its own occupancy (self-test: RMSE of log level 0.2–0.3 against 0.6–1.5).
+
+**The audit's fixes** (`js/features/bookingmodel-fixes.patch.md`, 16 Nov 2026), applied to v9 only:
+
+1. *Discount boost counted twice.* The reference for a request of n nights in lead class i is its own all-in price at
+   the stored settings, so every request is kept alike at the baseline (multiplier 1) and only a departure from the
+   settings moves demand. v8's E6 (1.05–1.12 with discounts) is gone from request-calibrated rooms: expected about −11%
+   bookings on the Double, −5% on En-Suite – Phil, and no tilt of the mix towards long and late stays. Rooms whose level
+   still comes from the occupancy start are unmoved (that start was pre-boost); their mix is no longer tilted either.
+   The market reference composes with it (ref = own all-in price × ratio × basket / nightly). A review demand factor
+   fitted under v6–v8 was fitted on the inflated level and should be re-fitted after the first review on v9.
+2. *Exposure weeks in unlisted months.* The exposure grid skips the weeks of a month with no stay night (long lets
+   included) and no ask, as the occupancy calibration already does; the stage-demand weeks skip the same. One old stay
+   two years back no longer halves a room's level by counting the dead weeks in between (self-test: 55 weeks against
+   51, level within 5%; before, 104 against 51). The pooled house rate uses the same grids, so it composes. Trade-off:
+   a listed month with genuinely no demand and no stay is dropped as evidence; "not offered" spells remain the precise
+   tool. Expected: up for a room with a gap between listings or an early lone booking (check the Double's `from`).
+3. *Cleaning income per booking.* A simulated booking is credited the received cleaning fee its guest was priced at
+   (the short-stay fee on a short stay), and the calibrated per-stay figure (the scale factor's numerator) is the median
+   of the earnings rows longer than the listing's short-stay limit when there are 3+, else of all rows. Expected: income
+   per short booking down by (per-stay − short-stay) × scale (about £16 on each room at the stored fees); on a room
+   where most rows were short stays the scale factor rises from about 0.73 to 1.
+4. *Enquiries.* The code now does what the doc promised: an enquiry counts at `enquiryWeight` (0.3) in the level, the
+   month adjustment, the lead-time fit and the stage demand (the stay-length and weekday mixes already did). The
+   minimum-stay reading still takes requests only (an enquiry is not evidence of the minimum in force). Expected: up by
+   the enquiry share × 0.3 on any room with enquiries.
+6. *Cancellations in projections.* A simulated booking is cancelled with the calibrated probability (the rate the
+   evaluator already applies to the request it judges), at a moment drawn uniformly between booking and check-in; its
+   nights are held until then and re-offered after. Chosen over changing the backtest's "actual" because the owner sees
+   the projection as nights that will stay booked and income that will be received, and the backtest's actual (nights
+   still booked today) already means that; making the actual include cancelled stays would have matched the model to a
+   figure nobody acts on. Not modelled: the late/early split of when they cancel. Expected: nights down by the
+   cancellation rate net of re-booking (a few percent at 8%; at saturating demand almost nothing).
+
+Left as documented limitations: 5 (Christmas lead), 7 (Superhost prior), 8 (ask's own week), 9 (Zara's Double dates:
+check `priceTrace(ctx).stages`), 10 (backtest counting).
+
+With no basket, v9 therefore no longer equals v8 (earlier candidate builds did): the self-test compares v9's no-basket
+run with itself under unusable samples instead. The random streams are v8's except that an arrival takes one extra draw
+(the cancellation) when the cancellation rate is above 0.
+
+Unsourced constants (top of the file): 365-day market horizon, MARKET_FIT_MIN 8, MARKET_FIT_K 8, FIT_WINDOW_DAYS 14,
+FIT_MIN_EVENTS 5, price changes outside ×0.5–×2 dropped, FIT_TAU_MIN 0.25, POOL_HOUSE_MIN_N 10, POOL_TAU_MIN 0.5,
+POOL_OCC_K 6.
 
 To backtest once hotel samples exist (needs NAS agent 1.17), on the live site console:
 
