@@ -4831,3 +4831,6 @@ background:var(--slate-bg);color:var(--slate);
 .pb-status.pb-st-applied{color:var(--ink);border-color:var(--ink);}
 .pb-status.pb-st-proposed,.pb-status.pb-st-deleted,.pb-status.pb-st-suggested{border-style:solid;color:var(--ink);}
 .pb-empty-slot,.pb-tip-empty span{color:var(--muted);font-style:italic;}
+
+/* ---- Inventory 'Fits' filter ---- */
+.inv-set-near{opacity:.75;}

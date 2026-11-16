@@ -20,7 +20,7 @@
 // persisted on the task itself (t.priceCheck), dated, with a Refresh button
 // to re-run it later — not the old in-memory, un-dated Map this used to be.
 import { safeHref, scrollAndFlash } from '../utils.js';
-import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
+import { data, queueSave, SHOPPING_CONTEXTS, unheldInventory, whoFits, inventorySets, whoFitsSet, whatSheHas, blankInventoryItem, SET_CORE_GROUPS } from '../state.js';
 import { escapeHtml, affiliateLink, daysUntil, daysSince, todayStr, MISSING_KEY_LINK_HTML, looksLikeUrl, bindBackdropClose, pickChipHtml, knownScalarValues, hydratePhotoBackgrounds, resizeImageToBlob, openLightbox, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { captureTask, revealTask } from './tasks.js';
@@ -1220,10 +1220,10 @@ ${find.condition ? `<span class="tag-chip">${escapeHtml(find.condition)}</span>`
 </div>`;
 }
 
-function setCardHtml(set) {
+function setCardHtml(set, focusId = '') {
 const name = [set.brand, set.style, set.colour].filter(Boolean).join(' · ') || 'Unnamed set';
 const pieces = set.items.map((i) => `${escapeHtml(i.piece || '?')} ${escapeHtml(i.size || '')}`).join(', ');
-const fits = whoFitsSet(set);
+const fits = focusId ? whoFitsSet(set).filter((f) => f.conn.id === focusId) : whoFitsSet(set);
 const head = set.complete
 ? `<span class="tag-chip tag-chip-green">Complete set</span>`
 : `<span class="tag-chip tag-chip-amber">Needs ${escapeHtml(set.missing.join(' + '))}</span>`;
@@ -1246,8 +1246,9 @@ const forceSearchRow = set.complete ? '' : `<div class="sync-row" style="margin:
 <span class="sync-status" data-set-completion-force-status="${escapeHtml(set.key)}"></span>
 </div>`;
 const photosHtml = set.items.map((i) => invPhotoThumbHtml(i)).join('');
-return `<div class="inv-set">
-<div class="inv-set-head"><span class="inv-set-photos">${photosHtml}</span><strong>${escapeHtml(name)}</strong> ${head}</div>
+const hasHtml = focusId && setHeldBy(set, focusId) ? ` <span class="tag-chip" title="She already holds a piece from this brand/range/colour">has some already</span>` : '';
+return `<div class="inv-set${focusId && !set.complete ? ' inv-set-near' : ''}">
+<div class="inv-set-head"><span class="inv-set-photos">${photosHtml}</span><strong>${escapeHtml(name)}</strong> ${head}${hasHtml}</div>
 <div class="settings-note" style="margin:0 0 4px;">${pieces}</div>
 ${setCompletionFindHtml(set)}
 ${forceSearchRow}
@@ -1259,15 +1260,57 @@ ${body}
 // as a real gap: sets, part sets and the flat item list below all ran
 // together with no visual boundary telling you which section you were
 // in.
-function inventorySetsHtml() {
+function inventorySetsHtml(focusId = '') {
 const sets = inventorySets().filter((s) => s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
 if (!sets.length) return '';
-const complete = sets.filter((s) => s.complete);
-const incomplete = sets.filter((s) => !s.complete);
+const fitsHer = (s) => whoFitsSet(s).some((f) => f.conn.id === focusId);
+const complete = sets.filter((s) => s.complete && (!focusId || fitsHer(s)));
+const incomplete = sets.filter((s) => !s.complete && (!focusId || fitsHer(s)));
 const section = (title, list) => list.length
-? `<div class="inv-section-head">${escapeHtml(title)} (${list.length})</div><div class="inv-sets">${list.map(setCardHtml).join('')}</div>`
+? `<div class="inv-section-head">${escapeHtml(title)} (${list.length})</div><div class="inv-sets">${list.map((s) => setCardHtml(s, focusId)).join('')}</div>`
 : '';
-return section('Complete sets', complete) + section('Part sets', incomplete);
+return section('Complete sets', complete) + section(focusId ? 'Near fits: part sets that fit her' : 'Part sets', incomplete);
+}
+
+// ---- "Fits" filter ----------------------------------------------------------
+// Matched people = every connection whoFits() returns for at least one
+// unassigned item (a recorded size on file that matches something in the
+// drawer). Same helper the rows use, no size matching of its own. The pick
+// is a per-device convenience in localStorage.
+const INV_FITS_KEY = 'inv-fits-person';
+function loadInvFitsId() { try { return localStorage.getItem(INV_FITS_KEY) || ''; } catch (e) { return ''; } }
+function saveInvFitsId(id) { try { if (id) localStorage.setItem(INV_FITS_KEY, id); else localStorage.removeItem(INV_FITS_KEY); } catch (e) { /* convenience only */ } }
+
+function invMatchedPeople() {
+const seen = new Map();
+unheldInventory().forEach((o) => whoFits(o).forEach(({ conn }) => seen.set(conn.id, conn)));
+return [...seen.values()].sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+}
+
+const invKey = (o, withPiece) => [o.brand, o.style, o.colour, withPiece ? o.piece : ''].map((x) => String(x || '').trim().toLowerCase()).join('|');
+function itemHeldBy(o, connId) { const k = invKey(o, true); return whatSheHas(connId).some((h) => invKey(h, true) === k); }
+function setHeldBy(set, connId) { const k = invKey(set, false); return whatSheHas(connId).some((h) => invKey(h, false) === k); }
+
+// A stored id nobody fits any more falls back to Everyone.
+function currentInvFitsId(people) { const id = loadInvFitsId(); return people.some((c) => c.id === id) ? id : ''; }
+
+function invFitsBarHtml(people, focusId) {
+if (!people.length) return '';
+const conn = people.find((c) => c.id === focusId);
+let summary = '';
+if (conn) {
+const coreSets = inventorySets().filter((s) => s.groups.some((g) => SET_CORE_GROUPS.includes(g)));
+const fitting = coreSets.filter((s) => whoFitsSet(s).some((f) => f.conn.id === focusId));
+const nSets = fitting.filter((s) => s.complete).length;
+const nPart = fitting.length - nSets;
+const nItems = unheldInventory().filter((o) => whoFits(o).some((f) => f.conn.id === focusId)).length;
+summary = `<span class="settings-note" style="margin:0;">${nSets} set${nSets === 1 ? '' : 's'}, ${nItems} item${nItems === 1 ? '' : 's'} fit ${connectionChipHtml(conn)}${nPart ? ` (+${nPart} part set${nPart === 1 ? '' : 's'} that could be finished)` : ''}</span>
+<button class="sync-btn sm inline" type="button" data-inv-fits-clear>Clear filter</button>`;
+}
+return `<div class="sync-row inv-fits-bar" style="margin-bottom:8px;flex-wrap:wrap;align-items:center;">
+<label style="font-size:12px;">Fits <select data-inv-fits-pick style="max-width:180px;"><option value="">Everyone</option>${people.map((c) => `<option value="${escapeHtml(c.id)}"${c.id === focusId ? ' selected' : ''}>${escapeHtml(c.name || 'Unnamed')}</option>`).join('')}</select></label>
+${summary}
+</div>`;
 }
 
 // Brand/style/piece/size/colour editable inline, exactly like a held
@@ -1374,9 +1417,9 @@ return `${apOrderChipHtml(order)}<span class="settings-note" style="margin:0;fon
 return `<select data-inv-ap-line="${escapeHtml(o.id)}" style="max-width:150px;">${apOrderLineOptionsHtml(order, '', { style: o.style, size: o.size })}</select>`;
 }
 
-function inventoryHtml() {
-const unsorted = unheldInventory();
-if (!unsorted.length) return '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
+function inventoryHtml(focusId = '') {
+const unsorted = unheldInventory().filter((o) => !focusId || whoFits(o).some((f) => f.conn.id === focusId));
+if (!unsorted.length) return focusId ? '<div class="empty">No single items fit her.</div>' : '<div class="empty">Nothing unassigned — everything recorded is with someone.</div>';
 const field = (o, name, placeholder, width, listId) => `<input type="text" autocomplete="off" placeholder="${placeholder}"${listId ? ` list="${listId}"` : ''} data-inv-field="${name}" data-inv-id="${escapeHtml(o.id)}" value="${escapeHtml(o[name] || '')}" style="max-width:${width};">`;
 // Blank orderNumber sorts first (most items have none at all), then
 // items sharing a real order number cluster together -- stable sort
@@ -1387,6 +1430,8 @@ const field = (o, name, placeholder, width, listId) => `<input type="text" autoc
 const items = [...unsorted].sort((a, b) => (a.orderNumber || '').localeCompare(b.orderNumber || ''));
 return items.map((o) => {
 const fits = whoFits(o);
+if (focusId) fits.sort((a, b) => (b.conn.id === focusId) - (a.conn.id === focusId));
+const heldTag = focusId && itemHeldBy(o, focusId) ? `<span class="tag-chip" title="She already holds this brand/range/colour/piece">she has this</span>` : '';
 const fitsHtml = fits.length
 ? fits.slice(0, 4).map(({ conn, how }) => `<span class="inv-fit" title="${escapeHtml(how)}">${connectionChipHtml(conn)}<button type="button" class="todo-add-btn" data-inv-assign="${escapeHtml(o.id)}:${escapeHtml(conn.id)}" title="Record that ${escapeHtml(conn.name || 'she')} now has this">Give</button></span>`).join('')
 : `<span class="settings-note" style="margin:0;">${o.size ? 'Nobody on file takes this size.' : 'No size recorded — add one and this can find a match.'}</span>`;
@@ -1407,7 +1452,7 @@ ${field(o, 'orderNumber', 'Order #', '90px', 'inv-ap-order-list')}
 <span class="inv-row-bottom">
 ${resaleValueHtml(o)}
 ${apOrderLinkHtml(o)}
-<span class="inv-fits">${fitsHtml}</span>
+<span class="inv-fits">${heldTag}${fitsHtml}</span>
 <span class="del-x" style="opacity:1;" data-inv-remove="${escapeHtml(o.id)}" title="Delete this item">&times;</span>
 </span>
 </div>`;
@@ -1556,6 +1601,8 @@ if (!sensitiveFieldsShown()) {
 el.innerHTML = '<div class="settings-note" style="margin:0;">Hidden on this device. Turn on sensitive fields in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#sensitive-fields-toggle">Settings</span> to show it.</div>';
 return;
 }
+const fitPeople = invMatchedPeople();
+const fitFocus = currentInvFitsId(fitPeople);
 const bounds = data.prefs.setCompletionSizeBounds || {};
 const cupOptions = ['AA', 'A', 'B', 'C', 'D', 'DD', 'E', 'F', 'FF', 'G', 'GG', 'H', 'HH', 'J', 'JJ', 'K'];
 const cupSelect = (name, value) => `<select data-set-completion-bound="${name}" style="max-width:60px;">${cupOptions.map((c) => `<option value="${c}"${c === value ? ' selected' : ''}>${c}</option>`).join('')}</select>`;
@@ -1579,10 +1626,14 @@ el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <label style="font-size:12px;">Bra band <input type="number" data-set-completion-bound="braBandMin" value="${escapeHtml(String(bounds.braBandMin ?? ''))}" style="max-width:55px;">&ndash;<input type="number" data-set-completion-bound="braBandMax" value="${escapeHtml(String(bounds.braBandMax ?? ''))}" style="max-width:55px;"></label>
 <label style="font-size:12px;">Bra cup ${cupSelect('braCupMin', bounds.braCupMin)}&ndash;${cupSelect('braCupMax', bounds.braCupMax)}</label>
 <label style="font-size:12px;">Knicker size <input type="number" data-set-completion-bound="knickersMin" value="${escapeHtml(String(bounds.knickersMin ?? ''))}" style="max-width:55px;">&ndash;<input type="number" data-set-completion-bound="knickersMax" value="${escapeHtml(String(bounds.knickersMax ?? ''))}" style="max-width:55px;"></label>
-</div>` + inventorySetsHtml() + `<div class="inv-section-head">All items</div>` + inventoryHtml();
+</div>` + invFitsBarHtml(fitPeople, fitFocus) + inventorySetsHtml(fitFocus) + `<div class="inv-section-head">${fitFocus ? 'Items that fit her' : 'All items'}</div>` + inventoryHtml(fitFocus);
 bindConnectionChips(el);
 hydratePhotoBackgrounds(el);
 bindLogoFallbacks(el);
+const fitsPick = el.querySelector('[data-inv-fits-pick]');
+if (fitsPick) fitsPick.addEventListener('change', () => { saveInvFitsId(fitsPick.value); renderInventory(); });
+const fitsClear = el.querySelector('[data-inv-fits-clear]');
+if (fitsClear) fitsClear.addEventListener('click', () => { saveInvFitsId(''); renderInventory(); });
 const addItemBtn = el.querySelector('[data-inv-add-item]');
 if (addItemBtn) addItemBtn.addEventListener('click', () => openAddInventoryDialog());
 const apReportBtn = el.querySelector('[data-ap-report]');
