@@ -24,7 +24,7 @@ import { parseIcsReservations, parseIcsBlocks, isUnconfirmedStay, isForgettableS
 const AWAITING_INCOME_DAYS = 30;
 import { fetchIcs } from '../files.js';
 import { canAttemptGoogleAction, hasCalendarWrite, isSignedIn, signIn } from '../sync/googleauth.js';
-import { listCalendars, createEvent, findEvents, getEvent } from '../googlecalendar.js';
+import { listCalendars, createEvent, findEvents, getEvent, patchEventDates } from '../googlecalendar.js';
 
 // Same fixed palette every other coloured chip in the app already uses
 // (css/style.css's --X custom properties + .dot.X), plus blue/pink added
@@ -874,7 +874,7 @@ return `<div class="cal-row stay-row" data-airbnb-row="${r.id}">
 ${isLong ? `<span class="settings-note" style="margin:0;" title="One let paid by a schedule of income entries in Letting income. The entries are unchanged; this stay only says the nights are one let.">Long let &middot; ${r.paymentIds.length} payments</span>` : `<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:86px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">`}
 ${r.platform !== 'other' ? (reservationPageUrl(r) ? `<a href="${escapeHtml(safeHref(reservationPageUrl(r)))}" target="_blank" rel="noopener noreferrer" title="Open this reservation on Airbnb">${AIRBNB_LOGO}</a>` : AIRBNB_LOGO) : `<span class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;" title="Not booked through Airbnb">${channelBadgeHtml(channelById(data.prefs.lettingChannels, r.channel) || { name: channelName(data.prefs.lettingChannels, r.channel) })}${escapeHtml(channelName(data.prefs.lettingChannels, r.channel))}</span>`}
 ${pushed}
-${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}
+${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}${assignSelectsHtml(r, isLong)}
 <button type="button" class="stay-more-btn" data-airbnb-more="${r.id}" aria-expanded="${more}" title="Listing, notes, the booking date, the day the guest paid, and the channel${r.notes ? `. Notes: ${escapeHtml(r.notes)}` : ''}">${r.notes ? '&#9998; ' : ''}<span class="stay-more-caret">&#9662;</span></button>
 </div>
 <div class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</div>
@@ -888,9 +888,106 @@ ${data.airbnbListings.length > 1 ? `<label>Listing <select data-airbnb-res-move=
 <input type="text" autocomplete="off" class="tag-add-input stay-notes" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}">
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 </div>
+${calendarDriftHtml(r)}
 ${unconfirmedHtml(r)}
 ${payoutCheckHtml(r)}
 </div>`;
+}
+
+// O2: stays that "Push all unpushed" would push -- upcoming, not found on the calendar, not already linked.
+function unpushedStays() {
+return data.airbnbReservations.filter((r) => notCancelled(r) && r.source !== 'external' && !r.googleEventId && r.checkout >= todayStr() && data.airbnbListings.some((l) => l.id === r.listingId));
+}
+function updatePushAllButton() {
+const btn = document.getElementById('airbnb-push-all-btn');
+if (!btn) return;
+const n = unpushedStays().length;
+btn.hidden = !n || !data.prefs.airbnbCalendarId;
+btn.textContent = n ? `Push all unpushed (${n})` : 'Push all unpushed';
+}
+// Explicit click only (never automatic): runs the ordinary per-stay push for each one in turn, so every
+// stay still gets the same adopt-an-exact-match-or-create logic. Stops at the first failure.
+async function pushAllUnpushed() {
+const btn = document.getElementById('airbnb-push-all-btn');
+const status = document.getElementById('airbnb-sync-status');
+const list = unpushedStays();
+if (!list.length) { if (status) status.textContent = 'Nothing to push.'; return; }
+if (btn) btn.disabled = true;
+let pushed = 0;
+try {
+for (const r of list) {
+if (status) status.textContent = `Pushing ${pushed + 1} of ${list.length}…`;
+const statusEl = document.querySelector(`[data-airbnb-push-status="${r.id}"]`) || document.createElement('div');
+await pushReservation(r, statusEl);
+const live = data.airbnbReservations.find((x) => x.id === r.id);
+if (!live || !live.googleEventId) {
+if (status) status.innerHTML = `Pushed ${pushed} of ${list.length}, then stopped: ${stayChipHtml(r)} didn't push — the reason is on its row.`;
+return;
+}
+pushed++;
+}
+if (status) status.textContent = `Pushed ${pushed} stay${pushed === 1 ? '' : 's'} to Google Calendar.`;
+} finally {
+if (btn) btn.disabled = false;
+updatePushAllButton();
+}
+}
+
+// O5: tap alternative to dragging a cleaner chip / keyring onto a stay. Two <select>s of KNOWN values
+// only (cleaners from the pool, keyrings from Settings) -- no free text. Drag still works unchanged.
+function assignSelectsHtml(r, isLong) {
+const parts = [];
+const names = cleanerNames();
+const edges = ['checkin', 'checkout'].filter((e) => !findCleanerMatch(r, e));
+const listing = data.airbnbListings.find((l) => l.id === r.listingId);
+if (data.prefs.airbnbCalendarId && listing && listing.needsCleaning && !isLong && names.length && edges.length) {
+parts.push(`<select class="stay-assign" data-airbnb-assign-cleaner="${r.id}" title="Book a known cleaner for a TBC clean without dragging (same calendar event as dropping the chip)"><option value="">Assign cleaner&hellip;</option>${edges.map((e) => `<optgroup label="${e === 'checkin' ? 'Check-in clean' : 'Check-out clean'}">${names.map((n) => `<option value="${e}|${escapeHtml(n)}">${escapeHtml(n)}</option>`).join('')}</optgroup>`).join('')}</select>`);
+}
+const free = (data.airbnbKeys || []).filter((k) => !data.airbnbKeyAssignments.some((a) => a.keyId === k.id && a.reservationId === r.id));
+if (free.length) {
+parts.push(`<select class="stay-assign" data-airbnb-assign-key="${r.id}" title="Earmark a keyring for this stay without dragging"><option value="">Add key&hellip;</option>${free.map((k) => `<option value="${escapeHtml(k.id)}">${escapeHtml(k.label || 'Keyring')}</option>`).join('')}</select>`);
+}
+return parts.join('');
+}
+
+// O3: a pushed stay whose dates no longer match its Google Calendar event. Read-only first:
+// verifyPushedEvents (run by Sync) records what the event actually says, per reservation, in
+// memory only (nothing is stored). The flagged row shows both date ranges, and the calendar is
+// only written when the "Update calendar event" button is pressed -- never automatically.
+const calendarDrift = new Map(); // reservationId -> { eventId, calendarId, checkin, checkout, allDay }
+function calendarDriftHtml(r) {
+const d = r.googleEventId && calendarDrift.get(r.id);
+if (!d || d.eventId !== r.googleEventId) return '';
+if (d.checkin === r.checkin && d.checkout === r.checkout) return '';
+return `<div class="cal-event-row"><span class="settings-note" style="margin:0;"><b>Calendar event has different dates.</b> The stay is ${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)}, the Google Calendar event is ${formatAirbnbDate(d.checkin)} &rarr; ${formatAirbnbDate(d.checkout)}.</span> <button class="sync-btn sm inline" type="button" data-airbnb-redate="${r.id}" title="Changes only the start and end of the existing calendar event to match this stay. Nothing else on the event is touched.">Update calendar event</button></div>`;
+}
+async function redateCalendarEvent(reservation, statusEl) {
+const out = pushStatusFor(reservation.id, statusEl);
+const d = calendarDrift.get(reservation.id);
+if (!d || !reservation.googleEventId) return;
+if (!isSignedIn()) {
+out.textContent = 'Signing in to Google…';
+try { await signIn(); } catch (err) { out.textContent = `Couldn't sign in to Google: ${err.message || err}`; return; }
+}
+if (!(await canAttemptGoogleAction())) { out.textContent = 'Sign in to Google at the top of Overview first.'; return; }
+if (!hasCalendarWrite()) { out.innerHTML = 'Turn on "Allow creating events in Google Calendar" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#calendar-write-toggle">Settings</span>, then sign out and back in.'; return; }
+out.textContent = 'Updating the calendar event…';
+try {
+const sameDay = reservation.checkin === reservation.checkout;
+// Same shape the event already has: an all-day event stays all-day (its end is exclusive, eventDayRange
+// reads it back inclusive), a pushed timed one keeps the check-in and check-out times.
+const opts = d.allDay
+? { date: reservation.checkin, endDate: dateStrAdd(reservation.checkout, 1) }
+: sameDay ? { date: reservation.checkin } : { date: reservation.checkin, endDate: reservation.checkout, startTime: CHECKIN_TIME, endTime: CHECKOUT_TIME };
+await patchEventDates(d.calendarId || reservation.googleCalendarId, reservation.googleEventId, opts);
+calendarDrift.delete(reservation.id);
+pushNotes.set(reservation.id, { t: 'Calendar event updated to match this stay.' });
+renderAirbnb();
+const again = document.querySelector(`[data-airbnb-push-status="${reservation.id}"]`);
+if (again) again.textContent = 'Calendar event updated to match this stay.';
+} catch (err) {
+out.textContent = `Couldn't update the calendar event: ${err.message || err}`;
+}
 }
 
 // A stay shown away from its own row (a booking request's outcome, the bookings either side
@@ -1060,6 +1157,7 @@ el.innerHTML = errorsHtml + refundsPendingHtml() + (upcoming.length
 : (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync.</div>'));
 
 bindRefundsPending(el);
+updatePushAllButton();
 bindLogoFallbacks(el);
 import('./bookingrequests.js').then((m) => m.renderBookingRequests()).catch((err) => console.error('Booking requests render failed:', err));
 el.querySelectorAll('[data-airbnb-eval]').forEach((btn) => {
@@ -1170,6 +1268,43 @@ btn.addEventListener('click', () => {
 const r = data.airbnbReservations.find((x) => x.id === btn.dataset.airbnbPush);
 const statusEl = el.querySelector(`[data-airbnb-push-status="${btn.dataset.airbnbPush}"]`);
 if (r && statusEl) pushReservation(r, statusEl);
+});
+});
+el.querySelectorAll('[data-airbnb-redate]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const r = data.airbnbReservations.find((x) => x.id === btn.dataset.airbnbRedate);
+const statusEl = el.querySelector(`[data-airbnb-push-status="${btn.dataset.airbnbRedate}"]`);
+if (r && statusEl) redateCalendarEvent(r, statusEl);
+});
+});
+// O5: the tap alternative to dragging -- known cleaners / keys only, picked from a list.
+el.querySelectorAll('[data-airbnb-assign-cleaner]').forEach((sel) => {
+sel.addEventListener('change', () => {
+if (!sel.value) return;
+const r = data.airbnbReservations.find((x) => x.id === sel.dataset.airbnbAssignCleaner);
+const statusEl = el.querySelector(`[data-airbnb-push-status="${sel.dataset.airbnbAssignCleaner}"]`);
+const sep = sel.value.indexOf('|');
+const edge = sel.value.slice(0, sep);
+const name = sel.value.slice(sep + 1);
+if (r && statusEl) {
+const before = (data.airbnbCleanerEvents || []).length;
+addCleanerEvent(r, edge, name, edge === 'checkin' ? r.checkin : r.checkout, pushStatusFor(r.id, statusEl)).then(() => {
+// A success redraws the row with the clean booked; drop the transient "Adding…" so it doesn't linger.
+if ((data.airbnbCleanerEvents || []).length > before) {
+pushNotes.delete(r.id);
+const again = document.querySelector(`[data-airbnb-push-status="${r.id}"]`);
+if (again) again.textContent = '';
+}
+});
+}
+sel.value = '';
+});
+});
+el.querySelectorAll('[data-airbnb-assign-key]').forEach((sel) => {
+sel.addEventListener('change', () => {
+if (!sel.value) return;
+assignKeyToReservation(sel.value, sel.dataset.airbnbAssignKey);
+sel.value = '';
 });
 });
 el.querySelectorAll('[data-airbnb-cleaner-toggle]').forEach((chip) => {
@@ -2553,10 +2688,19 @@ if (!keeps && t) { t.googleEventId = ''; t.googleCalendarId = ''; missing++; }
 } else if (gone) {
 const t = data.airbnbReservations.find((x) => x.id === group[0].id);
 if (t) { t.googleEventId = ''; t.googleCalendarId = ''; missing++; }
+calendarDrift.delete(group[0].id);
+} else {
+// O3: a uniquely-claimed live event is still left linked, but if its dates differ from the stay's
+// the difference is remembered (memory only) so the row can show it and offer "Update calendar event".
+const range = eventDayRange(event);
+const r0 = data.airbnbReservations.find((x) => x.id === group[0].id) || group[0];
+if (range.checkin !== r0.checkin || range.checkout !== r0.checkout) {
+calendarDrift.set(r0.id, { eventId, calendarId: r0.googleCalendarId, checkin: range.checkin, checkout: range.checkout, allDay: !!event.start?.date });
+} else calendarDrift.delete(r0.id);
 }
 }
 if (missing) queueSave();
-return { checked: candidates.length, missing };
+return { checked: candidates.length, missing, drifted: calendarDrift.size };
 }
 
 // Populates the calendar picker from the real Google Calendar list.
@@ -2686,7 +2830,8 @@ const refundProblemNote = refundProblems.length
 : '';
 const verifyNote = verifyResult.missing
 ? ` ${verifyResult.missing} booking${verifyResult.missing === 1 ? "'s calendar event wasn't" : "s' calendar events weren't"} actually there any more — marked as needing a push again.`
-: '';
+: "";
+const driftNote = verifyResult.drifted ? ` ${verifyResult.drifted} pushed stay${verifyResult.drifted === 1 ? " has" : "s have"} dates that differ from ${verifyResult.drifted === 1 ? "its" : "their"} Google Calendar event — see the flagged row${verifyResult.drifted === 1 ? "" : "s"} below.` : "";
 const unownedNote = cancelResult.unowned
 ? ` ${cancelResult.unowned} cancellation payout${cancelResult.unowned === 1 ? "" : "s"} not posted: the listing has no owner. Set one in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings → Airbnb listings</span> and Sync again.`
 : "";
@@ -2706,7 +2851,7 @@ if (feedTotals.added) feedParts.push(`${feedTotals.added} new booking${feedTotal
 if (feedTotals.updated) feedParts.push(`${feedTotals.updated} changed`);
 if (feedTotals.removed) feedParts.push(`${feedTotals.removed} gone (cancelled or finished)`);
 const feedNote = feedParts.length ? feedParts.join(', ') + '.' : 'No change to bookings.';
-const message = `${feedNote}${guestNote}${reviewNote}${dateNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${stepErrorNote}${signedOutNote}`;
+const message = `${feedNote}${guestNote}${reviewNote}${dateNote}${cancelNote}${unownedNote}${refundNote}${refundProblemNote}${verifyNote}${driftNote}${stepErrorNote}${signedOutNote}`;
 const letting = [{ tab: 'finances', target: '#letting-panel', label: 'Letting income' }];
 const payouts = (cancelResult.posted || 0) + (refundResult.posted || 0);
 // Payouts were posted to the ledger: refresh the Letting panel (and the loans that read it) now, not on reload.
@@ -2736,6 +2881,8 @@ btn.disabled = false;
 }
 });
 loadAirbnbCalendarOptions();
+const pushAllBtn = document.getElementById('airbnb-push-all-btn');
+if (pushAllBtn) pushAllBtn.addEventListener('click', () => pushAllUnpushed());
 const calSelect = document.getElementById('airbnb-push-calendar');
 if (calSelect) {
 // Belt and braces alongside the page-load attempt above and the
@@ -2747,6 +2894,7 @@ if (calSelect) {
 calSelect.addEventListener('focus', () => loadAirbnbCalendarOptions());
 calSelect.addEventListener('change', () => {
 data.prefs.airbnbCalendarId = calSelect.value;
+updatePushAllButton();
 queueSave();
 });
 }

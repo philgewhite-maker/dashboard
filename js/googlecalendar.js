@@ -153,6 +153,21 @@ if (!res.ok) throw new Error(`Couldn't check calendar event: ${res.status}`);
 return res.json();
 }
 
+// Re-dates one existing event (PATCH: only start and end are sent, so the title, description and anything
+// else on the event are untouched). Takes the same options as createEvent and reuses eventBody, so the
+// timed/all-day shape is identical to a fresh push. A Calendar WRITE: callers gate it on hasCalendarWrite()
+// and only call it from an explicit button (the "Update calendar event" on a drifted stay).
+async function patchEventDates(calendarId, eventId, options) {
+const body = eventBody({ title: '', ...options });
+const res = await googleFetch(`${EVENTS_API}/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`, {
+  method: 'PATCH',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ start: body.start, end: body.end }),
+});
+if (!res.ok) throw new Error(`Couldn't update the calendar event: ${res.status}`);
+return res.json();
+}
+
 // Removes one event the app itself created (the school-calendar "Remove
 // from calendar" button). An event already gone (404/410) counts as
 // success -- the goal is "not on the calendar", and it isn't.
@@ -222,4 +237,4 @@ status[name] = { found: false, events: [], error: err.message, syncedAt };
 return status;
 }
 
-export { syncCalendars, listCalendars, createEvent, deleteEvent, eventBody, findEvents, getEvent };
+export { syncCalendars, listCalendars, createEvent, patchEventDates, deleteEvent, eventBody, findEvents, getEvent };

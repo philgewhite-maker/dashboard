@@ -1,13 +1,13 @@
 import { safeHref } from '../utils.js';
 import { data, reachOutThreshold, isDormantStage, isTravelPaused, getLocalSettings, setLocalSetting } from '../state.js';
-import { escapeHtml, affiliateLink, scrollAndFlash, daysSince, daysUntil, MISSING_KEY_LINK_HTML } from '../utils.js';
+import { escapeHtml, todayStr, affiliateLink, scrollAndFlash, daysSince, daysUntil, MISSING_KEY_LINK_HTML } from '../utils.js';
 import { switchTab } from '../tabs.js';
 import { callTextJson, MissingKeyError, useModel } from '../ai.js';
 import { gapsFor } from './travel.js';
 import { accountLabel } from './financeaccounts.js';
 import { reviewDueMonth } from './bookingprojection.js';
 
-const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media', modelReview: 'finances', agentInbox: 'tasks' };
+const TARGET_TABS = { connection: 'dating', search: 'dating', habit: 'overview', goal: 'overview', job: 'jobhunt', voucher: 'finances', financeAccount: 'finances', switchOffers: 'finances', calendar: 'overview', business: 'business', task: 'tasks', want: 'shopping', health: 'health', trip: 'travel', 'trip-suggestion': 'travel', airbnb: 'overview', media: 'media', modelReview: 'finances', bookingRequest: 'overview', agentInbox: 'tasks' };
 // Lead time for the "trip's coming up and still has gaps" nudge -- same
 // 14-day window as NEW_MATCH_STAGES below, so a trip nudge doesn't start
 // nagging the moment it's created, only once it's genuinely close.
@@ -406,6 +406,7 @@ buyUrl: best.url,
 
 buildHealthNudges(pool);
 buildAirbnbNudges(pool);
+buildBookingRequestNudges(pool);
 buildModelReviewNudge(pool);
 buildStockNudges(pool);
 
@@ -463,6 +464,24 @@ text: `Review the booking model for ${name}: projections against what happened, 
 target: { type: 'modelReview', id: ym },
 signals: { kind: 'model-review', month: ym },
 category: 'airbnb',
+});
+}
+
+// O4: a booking request nobody has answered yet and whose check-in is still ahead. Requests to book are
+// time-limited, so every waiting one is nudged until it is decided (accepted, declined, gone direct) or the
+// check-in passes. Enquiries are not nudged: they are only a question. Clicking opens the request.
+function buildBookingRequestNudges(pool) {
+const today = todayStr();
+(data.bookingRequests || []).forEach((q) => {
+if (q.kind !== 'request' || q.decision || !q.checkin || q.checkin < today) return;
+const listing = data.airbnbListings.find((l) => l.id === q.listingId);
+const dIn = daysUntil(q.checkin);
+pool.push({
+text: `Booking request waiting: ${q.guestName || 'a guest'}${listing ? ` for ${listing.label || listing.prefix || 'a listing'}` : ''}, check-in ${dIn === 0 ? 'today' : dIn === 1 ? 'tomorrow' : `in ${dIn} days`} — accept or decline.`,
+target: { type: 'bookingRequest', id: q.id },
+signals: { kind: 'booking-request-waiting', daysUntil: dIn },
+category: 'airbnb',
+});
 });
 }
 
@@ -639,6 +658,8 @@ setTimeout(() => scrollAndFlash('#switch-offers-panel'), 50);
 setTimeout(() => scrollAndFlash(`[data-cal-row="${CSS.escape(target.name)}"]`), 50);
 } else if (target.type === 'airbnb') {
 setTimeout(() => scrollAndFlash(`[data-airbnb-row="${target.id}"]`), 50);
+} else if (target.type === 'bookingRequest') {
+setTimeout(() => { const d = document.getElementById('booking-requests'); if (d) d.open = true; scrollAndFlash(`[data-bkreq="${CSS.escape(target.id)}"]`); }, 80);
 } else if (target.type === 'modelReview') {
 setTimeout(() => { const d = document.getElementById('model-review'); if (d) { d.open = true; scrollAndFlash('#model-review'); } }, 80);
 } else if (target.type === 'business') {

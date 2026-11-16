@@ -2281,8 +2281,10 @@ async function save(openAfter) {
 if (!pending || !pending.chosenId) return;
 const status = document.getElementById('tinder-save-status');
 if (status) status.textContent = 'Saving…';
+const idsBefore = new Set(data.connections.map((c) => c.id));
 const result = await applyPendingToConnection(pending, (msg) => { if (status) status.textContent = `Saving… ${msg}`; });
 if (!result.ok) return;
+import('./connections.js').then((c) => c.showDuplicatesAfterImport(idsBefore));
 const { conn, failed, toFetchLen, firstError, alreadyHad } = result;
 const connId = conn.id;
 

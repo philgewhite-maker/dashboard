@@ -85,7 +85,7 @@ businessIdeas: [],
 subscriptions: [],
 enhancementIdeas: [],
 financeAccounts: [], // bank/card accounts -- see js/features/financeaccounts.js, blankFinanceAccount() below
-switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed}] -- last bank-switch-offers scan, see js/features/switchoffers.js
+switchOffers: [], // [{id, bank, offer, eligible, reasoning, suggestedFromAccountId, dismissed, taskId, newAccountId}] -- last bank-switch-offers scan, see js/features/switchoffers.js
 // Every past scan's raw extracted offers, oldest first, capped -- so the
 // terms/bonuses MSE's page actually quoted over time are on file for real
 // trend-watching (which bank's bonus crept up, how often a given bank's
@@ -2223,7 +2223,10 @@ subtotal: null, discount: null, delivery: null, total: null,
 // (aporders.js's refundCheck). A return can be refunded in more than one email.
 refunds: [],
 refundTaskId: '', // the "check the refund landed" subtask
-refundIssueTaskId: '', // the subtask raised when a refund doesn't match what was expectedcreatedAt: new Date().toISOString(),
+refundIssueTaskId: '', // the subtask raised when a refund doesn't match what was expected
+createdAt: new Date().toISOString(),
+// Open wants (shopping tasks with a wantSpec) this order fulfilled, confirmed by you when aporders.js offered the match, and ones you said were not it.
+wantTaskIds: [], wantDismissedIds: [],
 ...fields,
 };
 }

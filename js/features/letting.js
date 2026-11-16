@@ -876,6 +876,12 @@ emailBtn.type = 'button'; emailBtn.className = 'todo-add-btn';
 emailBtn.textContent = 'Open email draft';
 emailBtn.addEventListener('click', () => report.openEmailDraft(key, period.start, period.end));
 status.appendChild(emailBtn);
+const gmailBtn = document.createElement('button');
+gmailBtn.type = 'button'; gmailBtn.className = 'todo-add-btn';
+gmailBtn.textContent = 'Send via Gmail…';
+gmailBtn.title = 'Opens a confirm step showing the recipient, subject and attachment. Nothing is sent until you press Send there.';
+gmailBtn.addEventListener('click', () => report.openGmailSendConfirm(status, { key, blob, filename, period }));
+status.appendChild(gmailBtn);
 // Telegram only when `key` resolves to a real connection WITH a
 // linked chat id -- ownerKeyFor() returns the connection's own id
 // when the owner was set via the dropdown (not the free-text

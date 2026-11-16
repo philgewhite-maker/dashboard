@@ -317,6 +317,8 @@ const r = applyImport(state.items, { addMissing, ownerKey: state.ownerKey });
 import('./bookingrequests.js').then((m) => { m.resolveRequestOutcomes(); queueSave(); });
 renderLetting();
 import('./bookingsettings.js').then((m) => m.renderBookingEvaluatorSettings()).catch(() => {});
+// O7: earnings change what the nights already booked are worth, so re-run the projection as a stay push does (quiet; may create dead-void tasks).
+if (r.filled || r.added) import('./bookingprojection.js').then((m) => m.refreshProjection()).catch(() => {});
 rerun();
 const status = document.getElementById('aex-status');
 if (status) status.innerHTML = `Filled in ${r.filled} stay${r.filled === 1 ? '' : 's'} and entr${r.filled === 1 ? 'y' : 'ies'}${r.added ? `; added ${r.added} Earned entr${r.added === 1 ? 'y' : 'ies'}` : ''}. <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#be-est-rates">See the estimated rates</span>`;

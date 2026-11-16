@@ -32,7 +32,8 @@
 // list, never auto-apply" shape either way -- only how the page text
 // arrives changed. This is a real financial decision, so the feature
 // only ever proposes.
-import { data, queueSave } from '../state.js';
+import { data, queueSave, blankFinanceAccount } from '../state.js';
+import { matchBankLogo } from '../bankLogos.js';
 import { escapeHtml, uid, todayStr, daysSince, SYNC_LINK_HTML } from '../utils.js';
 import { callTextJson, MissingKeyError, useModel } from '../ai.js';
 import { accountLabel, expandAccountRow, formatShortDate } from './financeaccounts.js';
@@ -336,7 +337,7 @@ eligible,
 reasoning: donor ? `${reasoning} Switch from your ${donor.name || donor.bank}.` : reasoning,
 suggestedFromAccountId: donor?.id || '',
 dismissed: false,
-taskId: '',
+taskId: '', newAccountId: '',
 };
 });
 }
@@ -381,7 +382,7 @@ reasoning: String(o.reasoning || ''),
 // switch-FROM source months after it stopped being one.
 suggestedFromAccountId: (data.financeAccounts.find((a) => a.stage === 'CASS-ready' && !a.closeDate && a.bank === o.suggestedFromBank) || {}).id || '',
 dismissed: false,
-taskId: '', // set once "Create task" is clicked -- see switchOfferActionHtml
+taskId: '', newAccountId: '', // taskId: set once "Create task" is clicked (see switchOfferActionHtml); newAccountId: the account added from this offer once its task was done
 }));
 }
 
@@ -395,7 +396,15 @@ const ELIGIBLE_CLASS = { yes: 'tag-chip-green', unsure: 'tag-chip-amber' }; // '
 // same offer.
 function switchOfferActionHtml(o) {
 if (o.eligible !== 'yes') return '';
-if (o.taskId) return `<span class="dd-to-account-link" data-open-task-ref="${escapeHtml(o.taskId)}">&rarr; View task</span>`;
+if (o.taskId) {
+const view = `<span class="dd-to-account-link" data-open-task-ref="${escapeHtml(o.taskId)}">&rarr; View task</span>`;
+// O14: once the switch task is done, offer (never auto-create) the new account, prefilled from the offer.
+const task = data.tasks.find((t) => t.id === o.taskId);
+const added = o.newAccountId ? data.financeAccounts.find((a) => a.id === o.newAccountId) : null;
+if (added) return `${view} <span class="dd-to-account-link" data-open-account-ref="${escapeHtml(added.id)}">&rarr; New account: ${escapeHtml(accountLabel(added))}</span>`;
+if (task && task.bucket === 'done') return `${view} <button class="sync-btn sm inline" type="button" data-switch-offer-add-account="${escapeHtml(o.id)}" title="Adds an account for ${escapeHtml(o.bank)} to Finance accounts, prefilled from this offer (bank, product, opened today, the bonus). Nothing is added until you press this.">Add the new account</button>`;
+return view;
+}
 return `<button class="sync-btn inline" type="button" data-switch-offer-task="${escapeHtml(o.id)}">Create task</button>`;
 }
 
@@ -478,6 +487,25 @@ source: { kind: 'switch offer', label: o.bank, url: MSE_SWITCH_URL },
 o.taskId = task.id;
 queueSave();
 renderSwitchOffers();
+});
+});
+list.querySelectorAll('[data-switch-offer-add-account]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const o = data.switchOffers.find((entry) => entry.id === btn.dataset.switchOfferAddAccount);
+if (!o || o.newAccountId) return;
+// The offer text is "£240 — Product name": the product becomes the account name, the amount the first bonus.
+const [amountPart, ...rest] = String(o.offer).split(/\s+[—–-]\s+/);
+const amount = Number((amountPart.match(/£\s*([\d,.]+)/) || [])[1]?.replace(/,/g, ''));
+const acct = blankFinanceAccount({
+bank: o.bank, name: rest.join(' — ') || o.bank, logoUrl: matchBankLogo(o.bank) || '',
+accountType: 'Current account', openDate: todayStr(),
+switchBonuses: Number.isFinite(amount) && amount > 0 ? [{ id: uid(), description: `Switch bonus (${o.offer})`, amount, status: 'Working on' }] : [],
+});
+data.financeAccounts.push(acct);
+o.newAccountId = acct.id;
+queueSave();
+renderSwitchOffers();
+import('./financeaccounts.js').then((m) => m.renderFinanceAccounts());
 });
 });
 list.querySelectorAll('[data-open-task-ref]').forEach((el) => {

@@ -407,6 +407,7 @@ document.getElementById('wab-import-go').addEventListener('click', () => applyBu
 }
 
 async function applyBulkImport() {
+const idsBefore = new Set(data.connections.map((c) => c.id));
 const status = document.getElementById('whatsapp-status');
 const goodRows = bulkPending.rows.filter((r) => !r.error);
 const toImport = goodRows.filter((r) => r.checked && r.chosenId);
@@ -432,6 +433,7 @@ if (status) status.textContent = `Imported ${importedCount} chat${importedCount 
 recordImportRun('whatsapp', { scope: `bulk, ${toImport.length} file${toImport.length === 1 ? '' : 's'}`, count: importedCount });
 renderWhatsAppLastRun();
 if (changed) { queueSave(); renderConnections(); }
+import('./connections.js').then((c) => c.showDuplicatesAfterImport(idsBefore));
 bulkPending = null;
 renderBulk();
 }

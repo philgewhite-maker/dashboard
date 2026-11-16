@@ -204,6 +204,7 @@ if (picker) picker.hidden = radio.value !== 'pick';
 
 const applyBtn = document.getElementById('manual-import-apply');
 if (applyBtn) applyBtn.addEventListener('click', () => {
+const idsBefore = new Set(data.connections.map((c) => c.id));
 let created = 0, merged = 0;
 manualRows.forEach((r, i) => {
 const decision = el.querySelector(`input[name="manual-decision-${i}"]:checked`)?.value || 'new';
@@ -217,6 +218,7 @@ created++;
 queueSave();
 renderConnections();
 import('./overview.js').then((m) => m.renderOverview());
+import('./connections.js').then((c) => c.showDuplicatesAfterImport(idsBefore));
 manualRows = [];
 manualImportMessage = `Imported ${created + merged} row${created + merged === 1 ? '' : 's'} (${created} new, ${merged} merged).`;
 renderManualImport();

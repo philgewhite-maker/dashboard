@@ -335,6 +335,20 @@ tasksWriteNote.textContent = tasksWrite.checked
 : 'Sign out and back in to drop the write permission.';
 });
 
+// Same shape again, for sending the letting report from Gmail (adds gmail.send alongside gmail.readonly).
+const gmailSend = document.getElementById('gmail-send-toggle');
+const gmailSendNote = document.getElementById('gmail-send-note');
+if (gmailSend) {
+gmailSend.checked = !!settings.gmailSendEnabled;
+gmailSend.addEventListener('change', async () => {
+await setLocalSetting('gmailSendEnabled', gmailSend.checked);
+await refreshScopes();
+gmailSendNote.textContent = gmailSend.checked
+? 'Sign out and back in to grant the send permission — Google won\'t widen a token that\'s already been issued.'
+: 'Sign out and back in to drop the send permission.';
+});
+}
+
 const sensitiveToggle = document.getElementById('sensitive-fields-toggle');
 sensitiveToggle.checked = !!settings.showSensitiveFields;
 sensitiveToggle.addEventListener('change', async () => {

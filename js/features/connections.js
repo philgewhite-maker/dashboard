@@ -2203,6 +2203,7 @@ renderOverviewRef();
 queueSave();
 });
 document.getElementById('dup-find-btn').addEventListener('click', () => {
+dupRoot = null;
 dupCandidates = findDuplicateCandidates();
 dupCompareOpen = null;
 dupDismissed.clear();
@@ -3442,6 +3443,8 @@ return pairs.sort((x, y) => y.rank - x.rank || y.sharedCount - x.sharedCount);
 let dupCandidates = null; // null = not run yet this session; [] = run, nothing found
 let dupCompareOpen = null; // { a, b, reasons } -- the pair currently in the compare overlay
 const dupDismissed = new Set();
+// Where renderDupFinder draws: the Settings finder by default, or an inline container beside an import (O11).
+let dupRoot = null;
 function dupPairKey(a, b) { return [a.id, b.id].sort().join('|'); }
 
 // Standard connection-reference chip (record-reference-convention,
@@ -3498,8 +3501,29 @@ ${dupPhotoGridHtml(b)}
 </div>
 </div>`;
 }
+// O11: after an import, run the duplicate finder scoped to the connections the import just created (those
+// not in `before`, a Set of ids taken before it ran) and show the pairs inline, next to the import, with the
+// same Compare / Not a duplicate / merge controls as the Settings finder. A pair is listed when at least one
+// side is new. Nothing is merged unless you press merge in the compare view.
+function showDuplicatesAfterImport(before, containerId = 'import-dup-results') {
+const root = document.getElementById(containerId);
+if (!root) return;
+const fresh = new Set(data.connections.filter((c) => !before.has(c.id)).map((c) => c.id));
+if (!fresh.size) { root.innerHTML = ''; return; }
+dupRoot = root;
+dupCandidates = findDuplicateCandidates().filter((p) => fresh.has(p.a.id) || fresh.has(p.b.id));
+dupCompareOpen = null;
+dupDismissed.clear();
+renderDupFinder();
+if (!dupCandidates.length) root.innerHTML = `<div class="settings-note" style="margin:6px 0;">Checked the ${fresh.size} new connection${fresh.size === 1 ? '' : 's'} for duplicates: none found.</div>`;
+else {
+const head = root.querySelector('.settings-note');
+if (head) head.insertAdjacentText('afterbegin', `From this import (${fresh.size} new): `);
+}
+}
+
 function renderDupFinder() {
-const root = document.getElementById('dup-find-results');
+const root = (dupRoot && dupRoot.isConnected) ? dupRoot : document.getElementById('dup-find-results');
 if (!root) return;
 if (dupCandidates === null) { root.innerHTML = ''; return; }
 const visible = dupCandidates.filter((p) => !dupDismissed.has(dupPairKey(p.a, p.b)));
@@ -3766,7 +3790,7 @@ queueSave();
 }
 
 export {
-renderConnections, initConnectionForm, expandConnection, CONN_STAGES,
+renderConnections, initConnectionForm, expandConnection, CONN_STAGES, showDuplicatesAfterImport,
 initSensitiveFields, setShowSensitiveFields, visibleTagFields, sensitiveFieldsShown,
 filterByEmptyField, filterBySearch, filterByIds, clearFilters,
 STAGE_RANK, setContactPicker, phoneWithFlagHtml, initRatingCategoriesSettings,

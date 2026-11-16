@@ -39,6 +39,11 @@ const CALENDAR_WRITE_SCOPE = 'https://www.googleapis.com/auth/calendar.events';
 // replacing tasks.readonly rather than adding to it.
 const TASKS_WRITE_SCOPE = 'https://www.googleapis.com/auth/tasks';
 
+// Sending mail from the signed-in Gmail account (the letting report's "Send via Gmail", js/features/lettingreport.js).
+// Off unless turned on in Settings; unlike the others it ADDS to gmail.readonly rather than replacing it, since
+// gmail.send can only send -- it cannot read -- and the app still needs to read.
+const GMAIL_SEND_SCOPE = 'https://www.googleapis.com/auth/gmail.send';
+
 let scopesForSession = BASE_SCOPES.join(' ');
 
 async function refreshScopes() {
@@ -52,6 +57,7 @@ scopes = scopes.filter((s) => s !== 'https://www.googleapis.com/auth/calendar.re
 if (settings.tasksWriteEnabled) {
 scopes = scopes.filter((s) => s !== 'https://www.googleapis.com/auth/tasks.readonly').concat(TASKS_WRITE_SCOPE);
 }
+if (settings.gmailSendEnabled) scopes = scopes.concat(GMAIL_SEND_SCOPE);
 const next = scopes.join(' ');
 if (next !== scopesForSession) {
 scopesForSession = next;
@@ -321,8 +327,13 @@ function hasTasksWrite() {
 return hasScope(TASKS_WRITE_SCOPE);
 }
 
+// True when the current session was granted the Gmail send scope -- see GMAIL_SEND_SCOPE above.
+function hasGmailSend() {
+return hasScope(GMAIL_SEND_SCOPE);
+}
+
 export {
 NotConfiguredError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
-googleFetch, onSignOut, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite,
+googleFetch, onSignOut, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite, hasGmailSend,
 };

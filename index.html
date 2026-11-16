@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v879</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v880</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -105,6 +105,7 @@
 <div class="sync-row">
 <button class="sync-btn" id="airbnb-sync-btn" type="button">&#8635; Sync</button>
 <select id="airbnb-push-calendar" title="Which Google Calendar &quot;Push to Google Calendar&quot; sends to"><option value="">Push to&hellip;</option></select>
+<button class="sync-btn sm inline" id="airbnb-push-all-btn" type="button" hidden title="Pushes every upcoming stay that is not on the calendar yet, one at a time, to the calendar chosen here. Each stay is still checked for a matching event first, exactly as the per-stay Push does.">Push all unpushed</button>
 <span class="sync-status" id="airbnb-sync-status"></span>
 </div>
 <div class="sync-row" style="margin-top:8px;">
@@ -112,6 +113,7 @@
 <span class="sync-status" id="airbnb-rate-review-status"></span>
 <span class="inline-goto-link" data-goto-tab="tasks" data-goto-target="#tasks-panel" title="See proposals in Tasks">Tasks</span>
 </div>
+<details class="settings-subgroup" id="booking-requests" style="margin:0 0 12px;"></details>
 <div id="airbnb-list"></div>
 <div class="sync-row" id="airbnb-add-booking" style="margin-top:8px;">
 <select id="airbnb-add-listing" title="Which listing this booking is for"></select>
@@ -121,7 +123,6 @@
 <button class="sync-btn sm inline" type="button" id="airbnb-add-btn">Add booking</button>
 <span class="sync-status" id="airbnb-add-status"></span>
 </div>
-<details class="settings-subgroup" id="booking-requests" style="margin-top:12px;"></details>
 <h3 style="margin:18px 0 6px;font-size:14px;">&#128273; Keys</h3>
 <div id="airbnb-keys-list"></div>
 <h3 style="margin:18px 0 6px;font-size:14px;">&#129529; Cleaners</h3>
@@ -2839,6 +2840,7 @@ Album links are permanent, unlike the face-group links tried previously.
 </div>
 <div class="settings-note import-last-run" id="tinder-last-run"></div>
 <div class="settings-note" style="margin:4px 0;">After an import: <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#dup-find-btn">find possible duplicates</span> &middot; <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#photo-quality-scan-btn">check photo quality</span> &middot; <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#tag-cleanup">tidy up tags</span></div>
+<div id="import-dup-results"></div>
 <div id="tinder-bulk-review"></div>
 <div id="tinder-archive-queue"></div>
 <div id="tinder-review"></div>
@@ -2860,6 +2862,7 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <span class="sync-status" id="telegram-status"></span>
 </div>
 <div class="settings-note import-last-run" id="telegram-last-run"></div>
+<div id="telegram-dup-results"></div>
 <div id="telegram-review"></div>
 
 <div class="settings-note" style="margin:16px 0 4px;font-weight:600;">Match Google Contacts</div>
@@ -3228,6 +3231,18 @@ Allow creating events in Google Calendar (Planner tab)
 Allow deleting from Google Tasks once captured here
 </label>
 <div class="settings-note" id="tasks-write-note"></div>
+</div>
+</details>
+
+<details class="settings-item" id="gmail-send-settings">
+<summary><h3>Gmail sending</h3></summary>
+<div class="settings-block">
+<div class="settings-note" style="margin:0 0 8px;">Gmail is read to find your emails. Sending mail from your account (the letting report's "Send via Gmail", on Finances) is a separate permission, off unless you turn it on here. Nothing is ever sent without you pressing Send on a confirm step that shows who it goes to.</div>
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;">
+<input type="checkbox" id="gmail-send-toggle">
+Allow sending email from my Gmail (letting report)
+</label>
+<div class="settings-note" id="gmail-send-note"></div>
 </div>
 </details>
 

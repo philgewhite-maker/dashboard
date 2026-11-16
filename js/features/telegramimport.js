@@ -380,6 +380,7 @@ return messages;
 }
 
 async function applyImport() {
+const idsBefore = new Set(data.connections.map((c) => c.id));
 const status = document.getElementById('telegram-status');
 const toImport = pending.rows.filter((r) => r.checked && r.chosenId);
 if (!toImport.length) { status.textContent = 'Nothing selected.'; return; }
@@ -444,6 +445,7 @@ status.textContent = `Imported ${importedCount} chat${importedCount === 1 ? '' :
 recordImportRun('telegram', { scope: `${toImport.length} chat${toImport.length === 1 ? '' : 's'} selected`, count: importedCount });
 renderTelegramLastRun();
 if (changed) { queueSave(); renderConnections(); }
+import('./connections.js').then((c) => c.showDuplicatesAfterImport(idsBefore, 'telegram-dup-results'));
 pending = null;
 render();
 }

@@ -1,7 +1,6 @@
-// Reads (never sends, modifies, or deletes) Gmail — the top 5 starred
-// messages, plus anything from a couple of tracked senders in the last 2
-// days. Uses the same shared Google sign-in as Drive and Calendar
-// (googleauth.js), via the `gmail.readonly` scope.
+// Reads Gmail (the top 5 starred, tracked senders, searches) and, in one place only (sendMessage, below), sends —
+// opt-in gmail.send scope, explicit confirm only. Uses the same shared Google sign-in as Drive and
+// Calendar (googleauth.js), via `gmail.readonly` (reading) and the optional `gmail.send` (sending).
 import { googleFetch } from './sync/googleauth.js';
 import { kvGet, kvSet } from './db.js';
 
@@ -306,4 +305,58 @@ if (!json.data) throw new Error('Attachment had no data.');
 return base64UrlDecodeBytes(json.data);
 }
 
-export { fetchMailSearches, buildQuery, getMessageDetail, fetchMessageAttachmentBytes, gmailLink };
+
+// ---- Sending (the one write in this file) ----------------------------------
+// Everything above only reads. This is used by exactly one caller, the letting report's explicit "Send"
+// button (js/features/lettingreport.js), and needs the opt-in gmail.send scope (hasGmailSend() in
+// sync/googleauth.js); never call it without a confirm step that showed the recipient.
+function bytesToBase64(bytes) {
+let bin = '';
+for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+return btoa(bin);
+}
+function utf8Base64(text) { return bytesToBase64(new TextEncoder().encode(text)); }
+const wrap76 = (s) => s.replace(/.{1,76}/g, '$&\r\n').trimEnd();
+// A plain-text message with one attachment, as RFC 2822 text. `attachment` = { filename, mimeType, bytes: Uint8Array }.
+function buildMimeMessage({ to, subject, body, attachment }) {
+const boundary = `=_dash_${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
+const lines = [
+`To: ${to}`,
+`Subject: =?UTF-8?B?${utf8Base64(subject)}?=`,
+'MIME-Version: 1.0',
+`Content-Type: multipart/mixed; boundary="${boundary}"`,
+'',
+`--${boundary}`,
+'Content-Type: text/plain; charset="UTF-8"',
+'Content-Transfer-Encoding: base64',
+'',
+wrap76(utf8Base64(body)),
+];
+if (attachment) {
+const name = attachment.filename.replace(/["\r\n\\]/g, '_');
+lines.push(
+`--${boundary}`,
+`Content-Type: ${attachment.mimeType}; name="${name}"`,
+'Content-Transfer-Encoding: base64',
+`Content-Disposition: attachment; filename="${name}"`,
+'',
+wrap76(bytesToBase64(attachment.bytes)),
+);
+}
+lines.push(`--${boundary}--`, '');
+return lines.join('\r\n');
+}
+async function sendMessage(message) {
+const mime = buildMimeMessage(message);
+// The MIME text is pure ASCII (headers, base64 parts), so it goes straight through base64url.
+const raw = btoa(mime).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+const res = await googleFetch(`${GMAIL_API}/messages/send`, {
+method: 'POST',
+headers: { 'Content-Type': 'application/json' },
+body: JSON.stringify({ raw }),
+});
+if (!res.ok) throw new Error(`Gmail send failed: ${res.status}`);
+return res.json();
+}
+
+export { fetchMailSearches, buildQuery, getMessageDetail, fetchMessageAttachmentBytes, gmailLink, buildMimeMessage, sendMessage };

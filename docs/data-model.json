@@ -1,6 +1,6 @@
 {
   "_about": "Machine-readable twin of docs/data-model.html. js check: import('./docs/check-model.js') from the live site's console. Update when state.js gains/changes a key or a reference.",
-  "verifiedAgainst": "v870",
+  "verifiedAgainst": "v880",
   "groups": {
     "people": ["connections","telegramThreads","telegramUnclaimed","pendingImports","importStatus","flagRules","flagRulesSeeded","ratingCategories","reachOutStageDays","dayQueue","myCity","myName","myPhone","myEmail","myAddress"],
     "work": ["tasks","taskContexts","captureInbox","captureDrafts","agentInbox","businessIdeas","enhancementIdeas","readingList","jobs","habits","goals"],
@@ -29,11 +29,11 @@
     ["subscriptions","accountId","financeAccounts"],
     ["vouchers","providerId","providers"],["loyaltyPrograms","providerId","providers"],["subscriptions","providerId","providers"],["financeAccounts","providerId","providers"],["prefs.lettingChannels","providerId","providers"],
     ["financeAccounts","cassFromAccountId","financeAccounts"],["financeAccounts","repaymentFromAccountId","financeAccounts"],["financeAccounts","fundingFromAccountId","financeAccounts"],
-    ["switchOffers","suggestedFromAccountId","financeAccounts"],["switchOffers","taskId","tasks"],
+    ["switchOffers","suggestedFromAccountId","financeAccounts"],["switchOffers","taskId","tasks"],["switchOffers","newAccountId","financeAccounts"],
     ["businessIdeas","taskId","tasks"],
     ["inventory","holderId","connections"],["inventory","fromTaskId","tasks"],
     ["books","holderId","connections"],["books","fromMediaId","mediaItems"],
-    ["apOrders","taskId","tasks"],["apOrders","refundTaskId","tasks"],["apOrders","refundIssueTaskId","tasks"],
+    ["apOrders","taskId","tasks"],["apOrders","refundTaskId","tasks"],["apOrders","refundIssueTaskId","tasks"],["apOrders","wantTaskIds","tasks"],
     ["recipes","variantOf","recipes"],
     ["mailSearches","topicId","mailTopics"]
   ]

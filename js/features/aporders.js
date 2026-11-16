@@ -29,9 +29,10 @@
 import { data, queueSave, blankApOrder, blankInventoryItem } from '../state.js';
 import { escapeHtml, uid, daysSince, daysUntil, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { fetchMailSearches, getMessageDetail, gmailLink } from '../googlemail.js';
-import { captureTask, toggleTaskDone, revealTask } from './tasks.js';
+import { captureTask, toggleTaskDone, revealTask, renderTasks, taskChipHtml, bindTaskChips } from './tasks.js';
+import { nameKey, editDistance } from '../googlecontacts.js';
 import { recordMail, registerRetry } from './mailledger.js';
-import { sensitiveFieldsShown } from './connections.js';
+import { sensitiveFieldsShown, connectionChipHtml } from './connections.js';
 
 const SENDER = 'clientservices@agentprovocateur.com';
 const CADENCE_DAYS = 28;
@@ -718,6 +719,52 @@ notes: notes || `From AP order #${order.orderNumber}${order.orderDate ? ` (${ord
 });
 }
 
+// O8: matching a captured order to an open want. A want is a shopping task with a wantSpec; the order line is
+// compared with it using the same name folding and edit distance the contact matcher uses (googlecontacts.js),
+// so "Rosessence" still finds "Rosessense". Only ever an OFFER on the order card: nothing is marked done or
+// linked until you press the button, and "Not this" is remembered on the order.
+const WANT_OFFER_DAYS = 120;
+function tokenHit(tokens, word) {
+return tokens.some((t) => t === word || (word.length >= 5 && t.length >= 5 && editDistance(t, word, 1) <= 1));
+}
+function phraseHit(text, phrase) {
+const tokens = nameKey(text).split(' ').filter(Boolean);
+const words = nameKey(phrase).split(' ').filter(Boolean);
+return words.length > 0 && words.every((w) => tokenHit(tokens, w));
+}
+function wantMatchesLine(task, line) {
+const spec = task.wantSpec;
+if (!spec || task.bucket === 'done' || task.wantState === 'suspended') return false;
+const anchor = spec.style || spec.brand;
+if (!anchor || !phraseHit(line.name, anchor)) return false;
+if ((spec.pieces || []).length && !spec.pieces.some((p) => phraseHit(line.name, p))) return false;
+if ((spec.colours || []).length && !spec.colours.some((c) => phraseHit(line.colour, c))) return false;
+return true;
+}
+function wantOffersFor(order) {
+if (order.orderDate && daysSince(order.orderDate) > WANT_OFFER_DAYS) return [];
+const taken = new Set([...(order.wantTaskIds || []), ...(order.wantDismissedIds || [])]);
+const offers = [];
+data.tasks.forEach((t) => {
+if (!t.wantSpec || taken.has(t.id)) return;
+const line = order.lines.find((l) => wantMatchesLine(t, l));
+if (line) offers.push({ task: t, line });
+});
+return offers;
+}
+function wantsBlockHtml(order) {
+const linked = (order.wantTaskIds || []).map((id) => data.tasks.find((t) => t.id === id)).filter(Boolean)
+.map((t) => `<div class="settings-note" style="margin:2px 0;">Fulfils the want ${taskChipHtml(t)}${t.forConnectionId ? connectionForWantHtml(t) : ''}</div>`).join('');
+const offers = wantOffersFor(order).map(({ task, line }) => `<div class="settings-note" style="margin:4px 0;display:flex;flex-wrap:wrap;align-items:center;gap:6px;">Looks like your want ${taskChipHtml(task)}${task.forConnectionId ? connectionForWantHtml(task) : ''} (${escapeHtml(line.name)}, ${escapeHtml(line.colour)}):
+<button type="button" class="sync-btn sm inline" data-ap-want-link="${escapeHtml(order.id)}|${escapeHtml(task.id)}" title="Marks that want done and records on this order that it fulfilled it">Mark done and link</button>
+<button type="button" class="sync-btn sm inline" data-ap-want-dismiss="${escapeHtml(order.id)}|${escapeHtml(task.id)}" title="Not this one: stop offering it for this order">Not this</button></div>`).join('');
+return linked + offers;
+}
+function connectionForWantHtml(task) {
+const c = data.connections.find((x) => x.id === task.forConnectionId);
+return c ? ` for ${connectionChipHtml(c)}` : '';
+}
+
 function orderCardHtml(order) {
 const kept = keptLinesFor(order);
 const returning = returningLinesFor(order);
@@ -748,6 +795,7 @@ return `<div class="account-card" data-ap-order-card="${escapeHtml(order.id)}">
 ${badgeHtml}
 </div>
 <div class="settings-note" style="margin:4px 0 8px;font-weight:600;">${order.lines.length} item${order.lines.length === 1 ? '' : 's'} ordered, ${kept.length} kept, ${returning.length} returning</div>
+${wantsBlockHtml(order)}
 ${refundBlockHtml(order)}
 <details>
 <summary>Show items &amp; return actions</summary>
@@ -955,6 +1003,29 @@ switchTab('tasks');
 revealTask(link.dataset.apOpenTask);
 });
 });
+el.querySelectorAll('[data-ap-want-link]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [orderId, taskId] = btn.dataset.apWantLink.split('|');
+const order = data.apOrders.find((o) => o.id === orderId);
+if (!order || !data.tasks.some((t) => t.id === taskId)) return;
+if (!order.wantTaskIds.includes(taskId)) order.wantTaskIds.push(taskId);
+toggleTaskDone(taskId, true);
+queueSave();
+renderApOrders();
+renderTasks();
+});
+});
+el.querySelectorAll('[data-ap-want-dismiss]').forEach((btn) => {
+btn.addEventListener('click', () => {
+const [orderId, taskId] = btn.dataset.apWantDismiss.split('|');
+const order = data.apOrders.find((o) => o.id === orderId);
+if (!order) return;
+if (!order.wantDismissedIds.includes(taskId)) order.wantDismissedIds.push(taskId);
+queueSave();
+renderApOrders();
+});
+});
+bindTaskChips();
 bindApOrderChips();
 }
 

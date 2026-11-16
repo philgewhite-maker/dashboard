@@ -4846,3 +4846,4 @@ background:var(--slate-bg);color:var(--slate);
    if boot never finishes, the board appears after 2.5s anyway. */
 html:not([data-booted]) .board{visibility:hidden;animation:board-boot-reveal 0s 2.5s forwards;}
 @keyframes board-boot-reveal{to{visibility:visible;}}
+.stay-assign{max-width:140px;font-size:12px;}

@@ -12,7 +12,10 @@
 // cached-promise pattern loadHeicTo already uses) -- the ~450KB
 // download only happens the first time a report is actually generated.
 import { data } from '../state.js';
-import { loadJsPdf } from '../utils.js';
+import { loadJsPdf, escapeHtml } from '../utils.js';
+import { isSignedIn, signIn, canAttemptGoogleAction, hasGmailSend } from '../sync/googleauth.js';
+import { sendMessage } from '../googlemail.js';
+import { connectionChipHtml } from './connections.js';
 import {
 ownerKeyFor, ownerNameFor, entriesFor, nightRateFor, balanceFor, money, money0, monthRange, monthLabel, addMonths, today, isMyOwnListing, resolveColor, listingColorVar,
 } from './letting.js';
@@ -566,4 +569,65 @@ const body = encodeURIComponent(`Hi ${ownerNameFor(key)},\n\nAttached is your le
 window.open(`mailto:?subject=${subject}&body=${body}`, '_blank');
 }
 
-export { buildReportPdf, downloadBlob, reportFilename, openEmailDraft, defaultPeriod, periodSummary, statementFor, isoDate };
+
+// "Send via Gmail": sends the report PDF from the signed-in Gmail account. This sends mail on the owner's
+// behalf, so it is never automatic: pressing the button only opens this confirm box, which shows exactly who
+// it goes to, the subject and the attached file; nothing leaves until Send is pressed in it. Needs the opt-in
+// gmail.send scope (Settings, Gmail sending); without it the box says so instead of sending.
+function reportMailFor(key, period) {
+const name = ownerNameFor(key);
+return {
+subject: `Letting report — ${name} — ${period.start} to ${period.end}`,
+body: `Hi ${name},\n\nAttached is your letting report for ${period.start} to ${period.end}.\n`,
+};
+}
+function openGmailSendConfirm(container, { key, blob, filename, period }) {
+const ownerConn = (data.connections || []).find((c) => c.id === key);
+const { subject, body } = reportMailFor(key, period);
+const kb = Math.max(1, Math.round(blob.size / 1024));
+container.querySelector('[data-gmail-confirm]')?.remove();
+const box = document.createElement('div');
+box.setAttribute('data-gmail-confirm', '');
+box.className = 'settings-note';
+box.style.cssText = 'margin:8px 0;padding:8px 10px;border:1px solid var(--border,#888);border-radius:7px;';
+const toHtml = ownerConn && ownerConn.email
+? `<b>To:</b> ${escapeHtml(ownerConn.email)} (${connectionChipHtml(ownerConn)})`
+: `<b>To:</b> <input type="email" autocomplete="off" class="tag-add-input" data-gmail-to placeholder="${escapeHtml(ownerNameFor(key))}'s email address" style="max-width:240px;">${ownerConn ? ` <span class="settings-note" style="margin:0;">${connectionChipHtml(ownerConn)} has no email on file.</span>` : ''}`;
+box.innerHTML = `<div><b>About to send an email from your Gmail.</b></div>
+<div style="margin-top:4px;">${toHtml}</div>
+<div><b>Subject:</b> ${escapeHtml(subject)}</div>
+<div><b>Attachment:</b> ${escapeHtml(filename)} (${kb} KB)</div>
+<div style="white-space:pre-wrap;margin:4px 0;color:var(--muted,inherit);">${escapeHtml(body)}</div>
+<div class="sync-row" style="margin:6px 0 0;align-items:flex-start;">
+<button type="button" class="sync-btn sm inline" data-gmail-send>Send</button>
+<button type="button" class="sync-btn sm inline" data-gmail-cancel>Cancel</button>
+<span class="sync-status" data-gmail-status></span>
+</div>`;
+container.appendChild(box);
+const out = (h) => { box.querySelector('[data-gmail-status]').innerHTML = h; };
+box.querySelector('[data-gmail-cancel]').addEventListener('click', () => box.remove());
+const sendBtn = box.querySelector('[data-gmail-send]');
+sendBtn.addEventListener('click', async () => {
+const to = ownerConn && ownerConn.email ? ownerConn.email : (box.querySelector('[data-gmail-to]')?.value || '').trim();
+if (!/^[^\s@,;<>]+@[^\s@,;<>]+\.[^\s@,;<>]+$/.test(to)) { out('Enter one valid email address to send to.'); return; }
+if (!hasGmailSend()) {
+out('Sending needs permission first: turn on "Allow sending email from my Gmail" in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#gmail-send-toggle">Settings → Gmail sending</span>, then sign out and back in. Nothing was sent.');
+return;
+}
+sendBtn.disabled = true;
+try {
+if (!isSignedIn()) { out('Signing in to Google…'); await signIn(); }
+if (!(await canAttemptGoogleAction())) { out('Sign in to Google at the top of Overview first. Nothing was sent.'); return; }
+out('Sending…');
+const bytes = new Uint8Array(await blob.arrayBuffer());
+await sendMessage({ to, subject, body, attachment: { filename, mimeType: 'application/pdf', bytes } });
+box.innerHTML = `<b>Sent</b> to ${escapeHtml(to)}: ${escapeHtml(subject)} (${escapeHtml(filename)} attached).`;
+} catch (err) {
+out(`Couldn't send: ${escapeHtml(err.message || String(err))}. Nothing was sent.`);
+} finally {
+sendBtn.disabled = false;
+}
+});
+return box;
+}
+export { buildReportPdf, downloadBlob, reportFilename, openEmailDraft, openGmailSendConfirm, reportMailFor, defaultPeriod, periodSummary, statementFor, isoDate };
