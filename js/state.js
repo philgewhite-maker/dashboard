@@ -2742,9 +2742,35 @@ let onExternalUpdate = () => {};
 // against the current on-disk revision on every save — see persist() for
 // why this exists.
 let knownRev = 0;
-// JSON text of the document as this session last read it from, or wrote it to, disk: the common ancestor
-// persist() merges from when another tab has saved in the meantime.
-let persistedBase = null;
+// The document as this session last read it from, or wrote it to, disk: the common ancestor persist() merges
+// from when another tab has saved in the meantime. Held as one JSON string PER TOP-LEVEL KEY ({key: json}, keys
+// in document order, undefined-valued keys left out when joined), built in a single pass per save and shared
+// with notifyDataChanged below. persistedBaseText() joins it back into the exact text JSON.stringify(data)
+// would have produced, only on the rare merge path.
+let persistedSigs = null;
+
+// {key: JSON.stringify(obj[key])} for EVERY key (a key whose value is undefined keeps an undefined entry).
+// Throws if a value cannot be serialised, like JSON.stringify(obj) itself would.
+function docSignatures(obj) {
+const sig = {};
+Object.keys(obj).forEach((k) => { sig[k] = JSON.stringify(obj[k]); });
+return sig;
+}
+// Same text as JSON.stringify(<the object the map was built from>).
+function joinSignatures(sig) {
+const parts = [];
+Object.keys(sig).forEach((k) => { if (sig[k] !== undefined) parts.push(`${JSON.stringify(k)}:${sig[k]}`); });
+return `{${parts.join(',')}}`;
+}
+// Equal as whole documents: same serialisable keys, same order, same text.
+function signaturesEqual(a, b) {
+const ka = Object.keys(a).filter((k) => a[k] !== undefined);
+const kb = Object.keys(b).filter((k) => b[k] !== undefined);
+if (ka.length !== kb.length) return false;
+for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i] || a[ka[i]] !== b[kb[i]]) return false;
+return true;
+}
+function persistedBaseText() { return persistedSigs ? joinSignatures(persistedSigs) : null; }
 
 // Fired after a local save that actually changed something, so any
 // live-sync layer knows there's something to upload. Deliberately NOT
@@ -2783,13 +2809,20 @@ try { sig[k] = JSON.stringify(data[k]); } catch (e) { sig[k] = String(Math.rando
 });
 return sig;
 }
+// The render-relevant part of an all-keys map (persist() builds that once per save).
+function renderSignaturesFrom(all) {
+const sig = {};
+Object.keys(all).forEach((k) => { if (!NON_RENDER_KEYS.has(k)) sig[k] = all[k]; });
+return sig;
+}
 // Called once after the first render so the first real save has a baseline to diff against.
 function baselineDataSignatures() { lastSignatures = currentSignatures(); }
 // `fire: false` records the new state without notifying: used when the
 // caller re-renders everything itself (a remote pull, a backup import).
-function notifyDataChanged({ fire = true } = {}) {
+// `allSigs`: the all-keys map persist() already built for this save; without it the keys are serialised afresh.
+function notifyDataChanged({ fire = true } = {}, allSigs = null) {
 if (lastSignatures === null) return;
-const next = currentSignatures();
+const next = allSigs ? renderSignaturesFrom(allSigs) : currentSignatures();
 const changed = new Set();
 Object.keys(next).forEach((k) => { if (next[k] !== lastSignatures[k]) changed.add(k); });
 Object.keys(lastSignatures).forEach((k) => { if (!(k in next)) changed.add(k); });
@@ -2807,7 +2840,7 @@ async function loadData() {
 const stored = await kvGet(DATA_KEY);
 knownRev = (await kvGet(REV_KEY)) || 0;
 data = stored || sampleData();
-try { persistedBase = stored ? JSON.stringify(stored) : null; } catch (e) { persistedBase = null; }
+try { persistedSigs = stored ? docSignatures(stored) : null; } catch (e) { persistedSigs = null; }
 migrate();
 if (!stored) await persist();
 }
@@ -4258,8 +4291,14 @@ async function persist(opts = {}) {
 savePending = false;
 // Compare-before-write: nothing changed since the last save/load, so no write, no dirty marker, no push. Not for
 // remote adopt/merge (notify:false) or the merge retry, which must always write.
-if (opts.notify !== false && !opts.retries && persistedBase !== null) {
-try { if (JSON.stringify(data) === persistedBase) return; } catch (e) { /* fall through and save */ }
+// The document is serialised ONCE per save, key by key; the same map is the "unchanged?" test, the new merge base
+// and the change-notification baseline (it used to be three separate whole-document passes).
+let sigs = null;
+if (opts.notify !== false && !opts.retries && persistedSigs !== null) {
+try {
+sigs = docSignatures(data);
+if (signaturesEqual(sigs, persistedSigs)) return;
+} catch (e) { sigs = null; /* fall through and save */ }
 }
 try {
 const onDiskRev = (await kvGet(REV_KEY)) || 0;
@@ -4269,9 +4308,9 @@ const onDiskData = await kvGet(DATA_KEY);
 // away loses it silently (a projection that finished a minute ago simply vanished), so merge it three ways
 // instead: what this session last saw on disk (base), what it holds now (ours), what is on disk now (theirs).
 let kept = false;
-if (persistedBase && onDiskData && (opts.retries || 0) < 3) {
+if (persistedSigs && onDiskData && (opts.retries || 0) < 3) {
 try {
-const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBase), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'heatingReading']);
+const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBaseText()), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'heatingReading']);
 console.warn(`Disk revision ${onDiskRev} is newer than this session's ${knownRev}: merged this session's edits into it${conflicts.length ? ` (the disk copy won on ${conflicts.join(', ')})` : ''}.`);
 data = merged; kept = true;
 } catch (e) { kept = false; }
@@ -4288,9 +4327,9 @@ await persist({ ...opts, retries: (opts.retries || 0) + 1 });
 onExternalUpdate();
 return;
 }
-persistedBase = JSON.stringify(data);
+persistedSigs = docSignatures(data);
 onSaveStatus('conflict');
-notifyDataChanged({ fire: false });
+notifyDataChanged({ fire: false }, persistedSigs);
 onExternalUpdate();
 return;
 }
@@ -4304,9 +4343,9 @@ await kvSetMany([[SYNC_DIRTY_KEY, `${Date.now()}.${Math.random().toString(36).sl
 await kvSet(DATA_KEY, data);
 }
 await kvSet(REV_KEY, knownRev);
-persistedBase = JSON.stringify(data);
+persistedSigs = sigs || docSignatures(data);
 onSaveStatus('ok');
-notifyDataChanged({ fire: !opts.silentDispatch });
+notifyDataChanged({ fire: !opts.silentDispatch }, persistedSigs);
 if (opts.notify !== false) fireLocalChange();
 } catch (e) {
 onSaveStatus('error');
@@ -4815,7 +4854,7 @@ await replaceData(JSON.parse(text));
 }
 
 export {
-data, sampleData, loadData, migrate, persist, queueSave, flushSave, hasPendingSave, setSaveStatusHandler,
+data, docSignatures, joinSignatures, sampleData, loadData, migrate, persist, queueSave, flushSave, hasPendingSave, setSaveStatusHandler,
 setExternalUpdateHandler, setLocalChangeHandler, onDataChange, baselineDataSignatures, getLocalSettings, setLocalSetting, setLocalSettingHandler, computeStreak, reachOutThreshold,
 isDormantStage, currentAge, displayAge, photoCoverage, photoLinkLabels, averageRating, completeness,
 exportBackup, importBackup, replaceData, DATA_KEY, SYNC_DIRTY_KEY, TAG_FIELDS, SENSITIVE_BLOCKS, whatSheHas, unheldInventory, whoFits, inventorySets, incompleteCoreSets, whoFitsSet, interestNote, SIZE_GROUPS, sizeGroupFor, SET_CORE_GROUPS, DEFAULT_PREFS, blankInventoryItem, blankApOrder, blankLoan, blankSetCompletionFind, blankBookItem,

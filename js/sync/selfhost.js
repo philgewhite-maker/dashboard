@@ -52,7 +52,8 @@ await setLocalSetting('syncKnownRev', Number(rev) || 0);
 // definite failure you can act on beats an indefinite wait.
 const REQUEST_TIMEOUT_MS = 15000;
 
-async function requestOnce(method, body) {
+// `rawBody` (optional): an already-serialised JSON request body, sent as is instead of JSON.stringify(body).
+async function requestOnce(method, body, rawBody) {
 const { url, secret, configured } = await getConfig();
 if (!configured) throw new NotConfiguredError();
 
@@ -63,7 +64,7 @@ try {
 res = await fetch(url, {
 method,
 headers: { 'Content-Type': 'application/json', 'X-Sync-Secret': secret },
-body: body === undefined ? undefined : JSON.stringify(body),
+body: rawBody !== undefined ? rawBody : (body === undefined ? undefined : JSON.stringify(body)),
 signal: controller.signal,
 });
 } catch (networkErr) {
@@ -108,14 +109,14 @@ return res.json();
 // write. Anything else (a real network failure, a 401, a genuine server
 // error) is deterministic and retrying it would just fail the same way,
 // so only a JSON.parse-shaped SyntaxError gets the second attempt.
-async function request(method, body) {
+async function request(method, body, rawBody) {
 try {
-return await requestOnce(method, body);
+return await requestOnce(method, body, rawBody);
 } catch (err) {
 if (!(err instanceof SyntaxError)) throw err;
 console.warn('Sync response failed to parse -- retrying once:', err);
 try {
-return await requestOnce(method, body);
+return await requestOnce(method, body, rawBody);
 } catch (err2) {
 if (!(err2 instanceof SyntaxError)) throw err2;
 // Still cut short on a second, independent request -- not a one-off
@@ -158,9 +159,12 @@ return unseal(await request('GET'));
 
 // Writes `data`, but only if the server is still at the revision we last
 // saw. Throws ConflictError (carrying the newer document) if not.
-async function pushRemote(data) {
+// `text` (optional, with `data` left undefined): the document already serialised as JSON. A plaintext push sends
+// it verbatim; only the encrypted path needs the parsed object.
+async function pushRemote(data, { text = null } = {}) {
 const crypt = await import('../synccrypto.js');
 let payload = data;
+let rawData = text;
 if (await crypt.isEncrypted()) {
 // Refusing is the whole safety property. A device that has lost its
 // key would otherwise quietly replace an encrypted document with a
@@ -169,10 +173,13 @@ if (await crypt.isEncrypted()) {
 if (!(await crypt.hasKey())) {
 throw new crypt.LockedError('This device has no encryption key, so it won\'t overwrite the encrypted copy on the server. Paste the recovery key in Settings.');
 }
-payload = await crypt.encryptDocument(data);
+payload = await crypt.encryptDocument(data !== undefined ? data : JSON.parse(text));
+rawData = null;
 }
 const rev = await getKnownRev();
-const result = await request('POST', { rev, data: payload });
+const result = rawData !== null && data === undefined
+? await request('POST', undefined, `{"rev":${JSON.stringify(rev)},"data":${rawData}}`)
+: await request('POST', { rev, data: payload });
 await setKnownRev(result.rev);
 return result;
 }

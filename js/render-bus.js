@@ -15,7 +15,28 @@
 //  - heavy panels (connections, overview, nudges) and the ticker are
 //    debounced, and the nudges are only redrawn when you open their tab
 //    (their redraw re-shuffles and can make a paid AI call).
-import { onDataChange, baselineDataSignatures } from './state.js';
+import { data, onDataChange, baselineDataSignatures } from './state.js';
+import { renderAll } from './render-all.js';
+import { renderHabits } from './features/habits.js';
+import { renderGoals } from './features/goals.js';
+import { renderJobs } from './features/jobs.js';
+import { renderPendingImports } from './features/connections.js';
+import { renderYearlyPerks } from './features/yearlyperks.js';
+import { renderBusinessIdeas } from './features/ideas.js';
+import { renderEnhancementIdeas } from './features/enhancements.js';
+import { renderReadingList } from './features/readinglist.js';
+import { renderMedia } from './features/media.js';
+import { renderHealthDaily } from './features/health.js';
+import { renderRenphoDaily } from './features/renpho.js';
+import { renderWellnessDaily } from './features/wellness.js';
+import { renderMarriottAvailability } from './features/marriottavailability.js';
+import { renderApOrders } from './features/aporders.js';
+import { renderTagCleanup } from './features/tagcleanup.js';
+import { renderTelegramFamily } from './features/telegramfamily.js';
+import { renderBooks } from './features/books.js';
+import { renderSchoolCalendar } from './features/schoolcalendar.js';
+import { refreshShopping } from './features/shopping.js';
+import { renderDayQueue } from './features/dayqueue.js';
 import { renderVouchers } from './features/vouchers.js';
 import { renderLoyaltyBalances } from './features/loyaltybalances.js';
 import { renderTasks } from './features/tasks.js';
@@ -52,7 +73,7 @@ const RULES = [
 { id: 'planner', keys: ['tasks', 'trips', 'connections', 'plannerEntries', 'plannerActivities', 'plannerExtraDays', 'airbnbReservations', 'airbnbListings'], panels: ['#planner-panel'], render: renderPlanner, heavy: true },
 { id: 'nudges', keys: ['tasks', 'vouchers', 'trips', 'financeAccounts', 'calendars', 'habits', 'goals', 'airbnbReservations', 'agentInbox'], panels: ['#nudges-panel'], render: renderNudges, onTabShow: true },
 { id: 'agent-inbox', keys: ['agentInbox'], panels: ['#agent-inbox-panel'], render: renderAgentInbox },
-{ id: 'capture-inbox', keys: ['captureInbox'], panels: ['#capture-inbox-panel'], render: renderCaptureInbox },
+{ id: 'capture-inbox', keys: ['captureInbox', 'pendingImports'], panels: ['#capture-inbox-panel'], render: renderCaptureInbox },
 { id: 'capture-drafts', keys: ['captureDrafts'], panels: ['#capture-drafts-panel'], render: renderCaptureDrafts },
 { id: 'airbnb', keys: ['airbnbListings', 'airbnbReservations', 'airbnbBlocks', 'airbnbCleanerEvents', 'airbnbCleanerBlocks', 'airbnbCleaners', 'lettingLedger'], panels: ['#airbnb-panel'], render: renderAirbnb },
 { id: 'booking-requests', keys: ['bookingRequests', 'airbnbReservations', 'airbnbListings'], panels: ['#booking-requests'], render: renderBookingRequests },
@@ -70,8 +91,29 @@ const RULES = [
 { id: 'overview', keys: ['connections'], panels: ['#overview-panel'], render: renderOverview, heavy: true },
 { id: 'family', keys: ['connections', 'trips'], panels: ['#family-panel'], render: renderFamily },
 { id: 'calendars', keys: ['calendars'], panels: ['#calendars-panel'], render: renderCalendars },
+// Panels that only renderAll() used to redraw (added for targeted remote redraws, PERF-PLAN C8).
+{ id: 'habits', keys: ['habits'], panels: ['#habits-list'], render: renderHabits },
+{ id: 'goals', keys: ['goals'], panels: ['#goals-list'], render: renderGoals },
+{ id: 'jobs', keys: ['jobs'], panels: ['#jobs-list'], render: renderJobs },
+{ id: 'pending-imports', keys: ['pendingImports', 'connections'], panels: ['#candidate-list'], render: () => renderPendingImports() },
+{ id: 'yearly-perks', keys: ['annualPerks', 'financeAccounts', 'tasks'], panels: ['#yearly-perks-list'], render: renderYearlyPerks },
+{ id: 'business-ideas', keys: ['businessIdeas', 'tasks'], panels: ['#ideas-list'], render: renderBusinessIdeas },
+{ id: 'enhancement-ideas', keys: ['enhancementIdeas'], panels: ['#enhancements-list'], render: renderEnhancementIdeas },
+{ id: 'reading-list', keys: ['readingList'], panels: ['#reading-list'], render: renderReadingList },
+{ id: 'media', keys: ['mediaItems', 'subscriptions', 'books'], panels: ['#media-list'], render: renderMedia },
+{ id: 'health-daily', keys: ['healthDaily', 'renphoDaily', 'wellnessDaily'], panels: ['#health-daily-body'], render: renderHealthDaily },
+{ id: 'renpho-daily', keys: ['renphoDaily', 'healthDaily'], panels: ['#renpho-daily-body'], render: renderRenphoDaily },
+{ id: 'wellness-daily', keys: ['wellnessDaily', 'healthDaily'], panels: ['#wellness-daily-body'], render: renderWellnessDaily },
+{ id: 'marriott-availability', keys: ['marriottAvailability', 'loyaltyPrograms', 'loyaltyBalances'], panels: ['#mvc-availability-panel'], render: renderMarriottAvailability },
+{ id: 'ap-orders', keys: ['apOrders', 'tasks'], panels: ['#ap-orders-list'], render: renderApOrders },
+{ id: 'tag-cleanup', keys: ['connections', 'flagRules'], panels: ['#tag-cleanup'], render: renderTagCleanup, heavy: true },
+{ id: 'telegram-family', keys: ['telegramThreads', 'telegramUnclaimed', 'connections', 'trips', 'tasks'], panels: ['#telegramfamily-body'], render: renderTelegramFamily },
+{ id: 'books', keys: ['books', 'connections', 'mediaItems'], panels: ['#books-list'], render: renderBooks },
+{ id: 'school-calendar', keys: ['schoolCalendarUpdates'], panels: ['#school-calendar-list'], render: renderSchoolCalendar },
+{ id: 'shopping', keys: ['tasks', 'inventory', 'setCompletionFinds', 'cashbackTracked', 'ebayResaleEstimates', 'connections'], panels: ['#shopping-lists', '#inventory-list'], render: refreshShopping, heavy: true },
+{ id: 'day-queue', keys: ['dayQueue', 'connections'], panels: ['#day-queue-content'], render: renderDayQueue, heavy: true },
 // The ticker rewrites its whole strip (restarting the marquee), so it is debounced hard.
-{ id: 'ticker', keys: ['lettingLedger', 'financeAccounts', 'trips', 'tasks', 'ticker'], panels: ['#ticker'], render: renderTicker, heavy: true, debounce: 4000, always: true },
+{ id: 'ticker', keys: ['lettingLedger', 'financeAccounts', 'trips', 'tasks', 'ticker', 'heatingReading', 'claudeSubscriptionUsage', 'modelCheck'], panels: ['#ticker'], render: renderTicker, heavy: true, debounce: 4000, always: true },
 ];
 
 const dirty = new Map(); // rule id -> rule
@@ -105,7 +147,7 @@ if (panels.some((p) => isVisible(p) && isEditing(p))) { waiting = true; return; 
 if (tooBusy(rule)) { console.warn(`render-bus: "${id}" kept changing its own data; stopped re-rendering it for now.`); dirty.delete(id); return; }
 dirty.delete(id);
 recent.get(id).push(Date.now());
-try { rule.render(); } catch (err) { console.error(`render-bus: "${id}" failed to re-render:`, err); }
+try { const r = rule.render(); if (r && r.catch) r.catch((err) => console.error(`render-bus: "${id}" failed to re-render:`, err)); } catch (err) { console.error(`render-bus: "${id}" failed to re-render:`, err); }
 });
 // Something is still being typed into: look again once focus moves (focusout below also retries).
 if (waiting) schedule(600);
@@ -126,8 +168,53 @@ longest = Math.max(longest, rule.debounce || (rule.heavy ? 1200 : 120));
 if (dirty.size) schedule(longest);
 }
 
+// Keys that hold no display data (schema/seeding flags, check timestamps, a
+// cache nothing shows): a remote change to only these needs no redraw.
+const NO_DISPLAY_KEYS = new Set(['schemaVersion', 'voucherProviderBackfilled', 'providersConsolidated', 'apOrdersLastCheckedAt', 'apRefundsLastCheckedAt', 'flagRulesSeeded', 'importStatus', 'proxyRefusals']);
+const NON_RENDER = new Set(['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'scheduledRuns', 'calendarStatus', 'diagnostics']); // same list as state.js
+const RULE_KEYS = new Set(RULES.flatMap((r) => r.keys));
+
+// This module's own per-key picture of `data`, as of the last redraw it knows
+// of. state.js's baseline can't be used for a remote pull: the adopt re-saves
+// silently (no change set is reported), so the changed keys are found here.
+// Kept current from the change events (only the keys they name are re-read);
+// a key it missed just shows up as "changed" later, which only over-redraws.
+let seen = null;
+function sigOf(v) { try { return JSON.stringify(v); } catch (e) { return String(Math.random()); } }
+function snapshot() {
+const sig = {};
+Object.keys(data).forEach((k) => { if (!NON_RENDER.has(k)) sig[k] = sigOf(data[k]); });
+return sig;
+}
+
+// Called by autosync.js after a pull has replaced `data` (it used to call
+// renderAll()). Redraws only the panels fed by the keys that changed; a
+// changed key no rule covers, or no baseline yet, falls back to renderAll().
+// Returns 'none' | 'targeted' | 'all' (for the console / tests).
+function redrawAfterRemote() {
+if (!seen) { renderAll(); return 'all'; }
+const next = snapshot();
+const changed = new Set();
+Object.keys(next).forEach((k) => { if (next[k] !== seen[k]) changed.add(k); });
+Object.keys(seen).forEach((k) => { if (!(k in next)) changed.add(k); });
+seen = next;
+if (!changed.size) return 'none';
+const unknown = [...changed].filter((k) => !RULE_KEYS.has(k) && !NO_DISPLAY_KEYS.has(k));
+if (unknown.length) {
+console.info(`render-bus: remote change to ${unknown.join(', ')} has no rule; redrawing everything.`);
+renderAll();
+return 'all';
+}
+onChanged(changed);
+return 'targeted';
+}
+
 function initRenderBus() {
 baselineDataSignatures();
+seen = snapshot();
+onDataChange((changed) => {
+changed.forEach((k) => { if (k in data) seen[k] = sigOf(data[k]); else delete seen[k]; });
+});
 onDataChange(onChanged);
 // Opening a tab redraws whatever was waiting for it.
 document.addEventListener('tabshown', () => {
@@ -138,4 +225,4 @@ schedule(60);
 document.addEventListener('focusout', () => { if (dirty.size) setTimeout(flush, 0); });
 }
 
-export { initRenderBus };
+export { initRenderBus, redrawAfterRemote };

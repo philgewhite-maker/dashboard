@@ -19,11 +19,16 @@
 // them" (duplicate-merge, CSV import), applied here to "the same
 // connection edited on two devices since they last agreed."
 import { data, queueSave, getLocalSettings, setLocalSetting, setLocalChangeHandler } from '../state.js';
+import { kvGet, kvSet } from '../db.js';
 import { isConfigured, getConfig } from './selfhost.js';
 
 const PUSH_DEBOUNCE_MS = 2500; // matches autosync.js's own debounce
 const POLL_MS = 45000; // matches autosync.js's own poll cadence
-const STATE_KEY = 'connSyncState'; // local-settings key: {[id]: {rev, snapshot}}
+// {[id]: {rev, snapshot}}. Used to live under this key in the local-settings record, which made that record
+// carry a copy of every connection (chat logs included) and rewrite it on every unrelated settings toggle; now
+// its own kv entry. STATE_KEY stays only to migrate what an older build left in local settings.
+const STATE_KEY = 'connSyncState';
+const STATE_KV_KEY = 'connsync-state-v1';
 
 let pushTimer = null;
 let pollTimer = null;
@@ -51,13 +56,31 @@ if (!/\/sync\.php(\?.*)?$/.test(url)) return '';
 return url.replace(/\/sync\.php(\?.*)?$/, '/sync-connections.php');
 }
 
-async function getState() {
+// One live object shared by pushDirty() and pullChanged(), as the local-settings cache was before: a run that
+// updates entries and then fails part-way still keeps them for the next run in this session.
+let statePromise = null;
+async function loadState() {
+const stored = await kvGet(STATE_KV_KEY);
+if (stored && typeof stored === 'object') return stored;
+// First run on this build: take over what an older build kept in local settings. The new entry is written
+// first, and the old copy only emptied once it is safely there.
 const settings = await getLocalSettings();
-return settings[STATE_KEY] || {};
+const legacy = settings[STATE_KEY];
+if (legacy && typeof legacy === 'object' && Object.keys(legacy).length) {
+await kvSet(STATE_KV_KEY, legacy);
+await setLocalSetting(STATE_KEY, null);
+return legacy;
+}
+return {};
+}
+function getState() {
+if (!statePromise) statePromise = loadState().catch((err) => { statePromise = null; throw err; });
+return statePromise;
 }
 
 async function setState(state) {
-await setLocalSetting(STATE_KEY, state);
+statePromise = Promise.resolve(state);
+await kvSet(STATE_KV_KEY, state);
 }
 
 async function secretHeader() {

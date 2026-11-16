@@ -7,11 +7,11 @@
 // never silently erase a save made on another device. When that happens the
 // newer document wins and a backup of what this device had is downloaded
 // first, matching what "Pull from Google Drive" already does.
-import { data, replaceData, setLocalChangeHandler, hasPendingSave, flushSave, SYNC_DIRTY_KEY } from '../state.js';
+import { data, replaceData, setLocalChangeHandler, hasPendingSave, flushSave, SYNC_DIRTY_KEY, docSignatures, joinSignatures } from '../state.js';
 import { offerBackup, backupOutcomePhrase } from '../backupgate.js';
 import { kvGet, kvSet, kvDeleteIf } from '../db.js';
 import { mergeDocuments } from './merge.js';
-import { renderAll } from '../render-all.js';
+import { redrawAfterRemote } from '../render-bus.js';
 import { ConflictError, NotConfiguredError, isConfigured, pullRemote, pushRemote, setKnownRev, getKnownRev } from './selfhost.js';
 import { LockedError } from '../synccrypto.js';
 import { drainAgentStaging } from './agentstaging.js';
@@ -78,8 +78,21 @@ const BASE_KEY = 'sync-base';
 // Caches and last-run stamps each device refreshes for itself: never a reason
 // to push on their own, and never a merge conflict worth a backup file.
 const VOLATILE_KEYS = ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'calendarStatus'];
-async function saveBase(jsonText) {
-try { await kvSet(BASE_KEY, jsonText); } catch (err) { console.warn('Could not store the sync baseline:', err); }
+// The baseline's per-key JSON ({key: json}), kept in memory next to the stored text so a push compares strings
+// instead of parsing the baseline and re-serialising every key of it. Used only while BASE_KEY still holds
+// exactly `text` (another tab may have rewritten it), so it can never disagree with what is stored.
+let baseCache = null;
+// `sigs` (optional): docSignatures() of the document `jsonText` was joined from, so it needs no re-parsing.
+async function saveBase(jsonText, sigs) {
+try {
+await kvSet(BASE_KEY, jsonText);
+if (sigs) baseCache = { text: jsonText, sigs };
+} catch (err) { console.warn('Could not store the sync baseline:', err); }
+}
+// Serialises a document once, key by key: the baseline text and its per-key map from one pass.
+function baselineOf(doc) {
+const sigs = docSignatures(doc);
+return { text: joinSignatures(sigs), sigs };
 }
 
 // Which top-level sections of `nowText` differ from the last-synced baseline,
@@ -87,15 +100,19 @@ try { await kvSet(BASE_KEY, jsonText); } catch (err) { console.warn('Could not s
 // collection read from the record store). `hasBase` false means there is no
 // baseline to compare with. `sameShape` is false when a section was added or
 // removed. One definition, used by push() to decide whether to send and by
-// pull() to decide whether this device holds unsent edits.
-async function meaningfulChanges(nowText) {
+// pull() to decide whether this device holds unsent edits. `nowSigs` is the
+// current document's docSignatures() map (one serialisation, made by the caller).
+async function meaningfulChanges(nowSigs) {
 const baseText = await kvGet(BASE_KEY);
 if (!baseText) return { hasBase: false, changed: [], meaningful: [], sameShape: false };
-const base = JSON.parse(baseText), now = JSON.parse(nowText);
-const changed = Object.keys(now).filter((k) => JSON.stringify(now[k]) !== JSON.stringify(base[k]));
+let baseSigs;
+if (baseCache && baseCache.text === baseText) baseSigs = baseCache.sigs;
+else { baseSigs = docSignatures(JSON.parse(baseText)); baseCache = { text: baseText, sigs: baseSigs }; }
+const nowKeys = Object.keys(nowSigs).filter((k) => nowSigs[k] !== undefined);
+const changed = nowKeys.filter((k) => nowSigs[k] !== baseSigs[k]);
 const fromStore = flippedKeys();
 const meaningful = changed.filter((k) => !VOLATILE_KEYS.includes(k) && !fromStore.includes(k));
-return { hasBase: true, changed, meaningful, sameShape: Object.keys(base).length === Object.keys(now).length };
+return { hasBase: true, changed, meaningful, sameShape: Object.keys(baseSigs).length === nowKeys.length };
 }
 
 // Clears the persisted "unsent edits" marker, but only if it still holds the
@@ -115,7 +132,7 @@ async function hasUnsentEdits() {
 if (hasPendingSave() || pushTimer) return true;
 try { if (await kvGet(SYNC_DIRTY_KEY)) return true; } catch (err) { return true; }
 try {
-const { hasBase, meaningful, sameShape } = await meaningfulChanges(JSON.stringify(data));
+const { hasBase, meaningful, sameShape } = await meaningfulChanges(docSignatures(data));
 return hasBase && (meaningful.length > 0 || !sameShape);
 } catch (err) {
 // Can't tell: err on the side of pushing, whose conflict path merges.
@@ -155,8 +172,9 @@ flippedKeys().forEach((k) => { if (k in data) kept[k] = data[k]; });
 await replaceData(remote.data, { fromRemote: true });
 Object.assign(data, kept);
 await setKnownRev(remote.rev);
-await saveBase(JSON.stringify(data));
-renderAll();
+const adopted = baselineOf(data);
+await saveBase(adopted.text, adopted.sigs);
+redrawAfterRemote();
 settingsAfterRemote();
 return backup;
 }
@@ -193,7 +211,7 @@ backup = await offerBackup(`Two devices changed the same thing (${conflicts.slic
 }
 await replaceData(merged, { fromRemote: true });
 await setKnownRev(remote.rev);
-renderAll();
+redrawAfterRemote();
 settingsAfterRemote();
 syncLog(conflicts.length ? 'merged, server value kept for' : 'merged cleanly', conflicts.length ? conflicts.slice(0, 8).join(', ') : `rev ${remote.rev}`);
 return { merged: true, conflicts, backup };
@@ -241,7 +259,7 @@ setStatus(firstAdoption
 } else {
 // Same revision as the server: its copy IS the last synced state, so it
 // is the right baseline for any later merge. Stored once, not per poll.
-if (!hasPendingSave() && !pushTimer && !(await kvGet(BASE_KEY))) await saveBase(JSON.stringify(remote.data));
+if (!hasPendingSave() && !pushTimer && !(await kvGet(BASE_KEY))) { const b = baselineOf(remote.data); await saveBase(b.text, b.sigs); }
 // An edit saved on this device but never pushed (the page closed inside
 // the push debounce, or the push failed) would otherwise wait for the
 // next local edit. Send it now -- once per marker per page, so a push the
@@ -277,13 +295,15 @@ setStatus('Saving…');
 // Read BEFORE serialising: an edit saved after this point writes a new
 // token, which the compare-and-clear below leaves in place.
 try { token = await kvGet(SYNC_DIRTY_KEY); } catch (err) { token = null; }
-const sent = JSON.stringify(data);
+// One serialisation, key by key: `sent` is its exact text, and the same map is what the change check compares.
+const sentSigs = docSignatures(data);
+const sent = joinSignatures(sentSigs);
 // Which top-level sections this push actually changed, kept in the local
 // sync log so a chatty writer (a poll, a scheduled task, another open
 // device) can be identified from the keys that keep appearing here.
 let skip = false;
 try {
-const { hasBase, changed, meaningful, sameShape } = await meaningfulChanges(sent);
+const { hasBase, changed, meaningful, sameShape } = await meaningfulChanges(sentSigs);
 if (hasBase) {
 // A collection read from the record store changes whenever another
 // device edits it; that arrives via the store, not as a reason to push.
@@ -304,8 +324,8 @@ setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
 return 'skipped';
 }
 // Exactly the text the baseline records, so base and server agree.
-await pushRemote(JSON.parse(sent));
-await saveBase(sent);
+await pushRemote(undefined, { text: sent });
+await saveBase(sent, sentSigs);
 await clearDirty(token);
 setStatus(`Synced ${new Date().toLocaleTimeString()}`, 'ok');
 } catch (err) {

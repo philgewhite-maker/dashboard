@@ -94,14 +94,28 @@ const c = await crypt();
 return c.isEnvelope(payload) ? c.decryptDocument(payload) : payload;
 }
 
+// Row hashes, remembered against each row's JSON text. Hashing a row (canonical form + hash) dominated every run,
+// and runs happen on every edit, poll and refocus, mostly with nothing (or one row) changed: one JSON.stringify
+// of the row decides whether it must be hashed again. The text is always taken from the live row, so the memo
+// cannot go stale; a different key order or any edit is just a miss. Rebuilt each run, so deleted rows drop out.
+let rowHashMemo = new Map(); // stateKey -> {sig, hash}
+
 // Every local row of every collection: Map(stateKey -> {entry, id, value, hash}).
 function localRows() {
 const out = new Map();
+const nextMemo = new Map();
 COLLECTIONS.forEach((entry) => {
 rowsOf(entry, data[entry.key]).forEach((value, id) => {
-out.set(`${entry.key}${SEP}${id}`, { entry, id, value, hash: hashValue(value) });
+const key = `${entry.key}${SEP}${id}`;
+let sig;
+try { sig = JSON.stringify(value); } catch (e) { sig = undefined; }
+const memo = sig !== undefined ? rowHashMemo.get(key) : undefined;
+const hash = memo && memo.sig === sig ? memo.hash : hashValue(value);
+if (sig !== undefined) nextMemo.set(key, { sig, hash });
+out.set(key, { entry, id, value, hash });
 });
 });
+rowHashMemo = nextMemo;
 return out;
 }
 
