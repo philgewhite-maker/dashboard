@@ -99,6 +99,17 @@ id: 'residence-inn-london-tower-bridge', name: 'Residence Inn by Marriott London
 status: 'blocked', blockedReason: 'Same Marriott block as the London Bridge Residence Inn (property code LONBD).',
 url: () => '', parse: () => null,
 },
+{
+id: 'locke-bermonds', name: 'Bermonds Locke', basket: 'ensuite', home: 'https://www.lockeliving.com/en/london/bermonds-locke/your-stay/city-studio',
+// Checked 16 Nov 2026 through claude-test. Locke books through Mews (property/configuration id
+// fff9828e-f506-45c8-837a-ab51009c36f7); app.mews.com/distributor/<id>?mewsStart=YYYY-MM-DD&mewsEnd=YYYY-MM-DD&mewsAdultCount=2
+// honours the dates, but the booking app draws itself into a same-origin iframe written with document.write, which the
+// renderer's page serialisation leaves out (body is an empty iframe + cookie banner, no price text), and the prices
+// come from a POST GraphQL API (booking-engine.services.mews.com/graphql) that page.render/page.fetch cannot call. The
+// lockeliving.com room page itself carries no dated price. Revisit if the renderer can read child frames.
+status: 'blocked', blockedReason: 'Locke books through Mews, whose booking app renders inside an iframe the page renderer does not capture, and the prices come from a POST-only API, so no dated nightly price can be read.',
+url: () => '', parse: () => null,
+},
 ];
 const BASKET_TEXT = { double: 'Budget hotels nearby', ensuite: 'Mid-scale hotels nearby' };
 const hotelById = (id) => HOTELS.find((h) => h.id === id);
