@@ -123,8 +123,46 @@ SILENT_TOKEN_TIMEOUT_MS,
 ]);
 }
 
+// Single-flight: GIS's token client is shared and requestAccessToken()
+// overwrites client.callback, so two overlapping requests would strand the
+// first caller (an 8s timeout / false "not reconnected"). Concurrent silent
+// callers join one in-flight request; an interactive call waits for any
+// silent one, reuses the token it produced if fresh, and is itself shared so
+// two popups are never opened.
+let pendingSilent = null;
+let pendingInteractive = null;
+
+function freshCached() {
+return cachedToken && cachedToken.expiresAt > Date.now() + 30000 ? cachedToken.accessToken : null;
+}
+
 async function getAccessToken(interactive) {
-if (cachedToken && cachedToken.expiresAt > Date.now() + 30000) return cachedToken.accessToken;
+const hit = freshCached();
+if (hit) return hit;
+if (!interactive) {
+if (pendingSilent) return pendingSilent;
+// If an interactive request overwrote the shared callback meanwhile, this one times out:
+// hand back the token the popup produced instead of failing.
+const p = fetchNewToken(false)
+.catch((err) => { const c = freshCached(); if (c) return c; throw err; })
+.finally(() => { if (pendingSilent === p) pendingSilent = null; });
+pendingSilent = p;
+return p;
+}
+// Wait briefly for a silent request already in flight, but not past the click's user-activation
+// window (~5s in Chrome) or the popup gets blocked: after 1.5s go interactive anyway.
+if (pendingSilent) {
+try { await Promise.race([pendingSilent, new Promise((r) => setTimeout(r, 1500))]); } catch (e) { /* fall through to the popup */ }
+}
+const again = freshCached();
+if (again) return again;
+if (pendingInteractive) return pendingInteractive;
+const p = fetchNewToken(true).finally(() => { if (pendingInteractive === p) pendingInteractive = null; });
+pendingInteractive = p;
+return p;
+}
+
+async function fetchNewToken(interactive) {
 let resp;
 try {
 resp = await requestToken(interactive ? 'consent' : '');
@@ -205,8 +243,16 @@ if (cachedToken && window.google?.accounts?.oauth2?.revoke) {
 await new Promise((resolve) => window.google.accounts.oauth2.revoke(cachedToken.accessToken, resolve));
 }
 cachedToken = null;
+pendingSilent = null;
+pendingInteractive = null;
+for (const fn of signOutHooks) { try { fn(); } catch (e) { /* a hook must not block sign-out */ } }
 await setLocalSetting('googleConnected', false);
 }
+
+// Lets caches elsewhere (e.g. googlecalendar.js's calendarList) drop their
+// contents on sign-out without googleauth importing them (circular).
+const signOutHooks = [];
+function onSignOut(fn) { signOutHooks.push(fn); }
 
 // Same reasoning as SILENT_TOKEN_TIMEOUT_MS above, one layer further in --
 // confirmed live, this can also hang on the actual API request itself
@@ -231,8 +277,10 @@ const doFetch = (tok) => fetch(url, { ...options, headers: { ...(options.headers
 const resp = await doFetch(token);
 // A rejected token (revoked or expired in flight) would otherwise be reused from the cache until its expiry:
 // drop it and retry once with a fresh one. If getting a fresh one fails, hand back the original 401.
-if (resp.status === 401 && cachedToken && cachedToken.accessToken === token) {
-cachedToken = null;
+if (resp.status === 401) {
+// Drop the rejected token only if it is still the cached one; if another caller already replaced
+// or cleared it, getAccessToken() returns the newer token / joins the one refresh in flight.
+if (cachedToken && cachedToken.accessToken === token) cachedToken = null;
 let fresh = null;
 try { fresh = await getAccessToken(interactive); } catch (e) { fresh = null; }
 if (fresh && fresh !== token) return await doFetch(fresh);
@@ -276,5 +324,5 @@ return hasScope(TASKS_WRITE_SCOPE);
 export {
 NotConfiguredError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
-googleFetch, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite,
+googleFetch, onSignOut, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite,
 };

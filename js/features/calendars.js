@@ -159,7 +159,7 @@ return;
 }
 status.textContent = 'Loading…';
 try {
-const list = await listCalendars();
+const list = await listCalendars({ fresh: true });
 if (list.length === 0) {
 select.innerHTML = '<option value="">No calendars found</option>';
 status.textContent = '';

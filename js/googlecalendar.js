@@ -3,16 +3,34 @@
 // (googleauth.js) — the `calendar.readonly` scope was added there
 // specifically for this. Replaces what the original claude.ai artifact did
 // via an MCP connector only available inside claude.ai chats.
-import { googleFetch } from './sync/googleauth.js';
+import { googleFetch, onSignOut } from './sync/googleauth.js';
 
 const CALENDAR_LIST_API = 'https://www.googleapis.com/calendar/v3/users/me/calendarList';
 const EVENTS_API = 'https://www.googleapis.com/calendar/v3/calendars';
 
-async function listCalendars() {
+// In-memory only (boot still makes one call). Concurrent callers share one
+// request; a rejection is not cached; { fresh: true } (the explicit "Load
+// calendars" button) always refetches; sign-out clears it.
+const CALENDAR_LIST_TTL_MS = 15 * 60 * 1000;
+let calendarListCache = null; // { at, promise }
+onSignOut(() => { calendarListCache = null; });
+
+async function fetchCalendarList() {
 const res = await googleFetch(`${CALENDAR_LIST_API}?fields=items(id,summary)&minAccessRole=freeBusyReader`);
 if (!res.ok) throw new Error(`Calendar list failed: ${res.status}`);
 const json = await res.json();
 return json.items || [];
+}
+
+async function listCalendars({ fresh } = {}) {
+if (!fresh && calendarListCache && Date.now() - calendarListCache.at < CALENDAR_LIST_TTL_MS) {
+return (await calendarListCache.promise).slice();
+}
+const entry = { at: Date.now(), promise: null };
+entry.promise = fetchCalendarList();
+calendarListCache = entry;
+entry.promise.catch(() => { if (calendarListCache === entry) calendarListCache = null; });
+return (await entry.promise).slice();
 }
 
 function resolveCalendarId(name, calendarList) {
