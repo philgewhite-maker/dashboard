@@ -24,7 +24,7 @@
     ["airbnbKeys","listingIds","airbnbListings"],
     ["airbnbKeyAssignments","keyId","airbnbKeys"],["airbnbKeyAssignments","reservationId","airbnbReservations"],
     ["airbnbRateProposals","listingId","airbnbListings"],["airbnbRateProposals","taskId","tasks"],
-    ["bookingRequests","listingId","airbnbListings"],["bookingRequests","reservationId","airbnbReservations"],["airbnbEarnings","listingId","airbnbListings"],["airbnbEarnings","ownerKey","connections"],
+    ["bookingRequests","listingId","airbnbListings"],["bookingRequests","reservationId","airbnbReservations"],["bookingRequests","supersededBy","bookingRequests"],["airbnbEarnings","listingId","airbnbListings"],["airbnbEarnings","ownerKey","connections"],
     ["vouchers","sourceLoyaltyReadingIds","loyaltyBalances"],["loyaltyBalances","programId","loyaltyPrograms"],["loyaltyLabelKinds","programId","loyaltyPrograms"],
     ["subscriptions","accountId","financeAccounts"],
     ["vouchers","providerId","providers"],["loyaltyPrograms","providerId","providers"],["subscriptions","providerId","providers"],["financeAccounts","providerId","providers"],["prefs.lettingChannels","providerId","providers"],

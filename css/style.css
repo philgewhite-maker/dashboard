@@ -4532,7 +4532,12 @@ background:var(--slate-bg);color:var(--slate);
 /* Booking requests and enquiries (bookingrequests.js), on the Airbnb panel. */
 #booking-requests > summary{cursor:pointer;font-size:13px;font-weight:600;}
 .bkreq-list{display:flex;flex-direction:column;}
-.bkreq-row{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:12px;}
+.bkreq-row{display:flex;flex-direction:column;gap:3px;padding:6px 0;border-bottom:1px solid var(--line);font-size:12px;}
+.bkreq-line{display:flex;align-items:center;gap:4px 10px;flex-wrap:wrap;min-width:0;}
+.bkreq-line .bkreq-money{margin-left:auto;}
+.bkreq-line .bkreq-mail{margin-left:auto;}
+.bkreq-acts:empty{display:none;}
+.bkreq-acts .bkreq-out{flex:0 1 auto;min-width:0;}
 .bkreq-kind{font-size:9px;text-transform:uppercase;letter-spacing:.04em;border:1px solid var(--line);border-radius:3px;padding:0 4px;color:var(--muted);flex:0 0 auto;}
 .bkreq-kind.request{color:var(--ink);}
 .bkreq-dates{display:inline-flex;align-items:center;gap:5px;font-variant-numeric:tabular-nums;}

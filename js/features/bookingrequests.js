@@ -243,7 +243,7 @@ if (q.decision === 'accepted' && q.reservationId) {
 const held = allStays.find((s) => s.id === q.reservationId);
 if (held && isUnconfirmedStay(held)) { q.decision = ''; q.reservationId = ''; q.decidedOn = ''; changed++; }
 }
-if (q.decision === 'declined' || q.decision === 'accepted' || q.decision === 'direct') return;
+if (q.decision === 'declined' || q.decision === 'accepted' || q.decision === 'direct' || q.decision === 'withdrawn') return;
 let stay = q.confirmationCode ? stays.find((s) => s.confirmationCode === q.confirmationCode) : null;
 if (!stay) {
 stay = stays.find((s) => roomOf(s.listingId) === roomOf(q.listingId)
@@ -283,12 +283,31 @@ const received = String(q.receivedAt || '').slice(0, 10);
 const lapsed = q.kind === 'request' ? received && dateStrAdd(received, 2) < today : q.checkin < today || (received && dateStrAdd(received, ENQUIRY_OPEN_DAYS) < today);
 if (lapsed && q.decision !== 'not-booked') { q.decision = 'not-booked'; changed++; }
 });
+// Several requests that became the same stay (a guest who changed the dates and sent a new request): the one whose
+// dates match the stay, else the newest, stands for it; the others point at it and drop out of the list and the model.
+const byStay = new Map();
+(data.bookingRequests || []).forEach((q) => {
+if (q.decision === 'accepted' && q.reservationId) { if (!byStay.has(q.reservationId)) byStay.set(q.reservationId, []); byStay.get(q.reservationId).push(q); }
+});
+const keepers = new Map();
+byStay.forEach((list, resId) => {
+if (list.length < 2) return;
+const stay = allStays.find((s) => s.id === resId);
+const exact = stay ? list.filter((q) => q.checkin === stay.checkin && q.checkout === stay.checkout) : [];
+const pool = exact.length ? exact : list;
+const keep = pool.slice().sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))[0];
+list.forEach((q) => { if (q !== keep) keepers.set(q.id, keep.id); });
+});
+(data.bookingRequests || []).forEach((q) => {
+const want = keepers.get(q.id) || '';
+if ((q.supersededBy || '') !== want) { q.supersededBy = want; changed++; }
+});
 return changed;
 }
 
 // ---- List on the Airbnb panel ---------------------------------------------------
 
-const DECISION_LABEL = { '': 'Waiting', accepted: 'Became a stay', 'not-booked': 'Not booked', declined: 'Declined', direct: 'Went direct' };
+const DECISION_LABEL = { '': 'Waiting', accepted: 'Became a stay', 'not-booked': 'Not booked', declined: 'Declined', direct: 'Went direct', withdrawn: 'Withdrawn by guest' };
 const nightsOf = (q) => Math.round((new Date(`${q.checkout}T00:00:00`) - new Date(`${q.checkin}T00:00:00`)) / 86400000);
 const shortDate = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 
@@ -308,14 +327,24 @@ outcome = `<span class="bkreq-outcome accepted">Went direct:</span> ${x ? `<span
 const near = directs.filter((x) => (!q.listingId || !x.listingId || roomOf(x.listingId) === roomOf(q.listingId)) && x.end > dateStrAdd(q.checkin, -60) && x.start < dateStrAdd(q.checkout, 60));
 if (near.length) outcome += ` <select class="mini" data-bkreq-direct="${escapeHtml(q.id)}" title="It was booked direct instead"><option value="">Went direct?</option>${near.map((x) => `<option value="${escapeHtml(x.id)}">${escapeHtml(`${String(x.guest).split(',').pop().trim() || 'Guest'} · ${shortDate(x.start)} – ${shortDate(x.end)}`)}</option>`).join('')}</select>`;
 }
-return `<div class="bkreq-row" data-bkreq="${escapeHtml(q.id)}">
+const waiting = !q.decision && q.checkin >= todayStr();
+const amended = (data.bookingRequests || []).filter((x) => x.supersededBy === q.id).length;
+const mark = waiting ? `<select class="mini" data-bkreq-mark="${escapeHtml(q.id)}" title="Record an answer the inbox doesn't show"><option value="">Mark as…</option><option value="declined">Declined</option><option value="withdrawn">Withdrawn by guest</option></select>` : '';
+return `<div class="bkreq-row${waiting ? ' waiting' : ''}" data-bkreq="${escapeHtml(q.id)}">
+<div class="bkreq-line">
 <span class="bkreq-kind ${escapeHtml(q.kind)}">${q.kind === 'enquiry' ? 'Enquiry' : 'Request'}</span>
 <span class="bkreq-dates"><span class="dot ${escapeHtml((listing && listing.colour) || 'slate')}" title="${escapeHtml((listing && listing.label) || 'Listing not matched')}"></span>${escapeHtml(`${shortDate(q.checkin)} – ${shortDate(q.checkout)}`)} <span class="settings-note" style="margin:0;">${n} night${n === 1 ? '' : 's'}</span></span>
-<span class="bkreq-who">${escapeHtml(who)}</span>
 <span class="bkreq-money">${escapeHtml(money)}</span>
-<span class="bkreq-out">${outcome}</span>
-${q.checkin >= todayStr() ? `<button class="sync-btn sm inline" type="button" data-bkreq-eval="${escapeHtml(q.id)}" title="Weigh accepting this against keeping the dates open">Evaluate</button>` : ''}
+</div>
+<div class="bkreq-line">
+<span class="bkreq-who">${escapeHtml(who)}${amended ? ` <span class="settings-note" style="margin:0;" title="The guest sent ${amended} earlier request${amended === 1 ? '' : 's'} for this stay with other dates; only this one is counted">· dates changed</span>` : ''}</span>
 ${q.messageId ? `<span class="bkreq-mail" data-bkreq-open="${escapeHtml(q.messageId)}" title="Read the email">&#9993;</span>` : ''}
+</div>
+<div class="bkreq-line bkreq-acts">
+<span class="bkreq-out">${outcome}</span>
+${mark}
+${waiting ? `<button class="sync-btn sm inline" type="button" data-bkreq-eval="${escapeHtml(q.id)}" title="Weigh accepting this against keeping the dates open">Evaluate</button>` : ''}
+</div>
 </div>`;
 }
 
@@ -329,20 +358,25 @@ bindStayChips();
 const directs = directEntries();
 const all = (data.bookingRequests || []).slice().sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)));
 const today = todayStr();
-const open = all.filter((q) => q.checkout >= today);
-const past = all.filter((q) => q.checkout < today);
-const requests = all.filter((q) => q.kind === 'request');
+const shownAll = all.filter((q) => !q.supersededBy);
+const isWaiting = (q) => !q.decision && q.checkin >= today;
+const waitingList = shownAll.filter(isWaiting);
+const open = shownAll.filter((q) => q.checkout >= today);
+const decided = open.filter((q) => !isWaiting(q));
+const past = shownAll.filter((q) => q.checkout < today);
+const requests = shownAll.filter((q) => q.kind === 'request');
 const became = requests.filter((q) => q.decision === 'accepted').length;
-const wentDirect = all.filter((q) => q.decision === 'direct').length;
+const wentDirect = shownAll.filter((q) => q.decision === 'direct').length;
 const since = all.length ? String(all[all.length - 1].receivedAt).slice(0, 10) : '';
 const summary = all.length
-? `${requests.length} request${requests.length === 1 ? '' : 's'} (${became} became Airbnb stays) and ${all.length - requests.length} enquir${all.length - requests.length === 1 ? 'y' : 'ies'} on file${since ? ` since ${shortDate(since)} ${since.slice(0, 4)}` : ''}${wentDirect ? `; ${wentDirect} went direct instead` : ''}.`
+? `${requests.length} request${requests.length === 1 ? '' : 's'} (${became} became Airbnb stays) and ${shownAll.length - requests.length} enquir${shownAll.length - requests.length === 1 ? 'y' : 'ies'} on file${since ? ` since ${shortDate(since)} ${since.slice(0, 4)}` : ''}${wentDirect ? `; ${wentDirect} went direct instead` : ''}.`
 : 'None read yet.';
 const wasOpen = el.open;
-const waiting = open.filter((q) => !q.decision && q.checkin >= today);
+const waiting = waitingList;
 el.innerHTML = `<summary>Requests and enquiries <span class="settings-note" style="margin:0;">${waiting.length ? `${waiting.length} waiting${open.length > waiting.length ? ', ' : ''}` : ''}${open.length ? `${open.length > waiting.length || !waiting.length ? `${open.length} ` : ''}for upcoming dates` : ''}</span> <button class="sync-btn sm inline" type="button" data-bkreq-sim title="Open the booking simulator: on the newest request still waiting for an answer, or blank if there is none">Simulate</button></summary>
 <div class="settings-note" style="margin:4px 0 6px;">Every booking request and enquiry read from your inbox, including the ones that never became stays: the demand the booking evaluator learns from. ${escapeHtml(summary)}</div>
-<div class="bkreq-list">${open.map((q) => requestRowHtml(q, stayChipHtml, directs)).join('') || '<div class="settings-note" style="margin:0;">None for upcoming dates.</div>'}</div>
+<div class="bkreq-list">${waiting.map((q) => requestRowHtml(q, stayChipHtml, directs)).join('') || '<div class="settings-note" style="margin:0;">Nothing waiting for an answer.</div>'}</div>
+${decided.length ? `<details style="margin-top:6px;"><summary class="settings-note" style="margin:0;cursor:pointer;">Answered, upcoming dates (${decided.length})</summary><div class="bkreq-list">${decided.map((q) => requestRowHtml(q, stayChipHtml, directs)).join('')}</div></details>` : ''}
 ${past.length ? `<details style="margin-top:6px;"><summary class="settings-note" style="margin:0;cursor:pointer;">Earlier (${past.length})</summary><div class="bkreq-list">${past.slice(0, 200).map((q) => requestRowHtml(q, stayChipHtml, directs)).join('')}</div></details>` : ''}
 <div class="sync-row" style="margin-top:8px;align-items:center;">
 <button class="sync-btn sm inline" type="button" id="booking-requests-backfill" title="Reads every request and enquiry email from the last ${BACKFILL_MONTHS} months. Safe to run again: emails already read are skipped.">Read past requests from the inbox</button>
@@ -352,6 +386,12 @@ if (!autoOpened && waiting.length) { el.open = true; autoOpened = true; } else e
 if (!bound) {
 bound = true;
 el.addEventListener('change', (e) => {
+const markSel = e.target.closest('[data-bkreq-mark]');
+if (markSel && markSel.value) {
+const q = (data.bookingRequests || []).find((x) => x.id === markSel.dataset.bkreqMark);
+if (q) { q.decision = markSel.value; q.decidedOn = todayStr(); queueSave(); renderBookingRequests(); }
+return;
+}
 const sel = e.target.closest('[data-bkreq-direct]');
 if (!sel || !sel.value) return;
 const q = (data.bookingRequests || []).find((x) => x.id === sel.dataset.bkreqDirect);

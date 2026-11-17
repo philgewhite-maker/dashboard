@@ -2163,6 +2163,9 @@ guestName: '', guestReviews: null, identityVerified: false, guestCity: '', guest
 nightlyRate: null, payout: null, confirmationCode: '', airbnbThreadId: '',
 messageId: '', receivedAt: '',
 reservationId: '', decision: '', decidedOn: '', directEntryId: '',
+// Another request (its id) that replaced this one for the same stay, e.g. a guest who changed the dates: hidden in the
+// list and left out of the booking model's demand so one guest isn't counted twice. Set by resolveRequestOutcomes.
+supersededBy: '',
 evaluation: null,
 ...fields,
 };

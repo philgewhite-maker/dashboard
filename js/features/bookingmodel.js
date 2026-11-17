@@ -448,7 +448,7 @@ const name = String(conn ? conn.name || '' : l.ownerConnectionId ? '' : l.ownerL
 if (l.ownerConnectionId && !conn) return [l.id, /-\s*phil\s*$/i.test(String(l.label || ''))];
 return [l.id, (!l.ownerConnectionId && !name) || /^(me|phil)\b/i.test(name)];
 }));
-const requests = (data.bookingRequests || []).map((q) => ({ ...q }));
+const requests = (data.bookingRequests || []).filter((q) => !q.supersededBy).map((q) => ({ ...q }));
 // A rate-review proposal is only a suggestion until you act on it: it lifts the model's price for those dates only once its
 // subtask has been ticked off (the rate review's own meaning of "actioned"), so an unactioned event uplift can't inflate a verdict.
 const proposals = (data.airbnbRateProposals || []).filter((p) => { const sub = (data.tasks || []).find((t) => t.id === p.subtaskId); return !!sub && sub.bucket === 'done'; }).map((p) => ({ listingId: p.listingId, startDate: p.startDate, endDate: p.endDate, upliftPct: p.upliftPct, upliftAmount: p.upliftAmount, reason: p.reason }));
