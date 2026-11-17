@@ -2114,6 +2114,31 @@ photoId: '',
 // reservationId set), 'direct' (it was booked direct instead: directEntryId is 'led:<income entry
 // id>' or 'res:<stay id>'), 'not-booked' (no stay followed), or 'declined' when you said so.
 // `evaluation` is the booking evaluator's last verdict on it, kept for later checks.
+// Evaluating a request before its email has been read saves a request of its own (no email id, no guest name); the email,
+// read later, then arrives as a second record for the same request: shown twice, and counted twice as demand by the
+// booking model. Fold each such copy into the email's record (same dates, same room, payout within £2, received within 4
+// days of each other): the email record takes the copy's verdict, and its decision when it has none, and the copy goes.
+function mergeEvaluatorCopies(list) {
+const emails = list.filter((r) => r.messageId && r.kind === 'request');
+if (!emails.length) return list;
+const t = (x) => Date.parse(x.receivedAt || '') || 0;
+const drop = new Set();
+list.forEach((c) => {
+if (c.messageId || c.kind !== 'request') return;
+const e = emails.find((x) => x.checkin === c.checkin && x.checkout === c.checkout
+&& (!x.listingId || !c.listingId || x.listingId === c.listingId)
+&& (!(x.payout > 0) || !(c.payout > 0) || Math.abs(x.payout - c.payout) <= 2)
+&& Math.abs(t(x) - t(c)) <= 4 * 86400000);
+if (!e) return;
+if (c.evaluation && (!e.evaluation || String(c.evaluation.at) > String(e.evaluation.at))) e.evaluation = c.evaluation;
+if (!e.decision && c.decision) { e.decision = c.decision; e.decidedOn = c.decidedOn; if (!e.reservationId) e.reservationId = c.reservationId; }
+if (e.guestRating == null && c.guestRating != null) e.guestRating = c.guestRating;
+if (!e.listingId && c.listingId) e.listingId = c.listingId;
+drop.add(c);
+});
+return drop.size ? list.filter((r) => !drop.has(r)) : list;
+}
+
 function blankBookingRequest(fields = {}) {
 return {
 id: uid(), kind: 'request', listingId: '', airbnbListingId: '',
@@ -2937,6 +2962,7 @@ if (!held || score(r) > score(held)) byMsg.set(r.messageId, r);
 const dropped = data.bookingRequests.filter((r) => r.messageId && byMsg.get(r.messageId) !== r);
 if (dropped.length) data.bookingRequests = data.bookingRequests.filter((r) => !r.messageId || byMsg.get(r.messageId) === r);
 }
+data.bookingRequests = mergeEvaluatorCopies(data.bookingRequests);
 // FIRST, before anything else in here touches it. An existing document
 // predates this key entirely, and two passes below both reach for it --
 // the connection loop that carries the old per-person `owned` across,
@@ -4873,7 +4899,7 @@ blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PA
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, blankBookingProjection, blankAirbnbEarning, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
+blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, mergeEvaluatorCopies, blankBookingProjection, blankAirbnbEarning, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,

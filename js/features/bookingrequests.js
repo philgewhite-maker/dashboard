@@ -12,7 +12,7 @@
 // Each becomes a data.bookingRequests record (blankBookingRequest, state.js), including the
 // ones that never became stays: that is the demand the booking evaluator calibrates
 // against. Whether one became a stay is worked out here too (resolveRequestOutcomes).
-import { data, queueSave, blankBookingRequest } from '../state.js';
+import { data, queueSave, blankBookingRequest, mergeEvaluatorCopies } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { nightRateRooms } from './letting.js';
@@ -223,8 +223,11 @@ return out;
 // that (and for an enquiry, which has none) by the same room, the same check-in or
 // check-out, and a guest name that fits. With no stay, a request is 'not-booked' two days
 // after it arrived (Airbnb gives 24 hours to answer) and an enquiry once its check-in has
-// passed. A decision you set yourself ('declined') is left alone.
+// passed or a week after it arrived (one that turns into a stay later is still matched to it). A decision you set yourself ('declined') is left alone.
+const ENQUIRY_OPEN_DAYS = 7; // ASSUMPTION: an enquiry still unanswered by a request or a stay after a week is not coming
 function resolveRequestOutcomes() {
+const heldBefore = (data.bookingRequests || []).length;
+data.bookingRequests = mergeEvaluatorCopies(data.bookingRequests || []);
 const allStays = data.airbnbReservations || [];
 // Airbnb holds a request's dates on the calendar ("Reserved") while it waits for your answer: that hold is not a booking. Only a
 // stay with a confirmation code, a name or an income can be what a request became.
@@ -233,7 +236,7 @@ const stays = allStays.filter((s) => !isUnconfirmedStay(s));
 const ledgerStays = collectStays().filter((s) => String(s.id).startsWith('led:') && s.status === 'stay');
 const directs = directEntries();
 const today = todayStr();
-let changed = 0;
+let changed = heldBefore - data.bookingRequests.length;
 (data.bookingRequests || []).forEach((q) => {
 // Undo an earlier match to a calendar hold (the request was wrongly marked as having become a stay).
 if (q.decision === 'accepted' && q.reservationId) {
@@ -277,7 +280,7 @@ return;
 const direct = directs.find((x) => sameRoom(x.listingId) && x.start < q.checkout && x.end > q.checkin && x.guest && q.guestName && nameFits(x.guest, q.guestName));
 if (direct) { q.decision = 'direct'; q.directEntryId = direct.id; q.decidedOn = String(q.receivedAt || '').slice(0, 10); changed++; return; }
 const received = String(q.receivedAt || '').slice(0, 10);
-const lapsed = q.kind === 'request' ? received && dateStrAdd(received, 2) < today : q.checkin < today;
+const lapsed = q.kind === 'request' ? received && dateStrAdd(received, 2) < today : q.checkin < today || (received && dateStrAdd(received, ENQUIRY_OPEN_DAYS) < today);
 if (lapsed && q.decision !== 'not-booked') { q.decision = 'not-booked'; changed++; }
 });
 return changed;
