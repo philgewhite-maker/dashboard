@@ -28,6 +28,10 @@ let busy = false;
 let agentStatus = null; // the agent's last status object (wifi.events / wifi.pause / wifi.resume replies); not synced
 let lastError = null; // {html} of the last failed call
 let lastAttemptAt = 0;
+let pendingAction = null; // 'guestOff' | 'guestOn' | 'reboot' while its inline confirm row is open
+let controlBusy = false; // a router.* control call is in flight
+let controlNote = null; // {html, cls} result of the last control action
+const REBOOT_REFRESH_MS = 4 * 60 * 1000;
 
 // ---- pure logic -------------------------------------------------------------------------------------------------
 
@@ -294,6 +298,83 @@ if (res) agentStatus = res;
 renderWifiPresence();
 }
 
+// ---- router control (agent 1.20+: router.guestWifi, router.reboot) ----------------------------------------------------
+
+// Guest Wi-Fi state from the agent's last poll: true (any band on), false (all reported bands off), null (unknown).
+function guestWifiState(s) {
+if (!s) return null;
+const bands = [s.guest_2g_enable, s.guest_5g_enable].filter((v) => typeof v === 'boolean');
+if (!bands.length) return null;
+return bands.some(Boolean);
+}
+
+// Stays whose window (check-in day 00:00 to checkout 12:00 local) contains `now`, non-cancelled, not external.
+function staysInProgress(now = Date.now()) {
+const candidates = (data.airbnbReservations || []).filter((r) => r.source !== 'external');
+return matchStays(candidates, {}, []).filter((it) => now >= it.start && now <= it.end).map((it) => it.stay);
+}
+
+function controlWarnHtml(chipFor) {
+const stays = staysInProgress();
+const connected = !!(agentStatus && agentStatus.guest_clients > 0);
+if (stays.length) return stays.map((r) => `<div>${chipFor(r)} is staying now and will lose Wi-Fi.</div>`).join('');
+if (connected) return '<div>A guest device is connected to the guest Wi-Fi right now and will lose it.</div>';
+return '';
+}
+
+const AGENT_120 = 'Agent 1.20 needed: this home agent is older and cannot control the router. Update it on the NAS (home-agent/ files, then rebuild) and the commands.php allow-list on the web host.';
+function controlReasonHtml(err) {
+const m = (err && err.message) || String(err);
+if (/doesn't know the verb|unknown verb/i.test(m)) return AGENT_120;
+return reasonHtml(err);
+}
+
+async function runControl(verb, args) {
+if (busy || controlBusy) return;
+busy = true; controlBusy = true; pendingAction = null;
+controlNote = { html: 'Sending…', cls: 'busy' };
+renderWifiPresence();
+try {
+const res = await run(verb, args, { timeoutMs: 45000 });
+lastError = null;
+if (verb === 'router.guestWifi') {
+agentStatus = { ...(agentStatus || {}), configured: true, guest_2g_enable: res.guest_2g, guest_5g_enable: res.guest_5g };
+const state = guestWifiState(agentStatus);
+const band = (v) => (v == null ? '?' : v ? 'on' : 'off');
+if (res.matched) controlNote = { html: `Guest Wi-Fi is now ${args.on ? 'on' : 'off'}.`, cls: '' };
+else controlNote = { html: `Asked for guest Wi-Fi ${args.on ? 'on' : 'off'}, but the router reports ${state === null ? 'an unknown state' : state ? 'it still on' : 'it off'} (2.4 GHz: ${band(res.guest_2g)}, 5 GHz: ${band(res.guest_5g)}). Try again, or check the router.`, cls: 'zero' };
+} else {
+agentStatus = { ...(agentStatus || {}), configured: true, rebooting_until: new Date(Date.now() + REBOOT_REFRESH_MS).toISOString() };
+controlNote = { html: res && res.uncertain ? 'The router dropped the connection as it was told to reboot, so it is probably rebooting. Back in a few minutes; this refreshes by itself.' : 'Router is rebooting. Back in a few minutes; this refreshes by itself.', cls: '' };
+setTimeout(() => { controlNote = null; pull({ quiet: true }); }, REBOOT_REFRESH_MS);
+}
+} catch (err) {
+controlNote = { html: `${verb === 'router.reboot' ? 'Reboot' : 'Guest Wi-Fi change'} failed: ${controlReasonHtml(err)}`, cls: 'zero' };
+} finally {
+busy = false; controlBusy = false;
+}
+renderWifiPresence();
+}
+
+function openConfirm(kind) {
+if (busy || controlBusy) return;
+pendingAction = kind;
+controlNote = null;
+renderWifiPresence();
+}
+
+function renderConfirm(chipFor) {
+const box = document.getElementById('wifi-confirm');
+if (!box) return;
+if (!pendingAction || controlBusy) { box.hidden = true; box.innerHTML = ''; return; }
+const warn = pendingAction === 'guestOn' ? '' : controlWarnHtml(chipFor);
+const q = pendingAction === 'reboot'
+? 'Reboot the router? Internet and Wi-Fi drop for the whole house for about 2–3 minutes, including the guests and this agent.'
+: `Turn guest Wi-Fi ${pendingAction === 'guestOn' ? 'on' : 'off'}?`;
+box.innerHTML = `<div class="wifi-confirm-text"><strong>${escapeHtml(q)}</strong>${warn}</div><button class="sync-btn sm inline" id="wifi-confirm-yes" type="button">${pendingAction === 'reboot' ? 'Reboot now' : 'Yes'}</button><button class="sync-btn sm inline" id="wifi-confirm-no" type="button">Cancel</button>`;
+box.hidden = false;
+}
+
 // ---- rendering --------------------------------------------------------------------------------------------------
 
 function setStatusHtml(html, cls = '') {
@@ -306,12 +387,16 @@ el.className = `sync-status ${cls}`.trim();
 function statusHtml() {
 const s = agentStatus;
 const parts = [];
+if (controlNote) parts.push(controlNote.html);
 if (lastError) parts.push(`couldn't ask the agent: ${lastError.html}`);
 if (s && s.configured === false) parts.push(`Wi-Fi tracking isn't switched on at the agent: ${escapeHtml(s.reason || 'set ROUTER_PASSWORD in its .env')}`);
 else if (s) {
 if (s.paused && s.paused_until) parts.push(`<strong>Paused until ${clock(ms(s.paused_until))}</strong>: the router isn't being read, so devices coming or going now are missed.`);
 else {
 parts.push(s.last_poll ? `Router read ${clock(ms(s.last_poll))}` : 'Router not read yet');
+const g = guestWifiState(s);
+if (g !== null) parts.push(`Guest Wi-Fi: ${g ? 'on' : 'off'}`);
+if (s.rebooting_until && ms(s.rebooting_until) > Date.now()) parts.push('router rebooting, not being read');
 if (s.guest_clients != null) parts.push(`${s.guest_clients} on guest Wi-Fi now (${s.clients} in all)`);
 if (s.last_error) parts.push(`last poll failed: ${escapeHtml(String(s.last_error).slice(0, 120))}`);
 }
@@ -391,8 +476,16 @@ bindStayChips();
 chipFor = (r) => stayChipHtml(r);
 } catch (e) { /* the plain name stays */ }
 const now = Date.now();
-setStatusHtml(statusHtml(), lastError ? 'zero' : '');
+setStatusHtml(statusHtml(), (lastError || (controlNote && controlNote.cls === 'zero')) ? 'zero' : (controlNote && controlNote.cls === 'busy' ? 'busy' : ''));
 const paused = !!(agentStatus && agentStatus.paused);
+const gState = guestWifiState(agentStatus);
+const offBtn = document.getElementById('wifi-guest-off-btn');
+const onBtn = document.getElementById('wifi-guest-on-btn');
+const rebootBtn = document.getElementById('wifi-reboot-btn');
+if (offBtn) { offBtn.hidden = gState === false; offBtn.disabled = busy || controlBusy; }
+if (onBtn) { onBtn.hidden = gState === true; onBtn.disabled = busy || controlBusy; }
+if (rebootBtn) rebootBtn.disabled = busy || controlBusy;
+renderConfirm(chipFor);
 const pauseBtn = document.getElementById('wifi-pause-btn');
 const resumeBtn = document.getElementById('wifi-resume-btn');
 if (pauseBtn) pauseBtn.hidden = paused;
@@ -429,6 +522,15 @@ if (!panel) return;
 document.getElementById('wifi-refresh-btn').addEventListener('click', () => pull());
 document.getElementById('wifi-pause-btn').addEventListener('click', () => pauseFor(60));
 document.getElementById('wifi-resume-btn').addEventListener('click', () => resumeNow());
+document.getElementById('wifi-guest-off-btn').addEventListener('click', () => openConfirm('guestOff'));
+document.getElementById('wifi-guest-on-btn').addEventListener('click', () => openConfirm('guestOn'));
+document.getElementById('wifi-reboot-btn').addEventListener('click', () => openConfirm('reboot'));
+document.getElementById('wifi-confirm').addEventListener('click', (e) => {
+if (e.target.closest('#wifi-confirm-no')) { pendingAction = null; renderWifiPresence(); return; }
+if (!e.target.closest('#wifi-confirm-yes') || !pendingAction) return;
+if (pendingAction === 'reboot') runControl('router.reboot', { confirm: 'reboot' });
+else runControl('router.guestWifi', { on: pendingAction === 'guestOn' });
+});
 const list = document.getElementById('wifi-devices');
 list.addEventListener('change', (e) => {
 const role = e.target.closest('[data-wifi-role]');

@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v889</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v890</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -138,8 +138,12 @@
 <button class="sync-btn sm inline" id="wifi-refresh-btn" type="button" title="Asks the home agent for what the router has seen since the last pull.">Refresh</button>
 <button class="sync-btn sm inline" id="wifi-pause-btn" type="button" title="The router allows one admin login at a time, and the agent logs in every few minutes to read the device list, which signs you out of its admin page or the Tether app. Pause stops the agent logging in for an hour.">Pause for an hour</button>
 <button class="sync-btn sm inline" id="wifi-resume-btn" type="button" hidden>Resume now</button>
+<button class="sync-btn sm inline" id="wifi-guest-off-btn" type="button" title="Switches the router's guest Wi-Fi off (both bands). Works even while reading is paused.">Turn guest Wi-Fi off</button>
+<button class="sync-btn sm inline" id="wifi-guest-on-btn" type="button" title="Switches the router's guest Wi-Fi back on (both bands).">Turn guest Wi-Fi on</button>
+<button class="sync-btn sm inline" id="wifi-reboot-btn" type="button" title="Restarts the router. Internet and Wi-Fi drop for the whole house for a few minutes.">Reboot router</button>
 <span class="sync-status" id="wifi-status"></span>
 </div>
+<div class="settings-note wifi-confirm" id="wifi-confirm" hidden></div>
 <div id="wifi-stays"></div>
 <h3 style="margin:14px 0 6px;font-size:14px;">&#129529; Cleaner visits</h3>
 <div id="wifi-cleaners"></div>

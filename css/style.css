@@ -4762,6 +4762,9 @@ background:var(--slate-bg);color:var(--slate);
 
 /* Wi-Fi arrivals (wifipresence.js) */
 .wifi-bar{align-items:center;flex-wrap:wrap;gap:6px 10px;}
+.wifi-confirm{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;margin:8px 0;}
+.wifi-confirm[hidden]{display:none;}
+.wifi-confirm .wifi-confirm-text{flex:1 1 100%;}
 .wifi-stay{padding:8px 0;border-bottom:1px solid var(--line);}
 .wifi-stay:last-child{border-bottom:0;}
 .wifi-line{font-size:13px;margin-top:4px;}
