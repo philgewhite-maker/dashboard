@@ -253,11 +253,25 @@ run with itself under unusable samples instead. The random streams are v8's exce
 for a backtest, one at a time, so a move in a room's figures can be attributed: `fix1` (own-price reference), `fix2`
 (unlisted months' weeks skipped), `fix3` (cleaning fee per booking), `fix4` (enquiries in the level), `fix6`
 (cancellations in projections), `pool`, `market`. `setV9Flags({ fix2: false })` sets them module-wide (the backtest
-harness builds its own contexts); `ctx.v9flags` overrides per context. The app runs `V9_DEFAULTS` (`pool` and `fix6` off, the rest on;
+harness builds its own contexts); `ctx.v9flags` overrides per context. The app runs `V9_DEFAULTS` (`pool`, `poolW` and `fix6` off, the rest on;
 `setV9Flags('default')` restores them); the self-test runs every switch on; with every
 one off v9 is v8 exactly, draw for draw (self-test 41, on a three-room world with discounts, a gap in one
 room's records, enquiries and a cancellation rate). Note that `fix2` also moves the shared lead-time fit, which reads
 the same grids. Not a setting: nothing is read from the owner's data.
+
+`poolW` (experimental, off in the app, 17 Nov 2026; only read when `pool` is on) changes the pooling's evidence weight
+W_r, the one that sets how far a room's own occupancy-based start counts against the house rate (s_r = W_r / (W_r +
+POOL_OCC_K)). Off, W_r is the booking-weighted occupancy evidence (the sum of `occ.byMonthW`), so a room on offer but
+quiet reads as "little evidence" and is pulled hard towards the house rate: this is how the backtest's Double took
+most of the En-Suite's demand (May/June projected 10-12 nights against 4). On, W_r is the room's months on offer
+(`occ.months`), so a quiet month on offer counts as full evidence that the room sits where its own occupancy says
+(POOL_OCC_K is reused as the half-weight point in months, an assumption). Self-test 42 shows the two on a two-room
+world (a quiet room at a third of the house: s 0.8 against 0.5-0.6, the prior mean nearer its true rate on every seed,
+the level pulled up less). Two limits seen while writing it: the prior holds at most 4 pseudo-requests, so a room with
+20+ asks moves only a few percent whichever weight is used (it is the room with a handful of asks whose level the prior
+mean decides); and at an extreme ratio (a twentieth) the weak relative factor under the booking weight leaves a wide
+between-room spread, tau rises above its floor and that prior weakens by itself, so the two levels come out about the
+same. Whether `poolW` should go live waits on a backtest of `{ pool: true, poolW: true }` against the defaults.
 
 **Why pooling and simulated cancellations are off** (live backtest, 9 monthly as-of dates Dec 2025 – Aug 2026, 90-day
 horizon; nights ratio / income ratio, mean absolute error in nights / £, months where actual income was inside the

@@ -105,7 +105,12 @@ const MODEL_VERSION = 9;
 // Live defaults (owner approved 17 Nov 2026 after the per-fix backtest): pooling and simulated cancellations are OFF -
 // pooling handed the Double most of the En-Suite's demand, and simulated cancellations pulled projections below what
 // real cancellations did. setV9Flags('default') restores these; 'all' turns every switch on (the selfTest runs so).
-const V9_DEFAULTS = Object.freeze({ fix1: true, fix2: true, fix3: true, fix4: true, fix6: false, pool: false, market: true });
+// poolW (experimental, off in the app; only read when pool is on): the room's own evidence weight W_r in the pooling
+// (demandPool) is its months ON OFFER (occ.months) instead of the booking-weighted occupancy evidence (sum of
+// occ.byMonthW). Under the booking weight a room on offer but quiet reads as "little evidence" and is pulled hard
+// towards the house rate (the backtest's Double took most of the En-Suite's demand); under poolW a quiet month on
+// offer is full evidence that the room sits where its own occupancy says. Case 42 shows the difference.
+const V9_DEFAULTS = Object.freeze({ fix1: true, fix2: true, fix3: true, fix4: true, fix6: false, pool: false, poolW: false, market: true });
 const V9_FLAGS = { ...V9_DEFAULTS };
 const flagsOf = (ctx) => (ctx && ctx.v9flags ? { ...V9_FLAGS, ...ctx.v9flags } : V9_FLAGS);
 function setV9Flags(partial) {
@@ -1718,7 +1723,7 @@ const key = `raw|${ri}`;
 if (cache.has(key)) return cache.get(key);
 const o = params.occ[ri];
 const L0 = Math.max(0.01, rateForOccupancy(ctx, params, ri, Math.min(0.97, Math.max(0.02, o.overall ?? OCC_PRIOR))));
-const out = { L0, grid: null, N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, Xsum: 0, weeks: 0, from: null, occW: (o.byMonthW || []).reduce((a, b) => a + (Number(b) || 0), 0) };
+const out = { L0, grid: null, N: new Array(12).fill(0), X: new Array(12).fill(0), n: 0, Xsum: 0, weeks: 0, from: null, occW: (o.byMonthW || []).reduce((a, b) => a + (Number(b) || 0), 0), occMonths: Number(o.months) || 0 }; // occMonths: months on offer (poolW's W_r)
 const grid = exposureGrid(ctx, params, ri);
 if (grid) {
 out.grid = grid;
@@ -1741,7 +1746,9 @@ return out;
 //             prior; everything is as of ctx.today, from the same grids as the room's own count, so no look-ahead),
 //   phi_r   = (L0_r / L0_H)^s_r, the room's occupancy-based start against the other rooms' (their exposure-weighted
 //             geometric mean), raised to s_r = W_r / (W_r + POOL_OCC_K), W_r the room's months of occupancy evidence
-//             (occ.byMonthW): the other rooms say what a given occupancy means in requests; the room's own occupancy
+//             (occ.byMonthW, booking-weighted; with the poolW switch on, its months on offer, occ.months, so a room
+//             on offer but quiet keeps its own level - ASSUMPTION: POOL_OCC_K is reused unchanged as the half-weight
+//             point in months): the other rooms say what a given occupancy means in requests; the room's own occupancy
 //             says where it sits against them, as far as there is occupancy to go on. phi = 1 with none.
 //   tau^2   = max(POOL_TAU_MIN^2, DerSimonian-Laird moment estimate over the rooms with exposure, of the spread of
 //             log((n + 0.5) / X) - log phi about its mean, with weights n + 0.5).
@@ -1763,7 +1770,8 @@ return v8;
 }
 const withX = raws.map((r, i) => i).filter((i) => raws[i].grid && raws[i].Xsum > 0);
 const logL0 = raws.map((r) => Math.log(r.L0));
-const sOf = (r) => r.occW / (r.occW + POOL_OCC_K);
+const poolW = !!flagsOf(ctx).poolW; // poolW: W_r = months on offer; off: booking-weighted occupancy evidence (the committed v9)
+const sOf = (r) => { const W = poolW ? r.occMonths : r.occW; return W / (W + POOL_OCC_K); };
 // Between-room spread: deviations after the relative factor (against the whole house), weighted by requests.
 const logL0House = withX.length ? withX.reduce((a, i) => a + raws[i].Xsum * logL0[i], 0) / withX.reduce((a, i) => a + raws[i].Xsum, 0) : 0;
 const es = withX.map((i) => ({ e: Math.log((raws[i].n + 0.5) / raws[i].Xsum) - sOf(raws[i]) * (logL0[i] - logL0House), w: raws[i].n + 0.5 }));
@@ -2621,7 +2629,7 @@ const saved = { ...V9_FLAGS };
 setV9Flags('all');
 try {
 const results = selfTestAllOn();
-results.push({ name: 'v9 live defaults: pooling and simulated cancellations off, every other switch on', ok: !V9_DEFAULTS.pool && !V9_DEFAULTS.fix6 && V9_DEFAULTS.fix1 && V9_DEFAULTS.fix2 && V9_DEFAULTS.fix3 && V9_DEFAULTS.fix4 && V9_DEFAULTS.market, detail: JSON.stringify(V9_DEFAULTS) });
+results.push({ name: 'v9 live defaults: pooling (and its poolW weight) and simulated cancellations off, every other switch on', ok: !V9_DEFAULTS.pool && !V9_DEFAULTS.poolW && !V9_DEFAULTS.fix6 && V9_DEFAULTS.fix1 && V9_DEFAULTS.fix2 && V9_DEFAULTS.fix3 && V9_DEFAULTS.fix4 && V9_DEFAULTS.market, detail: JSON.stringify(V9_DEFAULTS) });
 return results;
 } finally { Object.assign(V9_FLAGS, saved); }
 }
@@ -3337,6 +3345,42 @@ const moved = !close(rOn.nights, r8.nights, 1e-6) && rOn.n[0] > r8.n[0];
 check('v9 switches: with every one off the candidate is v8 exactly; on, it is not', same && moved && r8.cancel > 0 && Object.values(flagsOf(cOn)).every(Boolean) && Object.values(V9_FLAGS).every(Boolean), `off vs v8: levels ${rOff.L.map((L) => L.toFixed(4)).join(' ')} / ${r8.L.map((L) => L.toFixed(4)).join(' ')}, nights ${rOff.nights.toFixed(3)} / ${r8.nights.toFixed(3)}, income £${rOff.income} / £${r8.income}, diff ${rOff.diff.toFixed(2)} / ${r8.diff.toFixed(2)}; on: levels ${rOn.L.map((L) => L.toFixed(4)).join(' ')}, nights ${rOn.nights.toFixed(3)}, ${rOn.n[0]} asks counted in A against ${r8.n[0]} (cancel rate ${r8.cancel.toFixed(3)})`);
 }
 check('v9 pooling: one room alone, or a house with too few requests, takes v8\'s prior; the house counts nothing after today', close(solo.L9, solo.L8, 0.03) && solo.prior.source === 'occupancy' && solo.prior.k === LEVEL_PRIOR_K && few.prior.source === 'occupancy' && few.prior.k === LEVEL_PRIOR_K && close(few.prior.mean, few.L0, 1e-9) && earlyPrior.source === 'house' && earlyPrior.houseN > 0 && earlyPrior.houseN <= othersBefore && othersBefore < othersAll, `alone ${solo.L9.toFixed(4)} vs v8 ${solo.L8.toFixed(4)} (start ${solo.L0.toFixed(4)} vs ${solo.L08.toFixed(4)}); few ${few.L9.toFixed(4)} vs v8 ${few.L8.toFixed(4)} (start ${few.L0.toFixed(4)} vs ${few.L08.toFixed(4)}): house had ${few.prior.houseN} < ${POOL_HOUSE_MIN_N}; standing on 2026-10-01 the house counts ${earlyPrior.houseN} requests of the other rooms' ${othersAll} on record, ${othersAll - othersBefore} of which arrived after that date`);
+// 42. The poolW switch (the pooling's evidence weight). Two rooms live two years in a quieter house: A at 0.1 a date
+// (about 70 requests in two years), B genuinely at a third of that and on offer every month (in each month B had no
+// booking, one enquiry that never books marks it as asked, as the backtest's Double looks: few requests, many quiet
+// months). Under the booking-weighted W (poolW off) B's quiet months count for almost nothing, so its relative factor
+// is weak and the house rate pulls its level up; with poolW on those months are evidence, B's exponent s is higher,
+// the prior mean sits nearer B's true rate, and B's level is pulled up less and lands nearer its true rate, on every
+// seed and in RMSE over them. Both read the same records (same raw counts and starts); only the prior differs. The
+// size is small here (0-3% of the level): the prior holds at most 4 pseudo-requests (tau's floor) against B's 20-25
+// asks, so whichever W is used the pooling can barely move a room with that many; it is the room with a handful of
+// asks whose level the prior mean decides, and the prior mean is what poolW changes. The ratio is kept
+// moderate on purpose: at an extreme one (a twentieth, tried while writing this) the weak relative factor leaves a
+// wide between-room spread, the moment estimate of tau rises well above its floor and that prior weakens by itself,
+// so the two levels came out about the same (0.0331 on vs 0.0323 off, own rate 0.0297) although the prior means
+// differed twofold; at a third, tau sits at its floor either way and the weight-choice alone decides.
+{
+const HOUSE42 = 0.1; const LOW = HOUSE42 / 3;
+const withEnq = (seed) => {
+const w = poolWorld({ rates: [HOUSE42, LOW], launch: [730, 730], seed: 200 + seed });
+const [y0, m0] = w.today.split('-').map(Number);
+const busy = new Set(w.stays.filter((x) => x.listingId === 'LB').flatMap((x) => { const out = []; for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) out.push(dayStr(d).slice(0, 7)); return out; }));
+for (let i = 1; i <= 24; i++) { const ym = new Date(Date.UTC(y0, m0 - 1 - i, 1)).toISOString().slice(0, 7); if (!busy.has(ym)) w.requests.push({ id: `q${i}`, listingId: 'LB', kind: 'enquiry', receivedAt: `${ym}-05T10:00:00.000Z`, checkin: `${ym}-15`, checkout: `${ym}-17` }); }
+return w;
+};
+const pair = Array.from({ length: 6 }, (_, k) => {
+const w = withEnq(k);
+const cOff = { ...w, v9flags: { poolW: false } }; calibrate(cOff); const dOff = demandFor(cOff, cOff.params, 1);
+const cOn = { ...w, v9flags: { poolW: true } }; calibrate(cOn); const dOn = demandFor(cOn, cOn.params, 1);
+const raw = dOn.n / dOn.X.reduce((a, b) => a + b, 0); // B's own observed rate, the same under both
+return { off: dOff, on: dOn, raw, months: cOn.params.occ[1].months };
+});
+const nearer = pair.every((x) => x.on.L < x.off.L && Math.abs(Math.log(x.on.L / LOW)) < Math.abs(Math.log(x.off.L / LOW)) && Math.abs(Math.log(x.on.prior.mean / LOW)) < Math.abs(Math.log(x.off.prior.mean / LOW)));
+const rmseOn = rms(pair.map((x) => Math.log(x.on.L / LOW))); const rmseOff = rms(pair.map((x) => Math.log(x.off.L / LOW)));
+const sameRaw = pair.every((x) => x.on.n === x.off.n && x.on.L0 === x.off.L0 && x.on.prior.source === 'house' && x.off.prior.source === 'house');
+const sUp = pair.every((x) => x.on.prior.s > x.off.prior.s && x.months >= 18);
+check('v9 poolW: a room on offer every month but quiet keeps a level nearer its own rate than under the booking-weighted W', nearer && rmseOn < rmseOff && sameRaw && sUp, `${pair.length} seeds, B ${Math.min(...pair.map((x) => x.on.n)).toFixed(1)}-${Math.max(...pair.map((x) => x.on.n)).toFixed(1)} asks over ${Math.min(...pair.map((x) => x.months))}+ months on offer (true ${LOW.toFixed(4)}, house ${pair[0].on.prior.house.toFixed(3)}): levels poolW on ${pair.map((x) => x.on.L.toFixed(4)).join(' ')} / off ${pair.map((x) => x.off.L.toFixed(4)).join(' ')} / observed ${pair.map((x) => x.raw.toFixed(4)).join(' ')}; RMSE of log(level / true) ${rmseOn.toFixed(3)} on vs ${rmseOff.toFixed(3)} off; k ${pair.map((x) => x.on.prior.k.toFixed(2)).join(' ')} / ${pair.map((x) => x.off.prior.k.toFixed(2)).join(' ')}; s on ${pair.map((x) => x.on.prior.s.toFixed(2)).join(' ')} / off ${pair.map((x) => x.off.prior.s.toFixed(2)).join(' ')}; prior means on ${pair.map((x) => x.on.prior.mean.toFixed(3)).join(' ')} / off ${pair.map((x) => x.off.prior.mean.toFixed(3)).join(' ')}`);
+}
 }
 return results;
 }
