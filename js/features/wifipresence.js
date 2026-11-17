@@ -30,6 +30,7 @@ let busy = false;
 let agentStatus = null; // the agent's last status object (wifi.events / wifi.pause / wifi.resume replies); not synced
 let lastError = null; // {html} of the last failed call
 let lastAttemptAt = 0;
+let showEmptyPast = false; // past stays with no guest device are hidden unless asked for (not synced)
 
 // ---- pure logic -------------------------------------------------------------------------------------------------
 
@@ -358,9 +359,13 @@ return `<div class="wifi-clean-row"><span class="wifi-clean-day">${escapeHtml(da
 }).join('');
 }
 
-function deviceRowHtml(mac, d) {
+// `matched`: the stays this device was matched to (from matchStays), shown as chips; an unassigned one then reads as an
+// automatic guest rather than as something still to sort out.
+function deviceRowHtml(mac, d, matched = [], chipFor = (r) => escapeHtml(r.guestName || 'Stay')) {
 const name = deviceName(d, mac);
-const roleOpts = ROLES.map(([v, label]) => `<option value="${v}"${(d.role || '') === v ? ' selected' : ''}>${label}</option>`).join('');
+const auto = !d.role && matched.length;
+const roleOpts = ROLES.map(([v, label]) => `<option value="${v}"${(d.role || '') === v ? ' selected' : ''}>${v === '' && auto ? 'Guest (auto)' : label}</option>`).join('');
+const stayHtml = matched.length ? `<span class="wifi-dev-stay">${matched.map((r) => chipFor(r)).join(' ')}</span>` : '';
 const first = ms(d.firstSeen); const last = ms(d.lastSeen);
 return `<div class="wifi-dev" data-wifi-mac="${escapeHtml(mac)}">
 <span class="wifi-dev-name" title="${escapeHtml(mac)}">${escapeHtml(name)} <small>…${escapeHtml(mac.slice(-5))}</small></span>
@@ -368,6 +373,7 @@ return `<div class="wifi-dev" data-wifi-mac="${escapeHtml(mac)}">
 <span class="wifi-dev-when">${first != null ? `first ${escapeHtml(dayName(first))} ${clock(first)}` : ''}${last != null ? ` · last ${escapeHtml(dayName(last))} ${clock(last)}` : ''}</span>
 <select data-wifi-role="${escapeHtml(mac)}" title="What this device is. Guest and Unassigned guest-network devices are matched to stays; Cleaner ones are timed below.">${roleOpts}</select>
 <input type="text" autocomplete="off" class="tag-add-input" data-wifi-label="${escapeHtml(mac)}" placeholder="Label (optional)" value="${escapeHtml(d.label || '')}">
+${stayHtml}
 </div>`;
 }
 
@@ -389,22 +395,33 @@ if (pauseBtn) pauseBtn.hidden = paused;
 if (resumeBtn) resumeBtn.hidden = !paused;
 
 const candidates = (data.airbnbReservations || []).filter((r) => r.source !== 'external');
-const shown = matchStays(candidates, data.wifiDevices, data.wifiVisits)
+const matched = matchStays(candidates, data.wifiDevices, data.wifiVisits);
+// MAC -> the stays it was matched to, for the device list.
+const staysByMac = new Map();
+matched.forEach((it) => it.devices.forEach((d) => { if (!staysByMac.has(d.mac)) staysByMac.set(d.mac, []); staysByMac.get(d.mac).push(it.stay); }));
+const recent = matched
 .filter((it) => it.end >= now - STAY_LOOKBACK_DAYS * 86400000 && it.start <= now + 86400000)
-.sort((a, b) => b.start - a.start)
-.slice(0, MAX_STAYS);
-stays.innerHTML = shown.length
+.sort((a, b) => b.start - a.start);
+// A stay that has ended with no guest device says nothing (most are from before the router was being read): hidden
+// unless asked for. Current and upcoming stays always show, even when empty.
+const isEmptyPast = (it) => !it.devices.length && it.end < now;
+const hiddenCount = recent.filter(isEmptyPast).length;
+const shown = recent.filter((it) => showEmptyPast || !isEmptyPast(it)).slice(0, MAX_STAYS);
+const toggle = hiddenCount
+? `<div class="settings-note" style="margin:4px 0 0;"><span class="inline-goto-link" data-wifi-empty-toggle>${showEmptyPast ? `Hide ${hiddenCount} past ${hiddenCount === 1 ? 'stay' : 'stays'} with no device` : `Show ${hiddenCount} past ${hiddenCount === 1 ? 'stay' : 'stays'} with no device`}</span></div>`
+: '';
+stays.innerHTML = (shown.length
 ? shown.map((it) => stayBlockHtml(it, chipFor, now)).join('')
-: '<div class="settings-note" style="margin:0;">No recent or current stays to match.</div>';
+: '<div class="settings-note" style="margin:0;">No current stays with guest devices.</div>') + toggle;
 
 const cleaners = document.getElementById('wifi-cleaners');
 if (cleaners) cleaners.innerHTML = cleanerRowsHtml(cleanerVisits(data.wifiDevices, data.wifiVisits));
 
 const macs = Object.keys(data.wifiDevices || {});
-const order = (mac) => { const d = data.wifiDevices[mac]; return `${d.net === 'guest' ? 0 : 1}${d.role ? 1 : 0}${String(9e15 - (ms(d.lastSeen) || 0)).padStart(16, '0')}`; };
+const order = (mac) => { const d = data.wifiDevices[mac]; return `${d.net === 'guest' ? 0 : 1}${d.role || staysByMac.has(mac) ? 1 : 0}${String(9e15 - (ms(d.lastSeen) || 0)).padStart(16, '0')}`; };
 macs.sort((a, b) => order(a).localeCompare(order(b)));
 const list = document.getElementById('wifi-devices');
-if (list) list.innerHTML = macs.length ? macs.map((m) => deviceRowHtml(m, data.wifiDevices[m])).join('') : '<div class="settings-note" style="margin:0;">No devices yet.</div>';
+if (list) list.innerHTML = macs.length ? macs.map((m) => deviceRowHtml(m, data.wifiDevices[m], staysByMac.get(m) || [], chipFor)).join('') : '<div class="settings-note" style="margin:0;">No devices yet.</div>';
 const label = document.getElementById('wifi-devices-summary');
 if (label) label.textContent = `Devices (${macs.length})`;
 const count = document.getElementById('wifi-count');
@@ -417,6 +434,11 @@ if (!panel) return;
 document.getElementById('wifi-refresh-btn').addEventListener('click', () => pull());
 document.getElementById('wifi-pause-btn').addEventListener('click', () => pauseFor(60));
 document.getElementById('wifi-resume-btn').addEventListener('click', () => resumeNow());
+document.getElementById('wifi-stays').addEventListener('click', (e) => {
+if (!e.target.closest('[data-wifi-empty-toggle]')) return;
+showEmptyPast = !showEmptyPast;
+renderWifiPresence();
+});
 const list = document.getElementById('wifi-devices');
 list.addEventListener('change', (e) => {
 const role = e.target.closest('[data-wifi-role]');
