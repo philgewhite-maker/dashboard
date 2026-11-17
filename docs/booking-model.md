@@ -188,7 +188,7 @@ top-rated-guest share is now 50% (the saved setting already was).
 
 ## v9 candidate (not live, backtest only)
 
-`js/features/bookingmodel-candidate.js` (MODEL_VERSION 9; 61 self-test cases). Loaded only by backtests and its own
+`js/features/bookingmodel-candidate.js` (MODEL_VERSION 9; 62 self-test cases). Loaded only by backtests and its own
 self-test; the app runs v8. What it changes from v8:
 
 **The market reference.** The guest-response reference becomes the market: the nearby-hotel basket median
@@ -248,6 +248,15 @@ check `priceTrace(ctx).stages`), 10 (backtest counting).
 With no basket, v9 therefore no longer equals v8 (earlier candidate builds did): the self-test compares v9's no-basket
 run with itself under unusable samples instead. The random streams are v8's except that an arrival takes one extra draw
 (the cancellation) when the cancellation rate is above 0.
+
+**Attribution switches** (`V9_FLAGS`, `setV9Flags`, 17 Nov 2026). Every v9 change can be turned back to v8's behaviour
+for a backtest, one at a time, so a move in a room's figures can be attributed: `fix1` (own-price reference), `fix2`
+(unlisted months' weeks skipped), `fix3` (cleaning fee per booking), `fix4` (enquiries in the level), `fix6`
+(cancellations in projections), `pool`, `market`. `setV9Flags({ fix2: false })` sets them module-wide (the backtest
+harness builds its own contexts); `ctx.v9flags` overrides per context. All on in the app and the self-test; with every
+one off the candidate is v8 exactly, draw for draw (self-test 41, on a three-room world with discounts, a gap in one
+room's records, enquiries and a cancellation rate). Note that `fix2` also moves the shared lead-time fit, which reads
+the same grids. Not a setting: nothing is read from the owner's data.
 
 Unsourced constants (top of the file): 365-day market horizon, MARKET_FIT_MIN 8, MARKET_FIT_K 8, FIT_WINDOW_DAYS 14,
 FIT_MIN_EVENTS 5, price changes outside ×0.5–×2 dropped, FIT_TAU_MIN 0.25, POOL_HOUSE_MIN_N 10, POOL_TAU_MIN 0.5,

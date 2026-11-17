@@ -94,6 +94,22 @@ import * as v8model from './bookingmodel.js'; // selfTest only: the pooling case
 import { basketReference, basketOfRoom, hotelPriceAt, HOTELS } from './hotelbasket.js';
 
 const MODEL_VERSION = 9;
+// v9 attribution switches (backtest diagnostics only; every switch is on in the app and the selfTest). Each one turns
+// a v9 change back to v8's behaviour so a backtest can be run with the changes toggled one at a time and the move in
+// each room's figures attributed: fix1 (own-price reference, audit 1), fix2 (unlisted months' weeks skipped, audit 2),
+// fix3 (cleaning fee per booking, audit 3), fix4 (enquiries in the level, audit 4), fix6 (cancellations in
+// projections, audit 6), pool (partial pooling of the level), market (the market reference). With every switch off
+// the candidate is v8 exactly (selfTest 62). Set for a whole run with setV9Flags({ fix2: false }) (module-wide: the
+// backtest harness builds its own contexts), or per context with ctx.v9flags = { fix2: false } (merged over the
+// module's); flagsOf(ctx) is what the code reads. Not a setting: nothing here is read from the owner's data.
+const V9_FLAGS = { fix1: true, fix2: true, fix3: true, fix4: true, fix6: true, pool: true, market: true };
+const flagsOf = (ctx) => (ctx && ctx.v9flags ? { ...V9_FLAGS, ...ctx.v9flags } : V9_FLAGS);
+function setV9Flags(partial) {
+if (partial === 'all') Object.keys(V9_FLAGS).forEach((k) => { V9_FLAGS[k] = true; });
+else if (partial === 'none') Object.keys(V9_FLAGS).forEach((k) => { V9_FLAGS[k] = false; });
+else if (partial && typeof partial === 'object') Object.keys(partial).forEach((k) => { if (k in V9_FLAGS) V9_FLAGS[k] = !!partial[k]; });
+return { ...V9_FLAGS };
+}
 // v9 market reference (see the header). Every figure here is an ASSUMPTION of this build, unsourced:
 const MARKET_HORIZON_DAYS = 365; // the basket is used for check-ins up to this far ahead (the sampler's furthest point is 350 days)
 const MARKET_FIT_MIN = 8; // past stays with a basket on their nights before the history ratio is used at all
@@ -560,7 +576,7 @@ const lf = guestPriceSettings(s).cleaningFees[e.listingId];
 const shortMax = lf && lf.shortStay != null && lf.shortStay !== '' ? Number(lf.shortStayMaxNights) || 0 : 0;
 if (e.cleaningFee > 0) cleanFees[r].push({ fee: Number(e.cleaningFee), long: Number(e.nights) > shortMax });
 });
-const feeMedian = (xs) => { const long = xs.filter((x) => x.long).map((x) => x.fee); return long.length >= 3 ? median(long) : median(xs.map((x) => x.fee)); };
+const feeMedian = (xs) => { const long = flagsOf(ctx).fix3 ? xs.filter((x) => x.long).map((x) => x.fee) : []; return long.length >= 3 ? median(long) : median(xs.map((x) => x.fee)); };
 const everyCleaning = cleanFees.flat();
 live.forEach((x) => {
 if ((ctx.earnedStayIds || new Set()).has(x.id)) return;
@@ -1058,6 +1074,7 @@ return M;
 // stay length n (NaN = none: that length keeps v8's reference).
 const rhoCell = (m, w, n) => `${m}|${w}|${n}`;
 function marketFor(ctx, params, ri, c) {
+if (!flagsOf(ctx).market) return null; // market off: the own-price reference everywhere, as v8
 if (!Array.isArray(ctx.hotelPrices) || !ctx.hotelPrices.length) return null;
 const T = dayNum(ctx.today);
 if (c < T || c >= T + MARKET_HORIZON_DAYS) return null;
@@ -1204,14 +1221,44 @@ const allIn = (n, i, ex, cur) => allInGuestPrice({ nightly: nightlyOf[n], nights
 // already follow (playArrivals). refS.elasticity (v6's 1.5) is no longer read by the response. One ref per (n, i):
 // every length, not only those on the curve, as a 1-night extra can come.
 const refs = new Float64Array((LOS_MAX + 1) * K);
-let logRef = 0; let wRef = 0; const solved = eps.some((e) => e !== 0);
+let logRef = 0; let wRef = 0; let solved = eps.some((e) => e !== 0);
+let E6 = 1; // the expected multiplier at the baseline: 1 by construction (kept so the selfTest and display still read it)
+if (flagsOf(ctx).fix1) {
 for (let n = 1; n <= LOS_MAX && solved; n++) {
 const p = (cdf[n] || 0) - (cdf[n - 1] || 0);
 for (let i = 0; i < K; i++) { refs[n * K + i] = allIn(n, i, 0, false); if (p > 0 && q[i] > 0) { logRef += p * q[i] * Math.log(refs[n * K + i]); wRef += p * q[i]; } }
 }
+} else {
+// fix1 off: v8's reference, one per stay length, solved so that the kept share at the baseline equals v6's
+// (1 - discount) ^ -elasticity over the lead classes (E6 above 1 with discounts: the double count of audit finding 1).
+const eps6 = Number(refS.elasticity) || 0;
+E6 = 0;
+for (let n = 1; n <= LOS_MAX && solved; n++) {
+let E6n = 0; const terms = [];
+for (let i = 0; i < K; i++) {
+if (!(q[i] > 0)) continue;
+E6n += q[i] * Math.pow((1 - stepPct(discRef.shortNotice, 'days', reps[i])) * (1 - stepPct(discRef.length, 'nights', n)), -eps6);
+terms.push({ w: q[i], la: Math.log(allIn(n, i, 0, false)), e: eps[i] });
+}
+if (!terms.length || !(E6n > 0)) { solved = false; break; }
+let x;
+const e0 = terms[0].e;
+if (terms.every((t) => t.e === e0)) {
+let S = 0; terms.forEach((t) => { S += t.w * Math.exp(t.e * t.la); });
+x = (Math.log(S) - Math.log(E6n)) / e0;
+} else {
+const g = (y) => { let v = 0; for (const t of terms) v += t.w * Math.exp(t.e * (t.la - y)); return v; };
+let lo = Math.min(...terms.map((t) => t.la)) - 20; let hi = Math.max(...terms.map((t) => t.la)) + 20;
+for (let it = 0; it < 80; it++) { const mid = (lo + hi) / 2; if (g(mid) < E6n) lo = mid; else hi = mid; }
+x = (lo + hi) / 2;
+}
+for (let i = 0; i < K; i++) refs[n * K + i] = Math.exp(x);
+const p = (cdf[n] || 0) - (cdf[n - 1] || 0);
+if (p > 0) { E6 += p * E6n; logRef += p * x; wRef += p; }
+}
+}
 // `ref`, for display and the selfTest: the stay-length and lead-class weighted (geometric) mean of the references.
 let ref = solved && wRef > 0 ? Math.exp(logRef / wRef) : null;
-const E6 = 1; // the expected multiplier at the baseline: 1 by construction (kept so the selfTest and display still read it)
 // v9: against the market. ref8_ni / nightlyOf[n] is the discount and cleaning-fee structure of the own-price reference
 // (free of the nightly price itself when there is no cleaning fee); rho_n x M_n, the market at the room's relative
 // position, stands in for the nightly price. With no market (mk null) the references are the own-price ones, untouched.
@@ -1284,7 +1331,7 @@ return null;
 function drawArrivals(ctx, params, { from, to, todayN, lam, rooms, extra = null, rngX = null }, rng) {
 const out = [];
 const oneNight = (Number(ctx.s.oneNightDemandPct ?? ONE_NIGHT_DEMAND_PCT) || 0) / 100;
-const cancels = Number(params.cancelRate) > 0; // v9: the cancellation draw is taken only when it can be used, so a rate of 0 draws as v8 did
+const cancels = flagsOf(ctx).fix6 && Number(params.cancelRate) > 0; // v9: the cancellation draw is taken only when it can be used, so a rate of 0 (or fix6 off) draws as v8 did
 rooms.forEach((ri) => {
 for (let c = Math.max(from, todayN); c < to; c++) {
 const boost = guestResponse(ctx, params, ri, c, todayN).B; // v7: per check-in date and reach (v6: maxBoost per room)
@@ -1334,7 +1381,8 @@ const gapMax = Number(s.gapMaxNights) || 0;
 // rate net of re-booking, and the backtest's "actual" (nights still booked today) was not what the projection meant.
 // The draw is the arrival's own `cu` (drawArrivals), so accept and reject futures cancel the same bookings. An arrival
 // with no `cu` (a made-up one) never cancels. Not modelled: the late/early split (lateShare) of when they cancel.
-const cancelRate = Math.min(0.9, Math.max(0, Number(params.cancelRate) || 0));
+const flags = flagsOf(ctx);
+const cancelRate = flags.fix6 ? Math.min(0.9, Math.max(0, Number(params.cancelRate) || 0)) : 0; // fix6 off: booked for good, as v8
 const pending = []; // cancellations due, by the day they happen
 
 const booked = [];
@@ -1377,7 +1425,7 @@ if (a.u > gr.mult(a.los, a.lead, ex) / gr.B) continue; // the guest doesn't take
 for (let i = i0; i < i1 && i < len; i++) o[i] = 1;
 // clean (v9, audit finding 3): the received cleaning fee this booking pays, the one its guest was priced at (gr.fees,
 // receivedCleaningFees at the current settings): the short-stay fee on a short stay. v8 credited the per-stay fee to every booking.
-const b = { room: a.room, ci: a.c, co: a.c + a.los, factor: factor * topRated[a.room] * (a.at < newUntil[a.room] ? 1 - newPct : 1), at: a.at, lead: a.lead, clean: cleaningFeeFor(gr.fees, a.los) };
+const b = { room: a.room, ci: a.c, co: a.c + a.los, factor: factor * topRated[a.room] * (a.at < newUntil[a.room] ? 1 - newPct : 1), at: a.at, lead: a.lead, clean: flags.fix3 ? cleaningFeeFor(gr.fees, a.los) : undefined }; // fix3 off: the readers fall back to the per-stay figure, as v8
 booked.push(b);
 if (cancelRate > 0 && a.cu != null && a.cu < cancelRate) {
 const at = a.at + (a.cu / cancelRate) * (a.c - a.at); // cu / cancelRate is uniform on [0, 1) given the cancellation
@@ -1513,7 +1561,8 @@ const end = weekStartN(dayNum(ctx.today)); // complete weeks only
 // v9 (audit finding 4): an enquiry counts at its weight (s.enquiryWeight, as the stay-length and weekday mixes already
 // count it), in the level, the month adjustment, the lead-time fit and the stage demand; v8 counted requests only
 // while the doc said enquiries counted. availabilityOf's minimum-stay reading still takes requests only.
-const ew = Number(ctx.s.enquiryWeight) || 0;
+const flags = flagsOf(ctx);
+const ew = flags.fix4 ? Number(ctx.s.enquiryWeight) || 0 : 0; // fix4 off: requests only, as v8
 const ids = new Set(ctx.rooms[ri].listingIds);
 const asks = asksFor(ctx, ids).filter((a) => a.checkin >= a.t && (a.kind === 'request' || ew > 0)).map((a) => ({ ...a, w: a.kind === 'enquiry' ? ew : 1 }));
 if (!asks.length || !(weekStartN(asks[0].t) < end)) return null;
@@ -1529,7 +1578,7 @@ const av = availabilityOf(ctx, params, ri);
 const listedMonth = new Set();
 ctx.stays.forEach((x) => { if (x.status !== 'stay' || !ids.has(x.listingId) || !x.checkin || !x.checkout) return; for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) listedMonth.add(dayStr(d).slice(0, 7)); });
 asks.forEach((a) => { listedMonth.add(dayStr(a.t).slice(0, 7)); listedMonth.add(dayStr(a.checkin).slice(0, 7)); });
-const listedWeek = (w) => listedMonth.has(dayStr(w + 3).slice(0, 7));
+const listedWeek = flags.fix2 ? (w) => listedMonth.has(dayStr(w + 3).slice(0, 7)) : () => true; // fix2 off: every week counts, as v8
 // Each date's class and weight, worked out once: the date arithmetic is the slow part.
 const days = end - first + LEAD_SPAN;
 const cls = new Uint8Array(days);
@@ -1702,6 +1751,11 @@ function demandPool(ctx, params) {
 const cache = ctx.demandCache || (ctx.demandCache = new Map());
 if (cache.has('pool')) return cache.get('pool');
 const raws = ctx.rooms.map((_, i) => demandRaw(ctx, params, i));
+if (!flagsOf(ctx).pool) { // pool off: v8's prior for every room (its own occupancy-based start, LEVEL_PRIOR_K pseudo-requests)
+const v8 = raws.map((r) => ({ source: 'occupancy', mean: r.L0, k: LEVEL_PRIOR_K, house: null, houseN: 0, phi: 1, s: 0, tau: null, tauHat: null }));
+cache.set('pool', v8);
+return v8;
+}
 const withX = raws.map((r, i) => i).filter((i) => raws[i].grid && raws[i].Xsum > 0);
 const logL0 = raws.map((r) => Math.log(r.L0));
 const sOf = (r) => r.occW / (r.occW + POOL_OCC_K);
@@ -3243,6 +3297,31 @@ const othersBefore = early.requests.filter((q) => q.listingId !== 'LC' && dayNum
 // (v8's prior, not v8's level exactly: the occupancy-based start now simulates with cancellations (audit finding 6), so
 // its draws differ and a one-month-old room's start can sit 30% off v8's by that noise alone; the prior is checked as
 // the room's own start with LEVEL_PRIOR_K, and the data-rich room alone within 3%.)
+// 41. Attribution switches (V9_FLAGS): with every one off the candidate IS v8, on the same records, draw for draw: the
+// level of every room, a three-month projection's nights and income, and an evaluation. The world is the pooled house
+// with the things the switches touch added: discounts and a price response (fix1), a stretch of months with nothing
+// on record in room B (fix2), enquiries in room A (fix4), a cancellation rate above 0 (fix6; none of the world's
+// stays is cancelled, so it is the prior's), three rooms (pool). No hotel samples: the market switch has nothing to
+// act on here (its own cases are 31-36). With the switches on, the same world projects differently (they do something).
+{
+const w = poolWorld({ rates: [HOUSE, HOUSE, HOUSE], launch: [730, 730, LAUNCH], seed: 11 });
+const disc = { airbnb: { shortNotice: [{ days: 5, pct: 10 }, { days: 10, pct: 5 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 18 }] }, direct: { shortNotice: [], length: [] } };
+w.s = { ...w.s, discounts: disc, elasticity: 1.5, elasticityPrior: { ...DEFAULT_PREFS.bookingEvaluator.elasticityPrior } };
+const T41 = dayNum(w.today);
+const gapFrom = dayStr(T41 - 420).slice(0, 7); const gapTo = dayStr(T41 - 300).slice(0, 7); // four months with nothing on record in room B
+w.stays = w.stays.filter((x) => !(x.listingId === 'LB' && x.checkin.slice(0, 7) >= gapFrom && x.checkout.slice(0, 7) <= gapTo));
+w.requests = w.requests.filter((q) => !(q.listingId === 'LB' && q.receivedAt.slice(0, 7) >= gapFrom && q.checkin.slice(0, 7) <= gapTo));
+for (let i = 0; i < 12; i++) { const t = T41 - 30 - i * 23; w.requests.push({ id: `e${i}`, listingId: 'LA', kind: 'enquiry', receivedAt: `${dayStr(t)}T10:00:00.000Z`, checkin: dayStr(t + 20), checkout: dayStr(t + 23) }); }
+const allOff = Object.fromEntries(Object.keys(V9_FLAGS).map((k) => [k, false]));
+const run = (c, m) => { const d = w.rooms.map((_, ri) => (m === v8model ? m.driftKit.demandFor(c, c.params, ri) : demandFor(c, c.params, ri))); const p = m.projectVoids(c, { from: '2026-12-01', to: '2027-03-01', runs: 120 }); const ev = m.evaluate({ listingId: 'LC', checkin: '2026-12-10', checkout: '2026-12-13', payout: 330, platform: 'airbnb', guestReviews: 5 }, c, { runs: 120 }); return { L: d.map((x) => x.L), n: d.map((x) => x.n), nights: p.voids.reduce((a, v) => a + v.expectedNights, 0), income: p.total.expected, diff: ev.diff, cancel: c.params.cancelRate }; };
+const c8 = { ...w }; v8model.calibrate(c8); const r8 = run(c8, v8model);
+const cOff = { ...w, v9flags: allOff }; calibrate(cOff); const rOff = run(cOff, { projectVoids, evaluate });
+const cOn = { ...w }; calibrate(cOn); const rOn = run(cOn, { projectVoids, evaluate });
+const sameL = rOff.L.every((L, i) => close(L, r8.L[i], 1e-9)) && rOff.n.every((n, i) => n === r8.n[i]);
+const same = sameL && close(rOff.nights, r8.nights, 1e-9) && close(rOff.income, r8.income, 1e-9) && close(rOff.diff, r8.diff, 1e-9);
+const moved = !close(rOn.nights, r8.nights, 1e-6) && rOn.n[0] > r8.n[0];
+check('v9 switches: with every one off the candidate is v8 exactly; on, it is not', same && moved && r8.cancel > 0 && Object.values(flagsOf(cOn)).every(Boolean) && Object.values(V9_FLAGS).every(Boolean), `off vs v8: levels ${rOff.L.map((L) => L.toFixed(4)).join(' ')} / ${r8.L.map((L) => L.toFixed(4)).join(' ')}, nights ${rOff.nights.toFixed(3)} / ${r8.nights.toFixed(3)}, income £${rOff.income} / £${r8.income}, diff ${rOff.diff.toFixed(2)} / ${r8.diff.toFixed(2)}; on: levels ${rOn.L.map((L) => L.toFixed(4)).join(' ')}, nights ${rOn.nights.toFixed(3)}, ${rOn.n[0]} asks counted in A against ${r8.n[0]} (cancel rate ${r8.cancel.toFixed(3)})`);
+}
 check('v9 pooling: one room alone, or a house with too few requests, takes v8\'s prior; the house counts nothing after today', close(solo.L9, solo.L8, 0.03) && solo.prior.source === 'occupancy' && solo.prior.k === LEVEL_PRIOR_K && few.prior.source === 'occupancy' && few.prior.k === LEVEL_PRIOR_K && close(few.prior.mean, few.L0, 1e-9) && earlyPrior.source === 'house' && earlyPrior.houseN > 0 && earlyPrior.houseN <= othersBefore && othersBefore < othersAll, `alone ${solo.L9.toFixed(4)} vs v8 ${solo.L8.toFixed(4)} (start ${solo.L0.toFixed(4)} vs ${solo.L08.toFixed(4)}); few ${few.L9.toFixed(4)} vs v8 ${few.L8.toFixed(4)} (start ${few.L0.toFixed(4)} vs ${few.L08.toFixed(4)}): house had ${few.prior.houseN} < ${POOL_HOUSE_MIN_N}; standing on 2026-10-01 the house counts ${earlyPrior.houseN} requests of the other rooms' ${othersAll} on record, ${othersAll - othersBefore} of which arrived after that date`);
 }
 return results;
@@ -3318,4 +3397,4 @@ cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100),
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown };
+export { V9_FLAGS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown };
