@@ -22,15 +22,12 @@ const GUEST_ROLES = new Set(['', 'guest']);
 const RETENTION_MS = 120 * 86400000;
 const PULL_OVERLAP_MS = 10 * 60 * 1000; // ask for a little before the cursor, so a clock difference can't drop a change
 const AUTO_PULL_MS = 5 * 60 * 1000;
-const STAY_LOOKBACK_DAYS = 21; // stays that ended longer ago than this drop off the card
-const MAX_STAYS = 10;
 const MAX_CLEANER_ROWS = 15;
 
 let busy = false;
 let agentStatus = null; // the agent's last status object (wifi.events / wifi.pause / wifi.resume replies); not synced
 let lastError = null; // {html} of the last failed call
 let lastAttemptAt = 0;
-let showEmptyPast = false; // past stays with no guest device are hidden unless asked for (not synced)
 
 // ---- pure logic -------------------------------------------------------------------------------------------------
 
@@ -331,20 +328,27 @@ return `<span class="wifi-dev-chip">${escapeHtml(deviceName(d.device, d.mac))} <
 }).join(' ');
 }
 
-function stayBlockHtml(item, chipFor, now) {
-const { stay } = item;
-let line;
-if (!item.devices.length) {
-line = item.end < now ? 'Guest Wi-Fi: no new device seen during this stay.' : 'Guest Wi-Fi: no new device yet.';
-} else {
-const last = item.open && now <= item.end + 24 * 3600000 ? 'still connected' : `last seen ~${clock(item.lastSeen)} on ${dayName(item.lastSeen)}`;
-line = `Guest Wi-Fi: first device ~${clock(item.firstSeen)} on ${dayName(item.firstSeen)} · ${last}`;
+const isLive = (item, now) => item.open && now <= item.end + 24 * 3600000;
+
+function stayLine(item, now) {
+if (!item.devices.length) return item.end < now ? 'Guest Wi-Fi: no new device seen during this stay.' : 'Guest Wi-Fi: no new device yet.';
+const last = isLive(item, now) ? 'still connected' : `last seen ~${clock(item.lastSeen)} on ${dayName(item.lastSeen)}`;
+return `Guest Wi-Fi: first device ~${clock(item.firstSeen)} on ${dayName(item.firstSeen)} · ${last}`;
 }
-return `<div class="cal-row wifi-stay" data-wifi-stay="${escapeHtml(stay.id)}">
-<div class="cal-head">${chipFor(stay)}</div>
-<div class="wifi-line${item.ambiguous ? ' amb' : ''}">${escapeHtml(line)}</div>
-${item.devices.length ? `<div class="wifi-devs">${stayDevicesHtml(item, chipFor)}</div>` : ''}
-</div>`;
+
+// For the Airbnb panel (js/features/airbnb.js): stay id -> {item, live} for every stay with at least one guest device.
+// The stay rows outline the guest name from this and show stayWifiHtml in their expander.
+function wifiByStay(reservations, now = Date.now()) {
+const map = new Map();
+matchStays((reservations || []).filter((r) => r.source !== 'external'), data.wifiDevices, data.wifiVisits).forEach((it) => {
+if (it.devices.length) map.set(it.stay.id, { item: it, live: isLive(it, now) });
+});
+return map;
+}
+
+// The Guest Wi-Fi block inside a stay's expander. chipFor renders the other stays named by "can't tell which room".
+function stayWifiHtml(item, chipFor, now = Date.now()) {
+return `<div class="stay-wifi${item.ambiguous ? ' amb' : ''}"><div class="wifi-line">${escapeHtml(stayLine(item, now))}</div>${item.devices.length ? `<div class="wifi-devs">${stayDevicesHtml(item, chipFor)}</div>` : ''}</div>`;
 }
 
 function cleanerRowsHtml(list) {
@@ -399,20 +403,11 @@ const matched = matchStays(candidates, data.wifiDevices, data.wifiVisits);
 // MAC -> the stays it was matched to, for the device list.
 const staysByMac = new Map();
 matched.forEach((it) => it.devices.forEach((d) => { if (!staysByMac.has(d.mac)) staysByMac.set(d.mac, []); staysByMac.get(d.mac).push(it.stay); }));
-const recent = matched
-.filter((it) => it.end >= now - STAY_LOOKBACK_DAYS * 86400000 && it.start <= now + 86400000)
-.sort((a, b) => b.start - a.start);
-// A stay that has ended with no guest device says nothing (most are from before the router was being read): hidden
-// unless asked for. Current and upcoming stays always show, even when empty.
-const isEmptyPast = (it) => !it.devices.length && it.end < now;
-const hiddenCount = recent.filter(isEmptyPast).length;
-const shown = recent.filter((it) => showEmptyPast || !isEmptyPast(it)).slice(0, MAX_STAYS);
-const toggle = hiddenCount
-? `<div class="settings-note" style="margin:4px 0 0;"><span class="inline-goto-link" data-wifi-empty-toggle>${showEmptyPast ? `Hide ${hiddenCount} past ${hiddenCount === 1 ? 'stay' : 'stays'} with no device` : `Show ${hiddenCount} past ${hiddenCount === 1 ? 'stay' : 'stays'} with no device`}</span></div>`
-: '';
-stays.innerHTML = (shown.length
-? shown.map((it) => stayBlockHtml(it, chipFor, now)).join('')
-: '<div class="settings-note" style="margin:0;">No current stays with guest devices.</div>') + toggle;
+// Each stay's guest devices are shown on its row in the Airbnb panel (name outlined, details in its expander), so
+// this panel only says where to look, naming the stays that have devices connected now.
+const live = matched.filter((it) => it.devices.length && isLive(it, now)).sort((a, b) => b.start - a.start);
+const goAirbnb = '<span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb</span>';
+stays.innerHTML = `<div class="settings-note" style="margin:0;">${live.length ? `Connected now: ${live.map((it) => chipFor(it.stay)).join(' ')}. ` : ''}Guest devices show on each stay in ${goAirbnb}: a green outline on the guest's name means devices were seen (stronger while connected), and the stay's &#9662; lists them.</div>`;
 
 const cleaners = document.getElementById('wifi-cleaners');
 if (cleaners) cleaners.innerHTML = cleanerRowsHtml(cleanerVisits(data.wifiDevices, data.wifiVisits));
@@ -434,11 +429,6 @@ if (!panel) return;
 document.getElementById('wifi-refresh-btn').addEventListener('click', () => pull());
 document.getElementById('wifi-pause-btn').addEventListener('click', () => pauseFor(60));
 document.getElementById('wifi-resume-btn').addEventListener('click', () => resumeNow());
-document.getElementById('wifi-stays').addEventListener('click', (e) => {
-if (!e.target.closest('[data-wifi-empty-toggle]')) return;
-showEmptyPast = !showEmptyPast;
-renderWifiPresence();
-});
 const list = document.getElementById('wifi-devices');
 list.addEventListener('change', (e) => {
 const role = e.target.closest('[data-wifi-role]');
@@ -462,4 +452,4 @@ setTimeout(autoPull, 5000);
 setInterval(autoPull, AUTO_PULL_MS);
 }
 
-export { initWifiPresence, renderWifiPresence, pull as pullWifiEvents, mergeWifiEvents, matchStays, cleanerVisits, selfTest };
+export { initWifiPresence, renderWifiPresence, wifiByStay, stayWifiHtml, pull as pullWifiEvents, mergeWifiEvents, matchStays, cleanerVisits, selfTest };

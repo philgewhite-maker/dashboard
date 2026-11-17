@@ -77,7 +77,7 @@ const RULES = [
 { id: 'agent-inbox', keys: ['agentInbox'], panels: ['#agent-inbox-panel'], render: renderAgentInbox },
 { id: 'capture-inbox', keys: ['captureInbox', 'pendingImports'], panels: ['#capture-inbox-panel'], render: renderCaptureInbox },
 { id: 'capture-drafts', keys: ['captureDrafts'], panels: ['#capture-drafts-panel'], render: renderCaptureDrafts },
-{ id: 'airbnb', keys: ['airbnbListings', 'airbnbReservations', 'airbnbBlocks', 'airbnbCleanerEvents', 'airbnbCleanerBlocks', 'airbnbCleaners', 'lettingLedger'], panels: ['#airbnb-panel'], render: renderAirbnb },
+{ id: 'airbnb', keys: ['airbnbListings', 'airbnbReservations', 'airbnbBlocks', 'airbnbCleanerEvents', 'airbnbCleanerBlocks', 'airbnbCleaners', 'lettingLedger', 'wifiDevices', 'wifiVisits'], panels: ['#airbnb-panel'], render: renderAirbnb },
 { id: 'wifi-presence', keys: ['wifiDevices', 'wifiVisits', 'airbnbReservations', 'airbnbListings'], panels: ['#wifi-panel'], render: renderWifiPresence },
 { id: 'booking-requests', keys: ['bookingRequests', 'airbnbReservations', 'airbnbListings'], panels: ['#booking-requests'], render: renderBookingRequests },
 { id: 'airbnb-keys', keys: ['airbnbKeys', 'airbnbKeyAssignments', 'airbnbReservations'], panels: ['#airbnb-panel'], render: renderAirbnbKeys },

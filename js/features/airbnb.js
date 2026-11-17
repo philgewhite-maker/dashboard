@@ -23,6 +23,7 @@ import { parseIcsReservations, parseIcsBlocks, isUnconfirmedStay, isForgettableS
 // still be entered (see syncAirbnbListing's removal step).
 const AWAITING_INCOME_DAYS = 30;
 import { fetchIcs } from '../files.js';
+import { wifiByStay, stayWifiHtml } from './wifipresence.js';
 import { canAttemptGoogleAction, hasCalendarWrite, isSignedIn, signIn } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents, getEvent, patchEventDates } from '../googlecalendar.js';
 
@@ -837,6 +838,8 @@ statusEl.textContent = `Couldn't add: ${err.message || err}`;
 
 // Which stays have their "more" row open (listing, booked date, channel, notes): session-only.
 const openStayMore = new Set();
+// stay id -> {item, live}: stays with devices seen on the guest Wi-Fi (js/features/wifipresence.js), rebuilt each render.
+let wifiStays = new Map();
 // "Double - Zara" -> "Double · Z": the dot's colour already says whose it is; the full name is in the tooltip and the more row.
 function shortListingLabel(label) {
 const [room, ...rest] = String(label).split(/\s+[-–]\s+/);
@@ -858,6 +861,7 @@ const nights = Math.round((new Date(`${r.checkout}T00:00:00`) - new Date(`${r.ch
 const lengthLabel = nights <= 0 ? 'same day' : `${nights} night${nights === 1 ? '' : 's'}`;
 const label = listing.label || listing.prefix || 'Listing';
 const more = openStayMore.has(r.id);
+const wifi = wifiStays.get(r.id);
 const isLong = r.letType === 'long' && (r.paymentIds || []).length > 0;
 const pushed = r.source === 'external'
 ? '<span class="stay-cal-ok" title="Found on the shared calendar by its external prefix: nothing to push, it is already there.">&#128197;&#10003;</span>'
@@ -867,14 +871,14 @@ const pushed = r.source === 'external'
 return `<div class="cal-row stay-row" data-airbnb-row="${r.id}">
 <div class="cal-head">
 <span class="cal-name" title="${escapeHtml(label)}"><span class="dot ${escapeHtml(listing.colour)}"></span>${escapeHtml(shortListingLabel(label))}</span>
-<input type="text" autocomplete="off" class="tag-add-input stay-guest" placeholder="${escapeHtml(pend && pend.guestName ? `${pend.guestName} (pending)` : 'Guest name')}" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}">
+<input type="text" autocomplete="off" class="tag-add-input stay-guest${wifi ? (wifi.live ? ' wifi-live' : ' wifi-seen') : ''}"${wifi ? ` title="${wifi.live ? 'On the guest Wi-Fi now' : 'Devices seen on the guest Wi-Fi'}: open the stay's details for times"` : ''} placeholder="${escapeHtml(pend && pend.guestName ? `${pend.guestName} (pending)` : 'Guest name')}" data-airbnb-res-field="guestName" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.guestName)}">
 <span class="cal-badge ${escapeHtml(listing.colour)}" title="${escapeHtml(lengthLabel)}">${formatAirbnbDate(r.checkin)} &rarr; ${formatAirbnbDate(r.checkout)} &middot; ${nights <= 0 ? 'day' : `${nights}n`}</span>
 </div>
 <div class="cal-turn-row">
 ${isLong ? `<span class="settings-note" style="margin:0;" title="One let paid by a schedule of income entries in Letting income. The entries are unchanged; this stay only says the nights are one let.">Long let &middot; ${r.paymentIds.length} payments</span>` : `<input type="number" step="0.01" min="0" class="tag-add-input" placeholder="${escapeHtml(pend && pend.payout != null ? `£${Math.round(pend.payout)} if accepted` : 'Income £')}" data-airbnb-res-field="income" data-airbnb-res-id="${r.id}" value="${r.income ?? ''}" style="max-width:86px;" title="What this stay earned. The owner's share becomes a debt on the checkout date — see Letting income on Finances.">`}
 ${r.platform !== 'other' ? (reservationPageUrl(r) ? `<a href="${escapeHtml(safeHref(reservationPageUrl(r)))}" target="_blank" rel="noopener noreferrer" title="Open this reservation on Airbnb">${AIRBNB_LOGO}</a>` : AIRBNB_LOGO) : `<span class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;" title="Not booked through Airbnb">${channelBadgeHtml(channelById(data.prefs.lettingChannels, r.channel) || { name: channelName(data.prefs.lettingChannels, r.channel) })}${escapeHtml(channelName(data.prefs.lettingChannels, r.channel))}</span>`}
 ${pushed}
-${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}${assignSelectsHtml(r, isLong)}
+${data.prefs.airbnbCalendarId && listing.needsCleaning && !isLong ? `<div class="cal-clean-group">${cleanerChipHtml(r, 'checkin')}${cleanerChipHtml(r, 'checkout')}</div>` : ''}${reservationKeysHtml(r)}
 <button type="button" class="stay-more-btn" data-airbnb-more="${r.id}" aria-expanded="${more}" title="Listing, notes, the booking date, the day the guest paid, and the channel${r.notes ? `. Notes: ${escapeHtml(r.notes)}` : ''}">${r.notes ? '&#9998; ' : ''}<span class="stay-more-caret">&#9662;</span></button>
 </div>
 <div class="sync-status" data-airbnb-push-status="${r.id}">${pushNoteHtml(r)}</div>
@@ -886,6 +890,8 @@ ${data.airbnbListings.length > 1 ? `<label>Listing <select data-airbnb-res-move=
 <label>Channel ${channelBadgeHtml(channelById(data.prefs.lettingChannels, r.channel) || { name: r.channel || '?' })} <select data-airbnb-stay-channel="${r.id}" title="Where this stay came from (channels are edited in Settings). The Letting income chart on Finances draws Airbnb solid and every other channel striped. A channel that is a long let by default also sets the let type to long.">${channelChoices(data.prefs.lettingChannels, r.channel).map((c) => `<option value="${escapeHtml(c.id)}"${c.id === r.channel ? ' selected' : ''}>${escapeHtml(c.name)}${c.active ? '' : ' (inactive)'}</option>`).join('')}</select></label>
 <label>Let <select data-airbnb-stay-lettype="${r.id}"${isLong ? ' disabled' : ''} title="${isLong ? 'Fixed while payments are linked. ' : ''}A long let takes the room off the market for the whole run and is not a short-let request. To fold a run of income entries into one long let, use Merge into one long let in Settings."><option value="short"${r.letType !== 'long' ? ' selected' : ''}>Short let</option><option value="long"${r.letType === 'long' ? ' selected' : ''}>Long let</option></select></label>
 <input type="text" autocomplete="off" class="tag-add-input stay-notes" placeholder="Notes" data-airbnb-res-field="notes" data-airbnb-res-id="${r.id}" value="${escapeHtml(r.notes)}">
+${assignSelectsHtml(r, isLong)}
+${wifi ? stayWifiHtml(wifi.item, (x) => stayChipHtml(x)) : ''}
 ${r.source === 'manual' ? `<span class="del-x" style="opacity:1;" data-airbnb-res-del="${r.id}" title="Delete this booking — nothing else records it, so it won't come back on the next Sync">&times;</span>` : ''}
 </div>
 ${calendarDriftHtml(r)}
@@ -1152,6 +1158,7 @@ const upcoming = data.airbnbReservations
 .sort((a, b) => (a.checkin < b.checkin ? -1 : a.checkin > b.checkin ? 1 : 0));
 if (countEl) countEl.textContent = upcoming.length ? String(upcoming.length) : '';
 const errorsHtml = airbnbSyncErrorsHtml();
+try { wifiStays = wifiByStay(data.airbnbReservations); } catch (err) { wifiStays = new Map(); console.error('Wi-Fi match failed:', err); }
 el.innerHTML = errorsHtml + refundsPendingHtml() + (upcoming.length
 ? upcoming.map(reservationRowHtml).join('')
 : (errorsHtml ? '' : '<div class="empty">Nothing upcoming — add a listing in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#airbnb-listings">Settings</span> and Sync.</div>'));
