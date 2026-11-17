@@ -1,9 +1,12 @@
-// Heating: room temperatures from the Heatmiser neoHub, read-only.
+// Heating: room temperatures from the Heatmiser neoHub, and (agent 1.19+) a
+// few controls per zone: standby on/off and a timed boost/hold with cancel.
 //
 // The hub only answers on the LAN, so this asks the home agent
-// (heating.live, see home-agent/neohub.py) and waits for its reply, the
-// same "leave a note, check back" round trip as every other agent verb.
-// Nothing here can change a setpoint: the agent verb only ever reads.
+// (heating.live / heating.standby / heating.hold / heating.cancelHold, see
+// home-agent/neohub.py) and waits for its reply, the same "leave a note,
+// check back" round trip as every other agent verb. Every change goes
+// through an inline confirm row first, and the agent re-reads the hub
+// afterwards so this can say "Done" or that the hub still shows something else.
 //
 // The last SUCCESSFUL reading lives in the synced document as
 // data.heatingReading = {fetchedAt, zones}, so any device (and the ticker's
@@ -87,6 +90,74 @@ return first.length > 90 ? `${first.slice(0, 87)}…` : first;
 
 const FLAME = '<svg class="heat-flame" viewBox="0 0 24 24" width="14" height="14" fill="currentColor" role="img" aria-label="Calling for heat"><title>Calling for heat</title><path d="M12.6 2.2c.3 2.6-.7 4.2-2.2 5.9C8.7 9.9 7 11.8 7 14.7 7 18.2 9.2 21 12.2 21s5.3-2.4 5.3-5.6c0-2.1-1-3.6-2-4.8-.3 1.3-.9 2.1-1.8 2.5.5-3.9-.1-8.2-1.1-10.9Z"/></svg>';
 
+// Per-zone control state, kept outside the DOM because the list is rebuilt
+// every minute and on every synced change:
+//   zoneUi[name] = {mode: null | 'boost' | 'confirm', action, temp, minutes,
+//                   pending, msg, msgCls}
+const zoneUi = {};
+const uiOf = (name) => (zoneUi[name] ||= { mode: null, pending: false, msg: '', msgCls: '' });
+const BOOST_TEMPS = Array.from({ length: 19 }, (_, i) => 16 + i * 0.5); // 16 .. 25
+const BOOST_MINUTES = [[30, '30 min'], [60, '1 h'], [120, '2 h'], [180, '3 h']];
+const minutesLabel = (m) => (BOOST_MINUTES.find((b) => b[0] === m) || [0, `${m} min`])[1];
+const degLabel = (t) => `${Number.isInteger(t) ? t : t.toFixed(1)}°`;
+
+function defaultBoostTemp(z) {
+if (z.standby || z.target == null) return 21;
+return Math.min(25, Math.max(16, Math.round((z.target + 1) * 2) / 2));
+}
+
+// "0:58" from the hub -> "58 min left". Anything unparseable -> ''.
+function holdLeft(holdTime) {
+const m = /^(\d+):(\d{2})/.exec(String(holdTime || ''));
+if (!m) return '';
+const mins = Number(m[1]) * 60 + Number(m[2]);
+if (!mins) return '';
+return mins >= 60 ? `${Math.floor(mins / 60)} h ${mins % 60 ? `${mins % 60} min ` : ''}left` : `${mins} min left`;
+}
+
+function confirmText(name, ui) {
+if (ui.action === 'on') return `Switch ${name} on?`;
+if (ui.action === 'off') return `Switch ${name} off?`;
+if (ui.action === 'hold') return `Hold ${name} at ${degLabel(ui.temp)} for ${minutesLabel(ui.minutes)}?`;
+return `Cancel the boost on ${name}?`;
+}
+
+function controlsHtml(z) {
+const name = z.zone || '';
+const ui = uiOf(name);
+const zAttr = escapeHtml(name);
+const off = z.offline || !name;
+const lock = off || ui.pending ? ' disabled' : '';
+let html = '';
+if (z.hold) {
+const left = holdLeft(z.holdTime);
+html += `<div class="heat-holdline">Boost to ${degLabel(z.holdTemp != null ? z.holdTemp : z.target)}${left ? ` · ${left}` : ''}</div>`;
+}
+if (ui.pending) {
+html += '<div class="heat-ctl"><span class="sync-status busy">Sending…</span></div>';
+} else if (ui.mode === 'confirm') {
+html += `<div class="heat-ctl heat-confirm"><span>${escapeHtml(confirmText(name, ui))}</span>
+<button class="sync-btn sm inline" type="button" data-heat="yes" data-zone="${zAttr}">Yes</button>
+<button class="sync-btn sm inline" type="button" data-heat="no" data-zone="${zAttr}">Cancel</button></div>`;
+} else if (ui.mode === 'boost') {
+const tOpts = BOOST_TEMPS.map((t) => `<option value="${t}"${t === ui.temp ? ' selected' : ''}>${degLabel(t)}</option>`).join('');
+const mOpts = BOOST_MINUTES.map(([m, l]) => `<option value="${m}"${m === ui.minutes ? ' selected' : ''}>${l}</option>`).join('');
+html += `<div class="heat-ctl"><label>Hold at <select data-heat-temp data-zone="${zAttr}">${tOpts}</select></label>
+<label>for <select data-heat-mins data-zone="${zAttr}">${mOpts}</select></label>
+<button class="sync-btn sm inline" type="button" data-heat="boost-go" data-zone="${zAttr}">Next</button>
+<button class="sync-btn sm inline" type="button" data-heat="no" data-zone="${zAttr}">Cancel</button></div>`;
+} else {
+html += `<div class="heat-ctl"><span class="heat-ctl-label">Heating</span>
+<button class="sync-btn sm inline" type="button" data-heat="on" data-zone="${zAttr}"${z.standby ? lock : ' disabled'}>On</button>
+<button class="sync-btn sm inline" type="button" data-heat="off" data-zone="${zAttr}"${z.standby ? ' disabled' : lock}>Off</button>
+<button class="sync-btn sm inline" type="button" data-heat="boost" data-zone="${zAttr}"${lock}>Boost</button>
+${z.hold ? `<button class="sync-btn sm inline" type="button" data-heat="cancel-hold" data-zone="${zAttr}"${lock}>Cancel boost</button>` : ''}
+${off ? '<span class="heat-ctl-note">offline</span>' : ''}</div>`;
+}
+if (ui.msg) html += `<div class="heat-msg ${ui.msgCls}" role="status">${escapeHtml(ui.msg)}</div>`;
+return html;
+}
+
 function zoneRowHtml(z) {
 const flags = [];
 if (z.offline) flags.push('<span class="heat-flag bad">offline</span>');
@@ -95,13 +166,89 @@ if (z.away) flags.push('<span class="heat-flag">away</span>');
 if (z.hold) flags.push('<span class="heat-flag">hold</span>');
 const diff = z.actual != null && z.target != null ? z.actual - z.target : 0;
 const tone = z.heating ? 'heating' : diff >= 2 ? 'warm' : diff <= -1 ? 'cool' : '';
-return `<div class="heat-row ${tone}">
+return `<div class="heat-item" data-heat-zone="${escapeHtml(z.zone || '')}"><div class="heat-row ${tone}">
 <span class="heat-zone">${escapeHtml(z.zone || 'Zone')}</span>
 <span class="heat-flags">${flags.join('')}</span>
 ${z.heating ? `<span class="heat-on">${FLAME}</span>` : ''}
 <span class="heat-actual">${fmt(z.actual)}</span>
 <span class="heat-target" title="Target">→ ${fmt(z.target)}</span>
-</div>`;
+</div>${controlsHtml(z)}</div>`;
+}
+
+const findZone = (name) => (currentReading() ? currentReading().zones.find((z) => z.zone === name) : null);
+
+// What the hub shows now, for the mismatch message.
+function stateWords(z) {
+if (!z) return 'nothing for this zone';
+return `${z.standby ? 'standby on' : 'standby off'} and ${z.hold ? `a hold at ${degLabel(z.holdTemp != null ? z.holdTemp : z.target)}` : 'no hold'}`;
+}
+
+async function applyAction(name) {
+const ui = uiOf(name);
+const { action, temp, minutes } = ui;
+ui.mode = null;
+ui.pending = true;
+ui.msg = '';
+render();
+let verb = 'heating.cancelHold';
+let args = { zone: name };
+// "Off" means standby ON; "On" means standby off (back to its schedule).
+if (action === 'on' || action === 'off') { verb = 'heating.standby'; args = { zone: name, on: action === 'off' }; }
+if (action === 'hold') { verb = 'heating.hold'; args = { zone: name, temp, minutes }; }
+try {
+const res = await run(verb, args, { timeoutMs: 45000 });
+const r = currentReading();
+if (r && res && res.zone) {
+const i = r.zones.findIndex((z) => z.zone === name);
+if (i >= 0) r.zones[i] = res.zone;
+queueSave();
+}
+if (res && res.matched) {
+ui.msg = 'Done';
+ui.msgCls = 'ok';
+setTimeout(() => { if (ui.msg === 'Done') { ui.msg = ''; render(); } }, 8000);
+} else {
+ui.msg = `The hub accepted it but still shows ${stateWords(res && res.zone)}.`;
+ui.msgCls = 'zero';
+}
+} catch (err) {
+const m = (err && err.message) || String(err);
+ui.msg = /doesn't know the verb|Unknown verb/i.test(m)
+? 'Agent 1.19 needed to change heating'
+: `Couldn't change it: ${err instanceof AgentNotConfiguredError ? 'set up sync in Settings first' : shortReason(err)}`;
+ui.msgCls = 'zero';
+} finally {
+ui.pending = false;
+}
+render();
+notifyAlerts();
+}
+
+// One delegated handler for every zone control (the list is rebuilt
+// wholesale, so per-button listeners would be lost).
+function bindControls(list) {
+list.addEventListener('change', (e) => {
+const sel = e.target.closest('select[data-zone]');
+if (!sel) return;
+const ui = uiOf(sel.dataset.zone);
+if (sel.hasAttribute('data-heat-temp')) ui.temp = Number(sel.value);
+if (sel.hasAttribute('data-heat-mins')) ui.minutes = Number(sel.value);
+});
+list.addEventListener('click', (e) => {
+const btn = e.target.closest('button[data-heat]');
+if (!btn) return;
+const name = btn.dataset.zone;
+const ui = uiOf(name);
+if (ui.pending) return;
+const kind = btn.dataset.heat;
+const z = findZone(name);
+if (kind === 'yes') { applyAction(name); return; }
+if (kind === 'no') ui.mode = null;
+else if (kind === 'boost') { ui.mode = 'boost'; ui.msg = ''; if (!ui.temp) ui.temp = z ? defaultBoostTemp(z) : 21; if (!ui.minutes) ui.minutes = 60; }
+else if (kind === 'boost-go') { ui.mode = 'confirm'; ui.action = 'hold'; }
+else if (kind === 'on' || kind === 'off' || kind === 'cancel-hold') { ui.mode = 'confirm'; ui.action = kind; ui.msg = ''; }
+render();
+});
 }
 
 function render(statusText, statusClass = '') {
@@ -111,6 +258,8 @@ const count = document.getElementById('heating-count');
 if (!list || !status) return;
 const reading = currentReading();
 const zones = reading ? reading.zones : [];
+// Don't rebuild under a select the user has open (the minute timer would close it).
+if (list.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
 list.innerHTML = zones.length
 ? zones.map(zoneRowHtml).join('')
 : '<div class="empty">No reading yet.</div>';
@@ -176,6 +325,7 @@ function initHeating() {
 const btn = document.getElementById('heating-refresh-btn');
 if (!btn) return;
 btn.addEventListener('click', () => refreshHeating());
+bindControls(document.getElementById('heating-list'));
 render();
 lastAlertSig = JSON.stringify(heatingAlerts(currentReading()).map((a) => [a.id, a.temp, a.asOf]));
 // A reading synced in from another device updates the panel and the ticker.

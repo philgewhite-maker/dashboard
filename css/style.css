@@ -4739,6 +4739,17 @@ background:var(--slate-bg);color:var(--slate);
 .heat-row.cool .heat-actual{color:var(--blue);}
 .heat-row.heating .heat-actual{color:var(--amber);}
 .heat-target{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto;min-width:3.6em;}
+.heat-item{border-bottom:1px solid var(--line);}
+.heat-item:last-child{border-bottom:0;}
+.heat-item .heat-row{border-bottom:0;padding-bottom:2px;}
+.heat-holdline{font-size:12px;color:var(--amber);padding:0 0 2px;}
+.heat-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:2px 0 8px;font-size:12px;color:var(--muted);}
+.heat-ctl select{font-size:13px;}
+.heat-confirm{color:inherit;font-size:13px;}
+.heat-ctl-note{color:var(--red);}
+.heat-msg{font-size:12px;padding:0 0 8px;}
+.heat-msg.ok{color:var(--sage);}
+.heat-msg.zero{color:var(--red);}
 .heat-foot{align-items:center;justify-content:space-between;margin-top:8px;}
 
 /* Wi-Fi arrivals (wifipresence.js) */
