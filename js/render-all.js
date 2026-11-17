@@ -40,6 +40,7 @@ import { renderTelegramFamily } from './features/telegramfamily.js';
 import { renderLetting } from './features/letting.js';
 import { renderLoans } from './features/loans.js';
 import { renderTicker } from './features/ticker.js';
+import { renderWifiPresence } from './features/wifipresence.js';
 import { renderLeave } from './features/leave.js';
 import { renderBooks } from './features/books.js';
 import { renderSchoolCalendar } from './features/schoolcalendar.js';
@@ -60,6 +61,7 @@ const RENDERERS = [
   [renderCalendars, 'overview'],
   [renderAirbnb, 'overview'],
   [renderAirbnbKeys, 'overview'],
+  [renderWifiPresence, 'overview'],
   [renderVouchers, 'finances'],
   [renderSubscriptions, 'finances'],
   [renderFinanceAccounts, 'finances'],

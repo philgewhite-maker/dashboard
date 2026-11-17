@@ -57,6 +57,8 @@ const COLLECTIONS = [
 { key: 'airbnbBlocks', kind: 'singleton', tab: 'overview', label: 'Airbnb blocked nights' },
 { key: 'airbnbCleanerBlocks', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner un-assignments' },
 { key: 'airbnbCleanerEvents', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner events' },
+{ key: 'wifiDevices', kind: 'singleton', tab: 'overview', label: 'Wi-Fi devices' },
+{ key: 'wifiVisits', kind: 'records', tab: 'overview', label: 'Wi-Fi visits' },
 // Shared
 { key: 'prefs', kind: 'prefs', tab: 'settings', label: 'Preferences' },
 ];

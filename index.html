@@ -16,7 +16,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v883</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v884</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -127,6 +127,26 @@
 <div id="airbnb-keys-list"></div>
 <h3 style="margin:18px 0 6px;font-size:14px;">&#129529; Cleaners</h3>
 <div id="airbnb-cleaners-list" class="airbnb-cleaners"></div>
+</section>
+
+<section class="panel wide" id="wifi-panel" data-tab="overview">
+<div class="panel-head">
+<h2><span class="dot blue"></span>Wi-Fi arrivals</h2>
+<span class="count-badge" id="wifi-count"></span>
+</div>
+<div class="sync-row wifi-bar">
+<button class="sync-btn sm inline" id="wifi-refresh-btn" type="button" title="Asks the home agent for what the router has seen since the last pull.">Refresh</button>
+<button class="sync-btn sm inline" id="wifi-pause-btn" type="button" title="The router allows one admin login at a time, and the agent logs in every few minutes to read the device list, which signs you out of its admin page or the Tether app. Pause stops the agent logging in for an hour.">Pause for an hour</button>
+<button class="sync-btn sm inline" id="wifi-resume-btn" type="button" hidden>Resume now</button>
+<span class="sync-status" id="wifi-status"></span>
+</div>
+<div id="wifi-stays"></div>
+<h3 style="margin:14px 0 6px;font-size:14px;">&#129529; Cleaner visits</h3>
+<div id="wifi-cleaners"></div>
+<details class="settings-subgroup wifi-devices-details" style="margin-top:12px;">
+<summary class="settings-note" style="margin:0;cursor:pointer;" id="wifi-devices-summary">Devices</summary>
+<div id="wifi-devices"></div>
+</details>
 </section>
 
 <section class="panel wide" id="mail-panel" data-tab="overview">

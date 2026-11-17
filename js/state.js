@@ -47,6 +47,9 @@ airbnbBlocks: [], // [{id, listingId, from, to}] nights Airbnb's feed marks "Not
 airbnbCleanerBlocks: [], // ["reservationId:edge"] stay edges the user un-assigned a cleaner from (x on the chip) -- see js/features/airbnb.js
 airbnbKeys: [], // physical keyrings and their current custody -- see js/features/airbnb.js
 airbnbKeyAssignments: [], // {id, keyId, reservationId} -- a key dragged onto a reservation, see js/features/airbnb.js
+wifiDevices: {}, // MAC -> {hostname, net:'guest'|'home', firstSeen, lastSeen (ISO UTC), role, label} -- every device the router has listed, see js/features/wifipresence.js
+wifiVisits: [], // {id: `${mac}_${from}`, mac, net, hostname, from, to|null (open), lastSeen, updated} -- one stretch of a device on the Wi-Fi, 120 days; see js/features/wifipresence.js
+wifiPulledAt: '', // ISO UTC of the last successful wifi.events pull from the home agent (the next pull asks for changes since)
 schoolCalendarUpdates: [], // one entry per detected term-date change, see js/features/schoolcalendar.js
 // One entry per incomplete owned set a search has actually found a
 // candidate for -- AP or eBay -- see js/features/setcompletion.js.
@@ -1840,6 +1843,19 @@ keyId: '', reservationId: '',
 createdAt: new Date().toISOString(),
 ...fields,
 };
+}
+
+// A device the router has listed (js/features/wifipresence.js), keyed by MAC in data.wifiDevices. firstSeen/lastSeen are
+// ISO UTC strings from the agent's polls; `role` and `label` are the only fields typed in here:
+// '' (unassigned) | 'guest' | 'cleaner' | 'household' | 'ignore'.
+function blankWifiDevice(fields = {}) {
+return { hostname: '', net: 'home', firstSeen: '', lastSeen: '', role: '', label: '', ...fields };
+}
+
+// One continuous stretch of a device on the Wi-Fi (the agent closes it after WIFI_LEAVE_MINUTES away). `to` is null while
+// open. `id` is mac + from, which is what makes a re-pull replace rather than duplicate.
+function blankWifiVisit(fields = {}) {
+return { id: '', mac: '', net: 'home', hostname: '', from: '', to: null, lastSeen: '', updated: '', ...fields };
 }
 
 // A bank account or credit card kept open for its incentive -- a switch
@@ -3718,6 +3734,19 @@ data.airbnbKeyAssignments = data.airbnbKeyAssignments.map((a) => ({ ...blankAirb
 // assignment IS the dangling reference -- there's nothing else to it.
 const airbnbKeyIds = new Set(data.airbnbKeys.map((k) => k.id));
 data.airbnbKeyAssignments = data.airbnbKeyAssignments.filter((a) => airbnbKeyIds.has(a.keyId) && airbnbReservationIds.has(a.reservationId));
+// Wi-Fi arrivals (js/features/wifipresence.js): visits are keyed by device + start so a re-pull replaces, never duplicates.
+if (!data.wifiDevices || typeof data.wifiDevices !== 'object' || Array.isArray(data.wifiDevices)) data.wifiDevices = {};
+Object.keys(data.wifiDevices).forEach((mac) => { data.wifiDevices[mac] = { ...blankWifiDevice(), ...data.wifiDevices[mac] }; });
+if (!Array.isArray(data.wifiVisits)) data.wifiVisits = [];
+{
+const wifiSeen = new Set();
+const wifiCutoff = new Date(Date.now() - 120 * 86400000).toISOString();
+data.wifiVisits = data.wifiVisits
+.filter((v) => v && v.mac && v.from)
+.map((v) => ({ ...blankWifiVisit(), ...v, id: `${v.mac}_${v.from}` }))
+.filter((v) => (v.lastSeen || v.from) >= wifiCutoff && !wifiSeen.has(v.id) && wifiSeen.add(v.id));
+}
+if (typeof data.wifiPulledAt !== 'string') data.wifiPulledAt = '';
 if (!Array.isArray(data.schoolCalendarUpdates)) data.schoolCalendarUpdates = [];
 if (!Array.isArray(data.setCompletionFinds)) data.setCompletionFinds = [];
 data.setCompletionFinds = data.setCompletionFinds.map((f) => ({ ...blankSetCompletionFind(), ...f }));
@@ -4899,7 +4928,7 @@ blankPackingItem, blankPackingModule, blankTripPacking, blankPackingListItem, PA
 blankMarriottAvailability, pruneMarriottAvailability,
 blankLoyaltyProgram, blankLoyaltyBalance, blankVoucher,
 blankPlannerEntry, blankPlannerActivity,
-blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, mergeEvaluatorCopies, blankBookingProjection, blankAirbnbEarning, blankAirbnbKey, blankAirbnbKeyAssignment, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
+blankAirbnbListing, blankAirbnbReservation, blankBookingRequest, mergeEvaluatorCopies, blankBookingProjection, blankAirbnbEarning, blankAirbnbKey, blankAirbnbKeyAssignment, blankWifiDevice, blankWifiVisit, KEY_CUSTODIAN_TYPES, blankFinanceAccount, SCHOOL_CALENDAR_SITES,
 CONTACT_STATUS_LABELS, CONTACT_MATCH_MIN_STAGE,
 DEFAULT_RATING_CATEGORIES, slugifyField, DEFAULT_RECIPE_RATING_CATEGORIES,
 FLAG_FIELD_DEFS, DEFAULT_FLAG_RULES, computeFlags, valueColorForField, stripSharedSuffix, suggestedAction, suggestedQuestions, isTravelPaused, ACTIONS, distanceMiles, heightCm,

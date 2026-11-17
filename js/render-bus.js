@@ -62,6 +62,7 @@ import { renderOverview } from './features/overview.js';
 import { renderFamily } from './features/family.js';
 import { renderCalendars } from './features/calendars.js';
 import { renderTicker } from './features/ticker.js';
+import { renderWifiPresence } from './features/wifipresence.js';
 
 // keys: the `data` fields that feed this panel. panels: selectors used to
 // find where it lives (focus + visibility checks). heavy: wait until its tab
@@ -77,6 +78,7 @@ const RULES = [
 { id: 'capture-inbox', keys: ['captureInbox', 'pendingImports'], panels: ['#capture-inbox-panel'], render: renderCaptureInbox },
 { id: 'capture-drafts', keys: ['captureDrafts'], panels: ['#capture-drafts-panel'], render: renderCaptureDrafts },
 { id: 'airbnb', keys: ['airbnbListings', 'airbnbReservations', 'airbnbBlocks', 'airbnbCleanerEvents', 'airbnbCleanerBlocks', 'airbnbCleaners', 'lettingLedger'], panels: ['#airbnb-panel'], render: renderAirbnb },
+{ id: 'wifi-presence', keys: ['wifiDevices', 'wifiVisits', 'airbnbReservations', 'airbnbListings'], panels: ['#wifi-panel'], render: renderWifiPresence },
 { id: 'booking-requests', keys: ['bookingRequests', 'airbnbReservations', 'airbnbListings'], panels: ['#booking-requests'], render: renderBookingRequests },
 { id: 'airbnb-keys', keys: ['airbnbKeys', 'airbnbKeyAssignments', 'airbnbReservations'], panels: ['#airbnb-panel'], render: renderAirbnbKeys },
 { id: 'letting', keys: ['lettingLedger', 'airbnbListings', 'airbnbReservations', 'loans'], panels: ['#letting-panel'], render: renderLetting },

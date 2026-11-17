@@ -4741,6 +4741,27 @@ background:var(--slate-bg);color:var(--slate);
 .heat-target{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums;flex:0 0 auto;min-width:3.6em;}
 .heat-foot{align-items:center;justify-content:space-between;margin-top:8px;}
 
+/* Wi-Fi arrivals (wifipresence.js) */
+.wifi-bar{align-items:center;flex-wrap:wrap;gap:6px 10px;}
+.wifi-stay{padding:8px 0;border-bottom:1px solid var(--line);}
+.wifi-stay:last-child{border-bottom:0;}
+.wifi-line{font-size:13px;margin-top:4px;}
+.wifi-line.amb{color:var(--amber);}
+.wifi-devs{display:flex;flex-wrap:wrap;align-items:center;gap:4px 8px;margin-top:4px;font-size:12px;}
+.wifi-dev-chip{border:1px solid var(--line);border-radius:10px;padding:1px 7px;white-space:nowrap;}
+.wifi-dev-chip small{color:var(--muted);}
+.wifi-amb{color:var(--amber);}
+.wifi-clean-row{display:flex;flex-wrap:wrap;gap:2px 10px;padding:4px 0;font-size:13px;border-bottom:1px solid var(--line);}
+.wifi-clean-row:last-child{border-bottom:0;}
+.wifi-clean-day{color:var(--muted);min-width:6.5em;}
+.wifi-clean-times{font-variant-numeric:tabular-nums;}
+.wifi-dev{display:flex;flex-wrap:wrap;align-items:center;gap:4px 10px;padding:6px 0;border-bottom:1px solid var(--line);font-size:13px;}
+.wifi-dev:last-child{border-bottom:0;}
+.wifi-dev-name{flex:1 1 150px;min-width:0;overflow-wrap:anywhere;}
+.wifi-dev-name small{color:var(--muted);}
+.wifi-dev-when{flex:1 1 200px;font-size:12px;color:var(--muted);}
+.wifi-dev .tag-add-input{flex:1 1 130px;max-width:180px;}
+
 /* ---- Booking evaluator settings: long-let offer check + per-listing discounts (bookingsettings.js) ---- */
 .llc-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px;font-size:12px;}
 .llc-form label{display:flex;flex-direction:column;gap:2px;color:var(--muted);}
