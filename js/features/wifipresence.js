@@ -16,7 +16,7 @@ import { getConfig } from '../sync/selfhost.js';
 import { data, queueSave, blankWifiDevice, blankWifiVisit } from '../state.js';
 import { escapeHtml } from '../utils.js';
 
-const ROLES = [['', 'Unassigned'], ['guest', 'Guest'], ['cleaner', 'Cleaner'], ['household', 'Household'], ['ignore', 'Ignore']];
+const ROLES = [['', 'Unassigned'], ['guest', 'Guest'], ['me', 'Me'], ['family', 'Family'], ['visitor', 'Visitors'], ['cleaner', 'Cleaner'], ['household', 'Household'], ['ignore', 'Ignore']];
 // Only these can be a stay's guest device: a device tagged cleaner/household/ignore never is.
 const GUEST_ROLES = new Set(['', 'guest']);
 const RETENTION_MS = 120 * 86400000;

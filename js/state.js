@@ -1847,7 +1847,7 @@ createdAt: new Date().toISOString(),
 
 // A device the router has listed (js/features/wifipresence.js), keyed by MAC in data.wifiDevices. firstSeen/lastSeen are
 // ISO UTC strings from the agent's polls; `role` and `label` are the only fields typed in here:
-// '' (unassigned) | 'guest' | 'cleaner' | 'household' | 'ignore'.
+// '' (unassigned) | 'guest' | 'me' | 'family' | 'visitor' | 'cleaner' | 'household' | 'ignore'. Only '' and 'guest' are matched to stays.
 function blankWifiDevice(fields = {}) {
 return { hostname: '', net: 'home', firstSeen: '', lastSeen: '', role: '', label: '', ...fields };
 }
