@@ -1,11 +1,11 @@
-# The booking model (v8)
+# The booking model (v9)
 
 What the dashboard's booking model does, what it learns from your own records, what it simply assumes, and what you
 need to keep up to date for it to stay right. Written for checking the assumptions, not for reading the code.
 
-Code: `js/features/bookingmodel.js` (the live model, v8). `js/features/guestprice.js` holds the guest-price maths.
-`js/features/bookingmodel-v6.js` is a frozen copy of the previous model, kept only so the self-test and backtests can
-compare the two; nothing in the app runs it.
+Code: `js/features/bookingmodel.js` (the live model, v9 since 17 Nov 2026; the v8 rows below say what v9 changed). `js/features/guestprice.js` holds the guest-price maths.
+`js/features/bookingmodel-v8.js` and `js/features/bookingmodel-v6.js` are frozen copies of earlier models, kept only so
+the self-tests and backtests can compare them; nothing in the app runs them.
 
 ## What it simulates
 
@@ -170,7 +170,7 @@ top-rated-guest share is now 50% (the saved setting already was).
   later blocks the projection for that window (audit finding 10); true spells are fine, one added to explain a miss
   flatters the model.
 - **Enquiries, cleaning fee per short stay, exposure weeks, cancellations in projections**: v8 limitations listed in the
-  tables above (audit findings 2, 3, 4, 6), fixed in the v9 candidate only.
+  tables above (audit findings 2, 3, 4, 6), fixed in v9.
 
 ## What keeps it correct
 
@@ -186,10 +186,10 @@ top-rated-guest share is now 50% (the saved setting already was).
   demand level, lead times and stay lengths are learnt from them.
 - **Times a room wasn't offered**: add them, or an empty spell reads as nobody wanting the room.
 
-## v9 candidate (not live, backtest only)
+## v9 (live since 17 Nov 2026)
 
-`js/features/bookingmodel-candidate.js` (MODEL_VERSION 9; 62 self-test cases). Loaded only by backtests and its own
-self-test; the app runs v8. What it changes from v8:
+`js/features/bookingmodel.js` (MODEL_VERSION 9; 63 self-test cases). Live with **pooling and simulated cancellations
+switched off** (`V9_DEFAULTS`), on the owner's approval after the per-fix backtest below. What it changes from v8:
 
 **The market reference.** The guest-response reference becomes the market: the nearby-hotel basket median
 (hotelbasket.js samples) times a per-cell ratio (month × check-in weekday × stay length). At today's prices the ratio is
@@ -253,10 +253,27 @@ run with itself under unusable samples instead. The random streams are v8's exce
 for a backtest, one at a time, so a move in a room's figures can be attributed: `fix1` (own-price reference), `fix2`
 (unlisted months' weeks skipped), `fix3` (cleaning fee per booking), `fix4` (enquiries in the level), `fix6`
 (cancellations in projections), `pool`, `market`. `setV9Flags({ fix2: false })` sets them module-wide (the backtest
-harness builds its own contexts); `ctx.v9flags` overrides per context. All on in the app and the self-test; with every
-one off the candidate is v8 exactly, draw for draw (self-test 41, on a three-room world with discounts, a gap in one
+harness builds its own contexts); `ctx.v9flags` overrides per context. The app runs `V9_DEFAULTS` (`pool` and `fix6` off, the rest on;
+`setV9Flags('default')` restores them); the self-test runs every switch on; with every
+one off v9 is v8 exactly, draw for draw (self-test 41, on a three-room world with discounts, a gap in one
 room's records, enquiries and a cancellation rate). Note that `fix2` also moves the shared lead-time fit, which reads
 the same grids. Not a setting: nothing is read from the owner's data.
+
+**Why pooling and simulated cancellations are off** (live backtest, 9 monthly as-of dates Dec 2025 – Aug 2026, 90-day
+horizon; nights ratio / income ratio, mean absolute error in nights / £, months where actual income was inside the
+projected range):
+
+| Variant (all rooms) | Ratio | MAE | In range |
+|---|---|---|---|
+| v8 (1500 runs) | 0.88 / 0.92 | 7.0 / £817 | 9 of 9 |
+| v9, every switch on (500 runs) | 0.90 / 0.93 | 8.3 / £778 | 7 of 9 |
+| **v9 live: pool and fix6 off (1500 runs)** | **0.90 / 0.95** | 7.6 / **£802** | **9 of 9** |
+
+Double alone: v8 0.66 / 0.62, v9 live 1.01 / 0.96. Pooling's evidence weight counts quiet months as little evidence, so
+the Double borrowed most of the En-Suite's rate (May/June projected 10–12 nights against 4); weighting it by months on
+offer instead is untried. Simulated cancellations pulled projections further below what stayed booked than the real
+cancellations did. Removing the enquiry fix (fix4) drops the En-Suite to 0.75; removing the unlisted-weeks fix (fix2)
+drops the Double to 0.49. The market reference had no effect (no hotel samples yet).
 
 Unsourced constants (top of the file): 365-day market horizon, MARKET_FIT_MIN 8, MARKET_FIT_K 8, FIT_WINDOW_DAYS 14,
 FIT_MIN_EVENTS 5, price changes outside ×0.5–×2 dropped, FIT_TAU_MIN 0.25, POOL_HOUSE_MIN_N 10, POOL_TAU_MIN 0.5,
@@ -268,8 +285,8 @@ To backtest once hotel samples exist (needs NAS agent 1.17), on the live site co
 const st = await import('./js/state.js');
 const ok = st.data.hotelPrices.filter(r => r.ok); const since = ok.map(r => r.sampledAt.slice(0,10)).sort()[0];
 const bt = await import('./js/features/modelbacktest.js');
-const m8 = await import('./js/features/bookingmodel.js');
-const m9 = await import('./js/features/bookingmodel-candidate.js?v=' + Date.now());
+const m8 = await import('./js/features/bookingmodel-v8.js');
+const m9 = await import('./js/features/bookingmodel.js');
 const o = { asOf: [since], horizon: 30, runs: 1500 };
 const r8 = await bt.backtest({ ...o, model: m8 }), r9 = await bt.backtest({ ...o, model: m9 });
 console.table([...r8.summary.map(s => ({ v: 8, ...s })), ...r9.summary.map(s => ({ v: 9, ...s }))]);
