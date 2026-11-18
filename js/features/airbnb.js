@@ -1483,8 +1483,16 @@ renderAirbnb();
 // assignment is removed.
 const KEY_NEEDS_NAME = new Set(['cleaner', 'workman', 'other']);
 
+// Only assignments to a stay still shown on this panel count: once a stay has
+// finished (and its income is in), its row goes, and a key left earmarked to
+// it would otherwise vanish from both the stay list and the unassigned pool.
+// The assignment record is kept (history, nudges); it just stops holding the key.
 function assignmentsForKey(keyId) {
-return data.airbnbKeyAssignments.filter((a) => a.keyId === keyId);
+return data.airbnbKeyAssignments.filter((a) => {
+if (a.keyId !== keyId) return false;
+const r = data.airbnbReservations.find((x) => x.id === a.reservationId);
+return !!r && stayIsOnPanel(r);
+});
 }
 function assignmentsForReservation(reservationId) {
 return data.airbnbKeyAssignments.filter((a) => a.reservationId === reservationId);
