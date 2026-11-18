@@ -455,7 +455,7 @@ const isOn = r.flipped.includes(c.entry.key);
 const flipBtn = isOn
 ? ` <span class="settings-note" style="margin:0;">read from the store</span> <button class="sync-btn sm inline" type="button" data-flip-off="${c.entry.key}">Switch back</button>`
 : (!bad && c.local ? ` <button class="sync-btn sm inline" type="button" data-flip-on="${c.entry.key}">Read from the store</button>` : '');
-if (!bad) return `<li>${tab}: ${c.local ? `all ${c.local} match` : 'nothing to store yet'}${flipBtn}</li>`;
+if (!bad) return `<li>${tab}: ${c.local ? (c.entry.kind === 'singleton' ? 'matches (kept as one row for the whole list)' : `all ${c.local} match`) : 'nothing to store yet'}${flipBtn}</li>`;
 const parts = [];
 if (c.missing.length) parts.push(`not in the store yet: ${listHtml(c.missing)}`);
 if (c.differ.length) parts.push(`different in the store: ${listHtml(c.differ)}`);
