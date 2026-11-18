@@ -37,6 +37,17 @@ const CONTACT_DATE = /^\.?connections\[[^\]]+\]\.(sentAt|chaseUntil|lastContact)
 // earliest stamp is the real one (and clock skew can't matter: both mean
 // "accrued").
 const ACCRUED_AT = /^\.?airbnbReservations\[[^\]]+\]\.accruedAt$/;
+// Wi-Fi presence pulled from the home agent: every device that has the
+// dashboard open pulls the same router history and stamps it at its own
+// moment, so these differ for no real reason. Re-pulling is idempotent
+// (visits are keyed mac + from), so the EARLIER pull cursor is the safe
+// one (the next pull just re-reads a little overlap); "last seen" and
+// "updated" take the later stamp, "first seen" the earlier, and a visit
+// one device has already seen close stays closed.
+const WIFI_CURSOR = /^\.?wifiPulledAt$/;
+const WIFI_LATER = /^\.?(wifiDevices\.[^.]+\.lastSeen|wifiVisits\[[^\]]+\]\.(lastSeen|updated))$/;
+const WIFI_FIRST = /^\.?wifiDevices\.[^.]+\.firstSeen$/;
+const WIFI_VISIT_TO = /^\.?wifiVisits\[[^\]]+\]\.to$/;
 const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
 
 function resolveBenign(base, ours, theirs, path) {
@@ -56,6 +67,14 @@ return { value: ours < theirs ? ours : theirs };
 }
 if (SPEND_STAMP.test(path) && typeof ours === 'string' && typeof theirs === 'string') {
 return { value: ours > theirs ? ours : theirs };
+}
+const str2 = typeof ours === 'string' && typeof theirs === 'string';
+if ((WIFI_CURSOR.test(path) || WIFI_FIRST.test(path)) && str2) {
+return { value: !ours ? theirs : !theirs ? ours : ours < theirs ? ours : theirs };
+}
+if (WIFI_LATER.test(path) && str2) return { value: ours > theirs ? ours : theirs };
+if (WIFI_VISIT_TO.test(path) && (ours === null || typeof ours === 'string') && (theirs === null || typeof theirs === 'string')) {
+return { value: ours === null ? theirs : theirs === null ? ours : ours > theirs ? ours : theirs };
 }
 return null;
 }
