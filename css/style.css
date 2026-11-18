@@ -4921,3 +4921,4 @@ input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=color],[ty
 .tab-bar::-webkit-scrollbar{display:none;}
 .tab-btn{flex:0 0 auto;scroll-snap-align:start;}
 }
+.stay-paidout{font-size:12px;color:var(--muted);align-self:center;}

@@ -186,10 +186,19 @@ return owners().filter((k) => !isMyOwnKey(k)).reduce((n, k) => n + balanceFor(k)
 //   cap is used up in order and nothing is ever reversed -- a stay in a
 //   month that is already full just owes its whole share.
 //
-// The month a stay counts in is the day the guest paid (reservation.paidOn,
-// copied to the row as capDate), falling back to the row's own date (the
-// checkout). Derived rows are recomputed on every call, never accumulated,
+// The month a stay counts in is the day the owner is paid out: Airbnb releases
+// the payout the day after check-in (payoutDateFor, copied to the row as
+// capDate), falling back to the row's own date (the checkout). The day the
+// guest booked/paid (reservation.paidOn) plays no part: the owner holds nothing
+// until the payout lands. Derived rows are recomputed on every call, never accumulated,
 // so they follow any later edit or deletion.
+function payoutDateFor(r) {
+if (!r || !/^\d{4}-\d{2}-\d{2}$/.test(r.checkin || '')) return '';
+const d = new Date(`${r.checkin}T00:00:00Z`);
+d.setUTCDate(d.getUTCDate() + 1);
+return d.toISOString().slice(0, 10);
+}
+
 function ownerCapAt(key, dateStr) {
 for (const l of data.airbnbListings || []) {
 if (ownerKeyFor(l) !== key) continue;
@@ -278,7 +287,7 @@ if (e.date < CAP_KEEPS_FROM) { bump(sums, e.ownerKey, e.date.slice(0, 7), amt, e
 const pct = Number(e.pct) || 50;
 const gross = Number(e.gross) || (amt * 100) / pct;
 const res = e.reservationId && reservations.find((r) => r.id === e.reservationId);
-const capDate = (res && res.paidOn) || e.capDate || e.date;
+const capDate = (res && payoutDateFor(res)) || e.capDate || e.date;
 bump(keepSums, e.ownerKey, capDate.slice(0, 7), Math.max(0, gross - amt), e.date);
 });
 const monthEndOf = (ym) => { const [y, m] = ym.split('-').map(Number); return new Date(Date.UTC(y, m, 0)).toISOString().slice(0, 10); };
@@ -385,7 +394,7 @@ note: `${listing.label || 'listing'}${r.guestName ? `, ${r.guestName}` : ''}`,
 guest: r.guestName || '', description: '',
 reservationId: r.id,
 listingId: r.listingId,
-...(r.paidOn ? { capDate: r.paidOn } : {}),
+...(payoutDateFor(r) ? { capDate: payoutDateFor(r) } : {}),
 });
 r.accruedAt = new Date().toISOString();
 added += 1;
@@ -397,7 +406,7 @@ return { added };
 function accrualIdFor(r) { return `accrual-${r.id}`; }
 
 // The stay's income is the one figure; its accrual row follows it. Called
-// when income or paidOn is edited on a stay that was already charged (an
+// when income or the check-in date is edited on a stay that was already charged (an
 // amended booking whose payout changed): the row's gross, owner share and cap
 // month are recomputed with the same rule accrueLettings used. Income cleared
 // or zero leaves the row alone (remove it in Letting income if the stay
@@ -411,7 +420,7 @@ const listing = (data.airbnbListings || []).find((l) => l.id === (row.listingId 
 if (!listing) return false;
 const amount = Math.round(splitAmountFor(listing, income, row.date) * 100) / 100;
 const pct = shareRuleAt(listing, row.date).pct;
-const capDate = r.paidOn || '';
+const capDate = payoutDateFor(r);
 if (row.gross === income && row.amount === amount && row.pct === pct && (row.capDate || '') === capDate) return false;
 row.gross = income;
 row.amount = amount;
@@ -2980,6 +2989,6 @@ if (keepListing) listingSel.value = keepListing;
 }
 
 export {
-CAP_KEEPS_FROM, accrueLettings, reconcileAccrual, accrualIdFor, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
+CAP_KEEPS_FROM, payoutDateFor, accrueLettings, reconcileAccrual, accrualIdFor, reconcileMonthlyCaps, renderLetting, initLetting, totalOwed, totalGross, balanceFor, grossFor, owners, ownerNameFor, ownerKeyFor, sharePctFor, shareRuleAt, splitAmountFor, money, isMyOwnKey, isMyOwnListing,
 lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, entriesFor, nightRateFor, cleanCostOn, money0, monthRange, monthLabel, addMonths, today, resolveColor, listingColorVar, nightsByMonthForEntry,
 };
