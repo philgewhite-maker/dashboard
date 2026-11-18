@@ -24,7 +24,8 @@ declare(strict_types=1);
  *      actual request cannot re-resolve to something different a moment
  *      later (DNS rebinding).
  *
- * GET ?url=<ics-export-url>   -> the feed's raw text (capped, see MAX_BYTES)
+ * GET ?url=<ics-export-url>   -> the feed's raw text, or a 502 error if it is
+ *                                 larger than $MAX_BYTES (never truncated)
  *
  * Upload next to sync.php, files.php and image-proxy.php; set $SECRET to
  * the SAME value as those. See README.md.
@@ -117,25 +118,46 @@ if ($safeIp === null) {
 }
 
 // Step 3: pin the request to the exact IP just validated.
+//
+// ICS_CAP_V2 (Nov 2026): the size cap is enforced WHILE downloading, and a
+// feed over the cap is an error, never a silently shortened feed. Until now
+// the whole body was read into memory and then cut to $MAX_BYTES, so a big
+// feed came back with its END:VCALENDAR (and any bookings after the cut)
+// missing -- which the app could read as those bookings being cancelled.
 $port = $parts['port'] ?? 443;
+$received = 0;
+$tooBig = false;
+$ics = '';
 $ch = curl_init($url);
 curl_setopt_array($ch, [
-    CURLOPT_RETURNTRANSFER => true,
+    CURLOPT_RETURNTRANSFER => false,
     CURLOPT_FOLLOWLOCATION => false, // see the file header -- redirects aren't re-validated, so they're refused rather than trusted
     CURLOPT_TIMEOUT => $TIMEOUT_SECONDS,
     CURLOPT_PROTOCOLS => CURLPROTO_HTTPS,
-    CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; dashboard-ics-proxy/1.0)',
+    CURLOPT_USERAGENT => 'Mozilla/5.0 (compatible; dashboard-ics-proxy/1.1)',
     CURLOPT_RESOLVE => ["$host:$port:$safeIp"],
     CURLOPT_HTTPHEADER => ['Accept: text/calendar,text/plain,*/*'],
+    CURLOPT_WRITEFUNCTION => function ($handle, string $chunk) use (&$ics, &$received, &$tooBig, $MAX_BYTES): int {
+        $received += strlen($chunk);
+        if ($received > $MAX_BYTES) {
+            $tooBig = true;
+            return 0; // returning fewer bytes than given makes curl abort the transfer
+        }
+        $ics .= $chunk;
+        return strlen($chunk);
+    },
 ]);
-$ics = curl_exec($ch);
+$ok = curl_exec($ch);
 $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 $contentType = curl_getinfo($ch, CURLINFO_CONTENT_TYPE) ?: '';
 $err = curl_error($ch);
 curl_close($ch);
 
-if ($ics === false) {
-    fail(502, "Could not fetch that feed: $err");
+if ($tooBig) {
+    fail(502, 'That feed is larger than ' . round($MAX_BYTES / 1048576, 1) . ' MB, so it was not passed on (a cut-off feed would look like missing bookings). Raise $MAX_BYTES in ics-proxy.php if this feed is genuine.');
+}
+if ($ok === false) {
+    fail(502, 'Could not fetch that feed' . ($err !== '' ? " ($err)" : ''));
 }
 if ($httpCode >= 300 && $httpCode < 400) {
     fail(502, "That feed redirected (HTTP $httpCode) — try the URL it redirects to directly");
@@ -150,9 +172,7 @@ if ($httpCode < 200 || $httpCode >= 300) {
 if ($contentType !== '' && strpos($contentType, 'calendar') === false && strpos($contentType, 'text/') === false && strpos($contentType, 'octet-stream') === false) {
     fail(502, "That URL didn't return a calendar feed (got $contentType)");
 }
-if (strlen($ics) > $MAX_BYTES) {
-    $ics = substr($ics, 0, $MAX_BYTES);
-}
 
 header('Content-Type: text/plain; charset=utf-8');
+header('X-Ics-Proxy: 1.1');
 echo $ics;

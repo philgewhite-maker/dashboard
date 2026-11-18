@@ -28,7 +28,11 @@ declare(strict_types=1);
  * JSON) shows up rather than assuming field names, so the first real POST
  * can be inspected via GET before any parsing logic gets built against it.
  *
- * Upload to your Krystal hosting (cPanel -> File Manager) and set the two
+ * Auth: X-Sync-Secret header only (master secret or a pair.php device
+ * token). `?secret=` is accepted ONLY on a POST and ONLY when it matches the
+ * separate, append-only $WEBHOOK_SECRET (HEALTH_AUTH_V2, Nov 2026).
+ *
+ * Upload to your Krystal hosting (cPanel -> File Manager) and set the
  * values below — same secret as sync.php. See README.md, "Health data
  * (Health Connect via HC Webhook)".
  */
@@ -38,6 +42,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
 // The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
 $SECRET = '';
+
+// OPTIONAL, for a phone bridge app that can only put a secret in the URL.
+// A DIFFERENT random value from the master secret (openssl rand -hex 32),
+// accepted only as ?secret= on a POST: it can append health data and do
+// nothing else. Leave on the placeholder if your bridge app sends the
+// X-Sync-Secret header -- then no secret is ever accepted in the address.
+// If it is ever set equal to the master secret it is refused outright.
+$WEBHOOK_SECRET = dash_config('health_webhook_secret');
 
 // Outside public_html, like sync.php's document — not reachable over the
 // web even if the .htaccess is ever lost.
@@ -81,20 +93,34 @@ require_once __DIR__ . '/auth.php';
 if (!dash_secret_configured($SECRET)) {
     fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 }
-// A webhook-posting app may not let you set a custom header at all, so the
-// secret is accepted as a query string token too, not just the header the
-// dashboard itself uses. hash_equals compares in constant time either way,
-// so a wrong guess can't be narrowed down by how long the rejection takes.
-$provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? ($_GET['secret'] ?? '');
-// Accepts this file's $SECRET or any per-device token issued by pair.php
-// -- see auth.php for why a device carrying its own token is worth the
-// extra file. Backwards compatible: with no devices paired, this behaves
-// exactly as the old hash_equals check did.
-if (!dash_authorise((string) $provided, $SECRET)['ok']) {
+// HEALTH_AUTH_V2 (Nov 2026). The master secret and device tokens are
+// accepted ONLY in the X-Sync-Secret header. Until now `?secret=` was
+// accepted too, which put the master secret into the host's access logs on
+// every webhook post (and, before dashboard v825, on every health fetch).
+//
+// A bridge app that cannot set a header can still post, but only with
+// $WEBHOOK_SECRET below: a separate value that can do exactly one thing,
+// append to this log (POST). It can't read health data, and it opens no
+// other endpoint, so its copy in a log line is worth very little.
+$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
+$headerSecret = (string) ($_SERVER['HTTP_X_SYNC_SECRET'] ?? '');
+$querySecret = isset($_GET['secret']) && is_string($_GET['secret']) ? $_GET['secret'] : '';
+
+if ($headerSecret !== '') {
+    // Accepts the master secret (auth.php or this file's $SECRET) or any
+    // per-device token issued by pair.php.
+    if (!dash_authorise($headerSecret, $SECRET)['ok']) {
+        fail(401, 'Bad or missing secret');
+    }
+} elseif ($querySecret !== '') {
+    $webhookReady = dash_is_real_secret($WEBHOOK_SECRET)
+        && !hash_equals(dash_master_secret($SECRET), (string) $WEBHOOK_SECRET);
+    if ($method !== 'POST' || !$webhookReady || !hash_equals((string) $WEBHOOK_SECRET, $querySecret)) {
+        fail(401, 'A secret in the address is no longer accepted here. Send it in the X-Sync-Secret header, or (bridge app POSTs only) use the separate health webhook secret.');
+    }
+} else {
     fail(401, 'Bad or missing secret');
 }
-
-$method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
 
 if ($method === 'POST') {
     $raw = file_get_contents('php://input') ?: '';
