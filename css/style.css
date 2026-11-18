@@ -3207,7 +3207,7 @@ font-size:12px;
 color:var(--muted);
 }
 .pref-grid input{
-font-family:'IBM Plex Mono',monospace;
+font-family:'Inter',sans-serif;
 font-size:13px;
 border:1px solid var(--line);
 border-radius:6px;
@@ -3856,7 +3856,7 @@ padding:8px 0;
 margin-bottom:10px;
 }
 input[type=password], input.settings-input, select.settings-input, textarea.settings-input{
-font-family:'IBM Plex Mono',monospace;
+font-family:'Inter',sans-serif;
 font-size:13px;
 border:1px solid var(--line);
 border-radius:7px;
@@ -4899,4 +4899,12 @@ html:not([data-booted]) .board{visibility:hidden;animation:board-boot-reveal 0s 
 /* iOS-only (audit D3 step 8): 16px stops Safari zooming the page on focus. -webkit-touch-callout matches only iOS WebKit, so this is inert on Android/desktop. */
 @supports (-webkit-touch-callout:none){
 input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=color],[type=hidden]),select,textarea{font-size:16px!important;}
+}
+
+/* Tab bar on phones (audit D3 step 5, owner-approved): one row you swipe sideways instead of four wrapped rows;
+   the right edge fades to show there is more. switchTab (js/tabs.js) scrolls the active tab into view. */
+@media(max-width:760px){
+.tab-bar{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;padding-right:24px;-webkit-mask-image:linear-gradient(90deg,#000 92%,transparent);mask-image:linear-gradient(90deg,#000 92%,transparent);}
+.tab-bar::-webkit-scrollbar{display:none;}
+.tab-btn{flex:0 0 auto;scroll-snap-align:start;}
 }

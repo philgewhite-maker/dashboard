@@ -17,6 +17,9 @@ el.style.display = el.dataset.tab === tab ? 'block' : 'none';
 document.querySelectorAll('[data-tab-btn]').forEach((btn) => {
 btn.classList.toggle('active', btn.dataset.tabBtn === tab);
 });
+// On a phone the tab bar is one sideways-scrolling row: bring the active tab into view (scrolls the bar only, not the page).
+const activeBtn = document.querySelector('.tab-btn.active'), bar = activeBtn && activeBtn.closest('.tab-bar');
+if (bar && bar.scrollWidth > bar.clientWidth) bar.scrollTo({ left: activeBtn.offsetLeft - (bar.clientWidth - activeBtn.offsetWidth) / 2, behavior: 'smooth' });
 if (location.hash.slice(1) !== tab) history.replaceState(null, '', `#${tab}`);
 // Synchronously, before tabshown and before this returns: callers such as the
 // goto-link handler, a connection/trip/task chip (switchTab then expandConnection/
