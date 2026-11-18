@@ -433,8 +433,8 @@ return `${rows}
 <summary class="settings-note" style="margin:0;cursor:pointer;">+ schedule a change</summary>
 <div style="margin-top:3px;display:flex;gap:3px;flex-wrap:wrap;">
 <input type="date" data-rate-rule-date="${escapeHtml(l.id)}" style="width:125px;" title="The date this rule takes over -- the plain Share % (or an earlier scheduled rule) applies right up until this date.">
-<input type="number" min="0" max="100" step="1" data-rate-rule-pct="${escapeHtml(l.id)}" placeholder="%" style="width:50px;">
-<input type="number" min="0" step="1" data-rate-rule-cap="${escapeHtml(l.id)}" placeholder="Cap £ (optional)" style="width:100px;">
+<input type="number" min="0" max="100" step="1" data-rate-rule-pct="${escapeHtml(l.id)}" placeholder="%" style="width:64px;">
+<input type="number" min="0" step="1" data-rate-rule-cap="${escapeHtml(l.id)}" placeholder="Cap £ (optional)" style="width:116px;">
 <button type="button" class="todo-add-btn" data-rate-rule-add="${escapeHtml(l.id)}">Add</button>
 </div>
 </details>`;

@@ -9,7 +9,7 @@
 // all -- only a human's own Accept click here ever calls the real
 // captureTask().
 import { data, queueSave } from '../state.js';
-import { escapeHtml, isCardCollapsed, cardToggleHtml } from '../utils.js';
+import { escapeHtml, isCardCollapsed, cardToggleHtml, safeHref } from '../utils.js';
 import { captureTask, revealTask } from './tasks.js';
 
 // Topological (parent-first) walk. Defensive against a malformed tree
@@ -172,7 +172,7 @@ const task = captureTask({
 title: node.title,
 notes: node.notes || '',
 due: node.due || '',
-link: node.link || '',
+link: (() => { const h = safeHref(node.link || ''); return h === '#' ? '' : h; })(),
 contexts: canonContexts(node.contexts),
 parentId: parentTask ? parentTask.id : null,
 bucket: (parentTask || i > 0) ? 'next' : (order.length > 1 ? 'project' : undefined),

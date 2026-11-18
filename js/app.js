@@ -205,6 +205,8 @@ const validTabs = new Set([...document.querySelectorAll('[data-tab-btn]')].map((
 const pairing = /^#pair=/.test(location.hash) ? location.hash : '';
 if (pairing) {
 sessionStorage.setItem('pendingPairing', pairing);
+// Scrub the key from the address bar/history right away (keeps path + search).
+try { history.replaceState(null, '', location.pathname + location.search); } catch (e) { /* non-fatal */ }
 switchTab('settings');
 } else {
 const [fromHash, connId] = location.hash.slice(1).split(':');

@@ -1877,7 +1877,10 @@ setTimeout(() => scrollAndFlash(`[data-account-row="${id}"]`), 50);
 // rather than a hand-reconstructed guess at the edges from a screenshot --
 // a console snippet duplicating flowEdges() externally risks drifting out
 // of sync with the real thing and answering the wrong question. Read-only,
-// no UI surface, nothing in the app itself calls it.
-if (typeof window !== 'undefined') window.__flowDebug = { flowEdges, flowColumns, mergeSparseChains, orderRowsByDeadEndPreference, transposeRowsForShortestEdges };
+// no UI surface, nothing in the app itself calls it. Only exposed when
+// localStorage 'dash-debug' === '1' (set it in the Console, then reload).
+let flowDebugOn = false;
+try { flowDebugOn = localStorage.getItem('dash-debug') === '1'; } catch (e) { /* storage blocked */ }
+if (typeof window !== 'undefined' && flowDebugOn) window.__flowDebug = { flowEdges, flowColumns, mergeSparseChains, orderRowsByDeadEndPreference, transposeRowsForShortestEdges };
 
 export { renderFinanceAccounts, initFinanceAccountForm, expandAccountRow, accountLabel, formatShortDate };

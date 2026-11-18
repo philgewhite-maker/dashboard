@@ -556,7 +556,7 @@ const rowsHtml = rules.map((r) => `<tr>
 <td><select data-capture-rule-field="inputMethod" data-capture-rule-id="${r.id}">
 ${CAPTURE_INPUT_METHODS.map((m) => `<option value="${m.value}"${m.value === r.inputMethod ? ' selected' : ''}>${escapeHtml(m.label)}</option>`).join('')}
 </select></td>
-<td><input type="text" autocomplete="off" maxlength="1" style="width:44px;text-align:center;text-transform:uppercase;" data-capture-rule-field="trigger" data-capture-rule-id="${r.id}" value="${escapeHtml(r.trigger || '')}" placeholder="T"></td>
+<td><input type="text" autocomplete="off" maxlength="1" style="width:52px;text-align:center;text-transform:uppercase;" data-capture-rule-field="trigger" data-capture-rule-id="${r.id}" value="${escapeHtml(r.trigger || '')}" placeholder="T"></td>
 <td><select data-capture-rule-field="outcome" data-capture-rule-id="${r.id}">
 ${outcomeKeys.map((k) => `<option value="${k}"${k === r.outcome ? ' selected' : ''}>${escapeHtml(outcomeLabelWithCost(CAPTURE_OUTCOMES[k]))}</option>`).join('')}
 </select></td>

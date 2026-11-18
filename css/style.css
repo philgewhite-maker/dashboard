@@ -71,6 +71,10 @@ border-radius:20px;padding:4px 12px;cursor:pointer;
 }
 .theme-toggle:hover{color:var(--ink);border-color:var(--muted);}
 *{box-sizing:border-box;}
+/* Button base (audit D3 step 1): ONLY font + cursor, zero specificity so every button class still wins.
+   No colour/border/background: the 40+ flat button classes must stay flat. */
+:where(button){font-family:'Inter',sans-serif;font-size:13px;cursor:pointer;}
+:where(button):disabled{cursor:not-allowed;}
 /* A plain <img> is natively draggable; nudging one a pixel mid-click is
    enough on Windows Chrome to kick off an OS-level drag that pops File
    Explorer. Kept as a blanket rule (every <img> in the app, not just the
@@ -306,8 +310,8 @@ margin-bottom:18px;
 .panel-head h2,.panel-subhead h2{
 font-family:var(--font-head);
 font-weight:600;
-font-size:19px;
-letter-spacing:-0.015em;
+font-size:18px;
+letter-spacing:-0.01em;
 margin:0;
 display:flex;
 align-items:center;
@@ -432,7 +436,7 @@ font:inherit;
 font-weight:500;
 cursor:pointer;
 }
-.share-banner .share-x{flex:0 0 auto;cursor:pointer;opacity:0.7;font-size:18px;line-height:1;}
+.share-banner .share-x{flex:0 0 auto;cursor:pointer;opacity:0.7;font-size:16px;line-height:1;}
 @media (min-width:700px){
 .share-banner{left:auto;right:20px;max-width:460px;}
 }
@@ -741,11 +745,11 @@ padding:4px 11px;cursor:pointer;
 font-family:'IBM Plex Mono',monospace;
 font-size:11px;
 text-transform:uppercase;
-letter-spacing:0.06em;
+letter-spacing:.06em;
 color:var(--muted);
 margin-bottom:6px;
 }
-.attach-hint{text-transform:none;letter-spacing:0;opacity:0.8;}
+.attach-hint{text-transform:none;letter-spacing:normal;opacity:0.8;}
 .attach-row{
 display:flex;
 align-items:center;
@@ -1385,7 +1389,7 @@ padding:2px 8px;
 font-size:11px;
 }
 .tag-chip .tag-x{cursor:pointer;font-weight:700;}
-.tag-chip.loyalty-member-id{font-family:'IBM Plex Mono',monospace;letter-spacing:.02em;}
+.tag-chip.loyalty-member-id{font-family:'IBM Plex Mono',monospace;letter-spacing:.03em;}
 /* A price sitting inline among .tag-chip pills (e.g. a found-item row)
    needs to match their own font-size -- a bare <strong> inherits the
    ambient body size instead, which reads oversized and sits off the
@@ -1469,7 +1473,7 @@ margin:0 4px 4px 0;
    elsewhere in the app, not a new colour language. */
 .unit-mismatch-note{background:var(--amber-bg);border:1px solid var(--amber);color:var(--amber);border-radius:6px;padding:6px 8px;margin-top:4px;font-size:11px;}
 .unit-mismatch-note .inline-goto-link{color:var(--amber);text-decoration:underline;font-weight:600;}
-.unit-mismatch-note input[type="number"]{width:70px;font-size:11px;padding:2px 4px;}
+.unit-mismatch-note input[type="number"]{width:70px;font-size:11px;padding:2px 4px;border-radius:5px;}
 .unit-mismatch-note .unit-mismatch-error{display:block;margin-top:4px;color:var(--red);}
 .tag-add-input{
 font-family:'Inter',sans-serif;
@@ -1884,7 +1888,7 @@ white-space:nowrap;
 /* Cleaners and keys share one row; each chip stays one line, the row wraps only when the screen is too narrow for all of them. */
 .cal-turn-row{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-top:6px;}
 .cal-turn-row .cal-badge,.cal-turn-row .key-chip{white-space:nowrap;}
-.cal-turn-row .cal-badge.cleaner-chip{font-size:10px;padding:2px 6px;letter-spacing:0;}
+.cal-turn-row .cal-badge.cleaner-chip{font-size:10px;padding:2px 6px;letter-spacing:normal;}
 .cal-turn-row .cal-clean-group{gap:4px;}
 .cal-turn-row .key-drop-zone{flex:0 1 auto;min-height:0;padding:0;gap:6px;}
 .cal-turn-row .key-drop-zone:not(:empty){border-color:transparent;}
@@ -2729,7 +2733,7 @@ margin:14px 0;
 .planner-grid-trip{grid-template-columns:repeat(auto-fill, minmax(120px, 1fr));}
 .planner-day{min-height:90px;position:relative;}
 .planner-day:has(.planner-day-stripe){padding-bottom:16px;}
-.planner-day-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;display:flex;align-items:center;justify-content:space-between;gap:6px;}
+.planner-day-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;display:flex;align-items:center;justify-content:space-between;gap:6px;}
 /* One-step "add something for this day" -- the usual route (add to the
    Activities pool, drag it up) stays for anything reusable, but a lot of
    what goes in a day box is a one-off with nothing to reuse. */
@@ -2925,7 +2929,7 @@ font-family:'Inter',sans-serif;font-size:13px;border:1px solid var(--line);borde
    instead of a full 90px-min-height empty box, so a long rolling
    horizon doesn't read as mostly blank space. */
 .planner-day-collapsed{min-height:0;display:flex;align-items:center;justify-content:space-between;gap:6px;padding:4px 8px;opacity:.7;}
-.planner-day-collapsed-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.02em;cursor:pointer;}
+.planner-day-collapsed-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.03em;cursor:pointer;}
 .planner-day-collapsed:hover{opacity:1;background:var(--slate-bg);}
 .planner-unfiled-banner{
 font-size:11px;color:var(--amber);background:var(--amber-bg);
@@ -3671,7 +3675,7 @@ white-space:nowrap;
 }
 .flow-card-type{
 font-family:'IBM Plex Mono',monospace;
-font-size:8px;
+font-size:9px;
 text-transform:uppercase;
 letter-spacing:.05em;
 color:var(--muted);
@@ -3810,7 +3814,7 @@ padding:8px 0;
 .guide-q{font-size:13px;font-weight:600;color:var(--ink);margin:0 0 4px;}
 .guide-steps{margin:0 0 6px 18px;padding:0;font-size:12px;line-height:1.55;color:var(--ink);}
 .guide-steps li{margin:2px 0;}
-.guide-tip{font-size:11.5px;line-height:1.5;color:var(--muted);margin:2px 0 0;}
+.guide-tip{font-size:11px;line-height:1.5;color:var(--muted);margin:2px 0 0;}
 
 /* Individual-setting tier: every setting is its own <details>, collapsed
    by default -- the h3 moves into the summary (styled here, not via the
@@ -3851,7 +3855,7 @@ background:var(--paper);
 padding:8px 0;
 margin-bottom:10px;
 }
-input[type=password], input[type=text].settings-input, input[type=number].settings-input, input[type=date].settings-input, select.settings-input{
+input[type=password], input.settings-input, select.settings-input, textarea.settings-input{
 font-family:'IBM Plex Mono',monospace;
 font-size:13px;
 border:1px solid var(--line);
@@ -4321,8 +4325,8 @@ background:var(--sage-bg);color:var(--sage);
 .letting-detail{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:flex-end;padding:2px 0 6px;}
 .letting-detail label{display:flex;flex-direction:column;gap:2px;font-size:11px;color:var(--muted);}
 #letting-list .letting-detail .settings-input,#letting-list .letting-detail select{flex:0 0 auto;width:auto;max-width:140px;}
-#letting-list .letting-platform-badge{width:16px;height:16px;font-size:8px;flex:none;vertical-align:-3px;}
-#letting-list input[type=date]{max-width:122px;font-size:12px;padding:4px 6px;}
+#letting-list .letting-platform-badge{width:16px;height:16px;font-size:9px;flex:none;vertical-align:-3px;}
+#letting-list input[type=date]{max-width:122px;font-size:12px;padding:4px 6px;border-radius:5px;}
 
 /* The add-a-transaction row on a phone. It wraps already, but its inputs
    carry max-widths set for a desktop column and a flex item will not
@@ -4357,7 +4361,7 @@ max-width:none;
    the row controls all fit a phone without sideways scrolling. */
 #letting-list .limits-table{min-width:0;}
 #letting-list .letting-tax{overflow-x:auto;}
-#letting-list input[type=date]{max-width:88px;font-size:11px;padding:4px 3px;}
+#letting-list input[type=date]{max-width:88px;font-size:11px;padding:4px 3px;border-radius:5px;}
 #letting-list input[type=date]::-webkit-calendar-picker-indicator{display:none;}
 }
 /* A long note must wrap inside its cell rather than widening the table —
@@ -4520,7 +4524,7 @@ background:var(--slate-bg);color:var(--slate);
 .occ-undated-who{font-weight:500;flex:0 1 auto;}
 .occ-undated-row>.settings-note{flex:1 1 220px;min-width:0;}
 .occ-undated-set{display:inline-flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);}
-.occ-undated-set input{max-width:132px;font-size:12px;padding:3px 5px;}
+.occ-undated-set input{max-width:132px;font-size:12px;padding:3px 5px;border-radius:5px;}
 
 /* Letting income: marks for a direct booking (£) and a transfer between you and an owner (two opposite arrows). */
 #letting-list .letting-platform-direct{display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;border:1.5px solid var(--ink);color:var(--ink);font-size:10px;font-weight:700;line-height:1;}
@@ -4891,3 +4895,8 @@ background:var(--slate-bg);color:var(--slate);
 html:not([data-booted]) .board{visibility:hidden;animation:board-boot-reveal 0s 2.5s forwards;}
 @keyframes board-boot-reveal{to{visibility:visible;}}
 .stay-assign{max-width:140px;font-size:12px;}
+
+/* iOS-only (audit D3 step 8): 16px stops Safari zooming the page on focus. -webkit-touch-callout matches only iOS WebKit, so this is inert on Android/desktop. */
+@supports (-webkit-touch-callout:none){
+input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=color],[type=hidden]),select,textarea{font-size:16px!important;}
+}

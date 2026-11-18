@@ -2,7 +2,7 @@
 // deletes every cache that isn't the current name, so raising the version is
 // what actually evicts a stale copy from a device that has been running the
 // app for a while.
-const CACHE_NAME = 'dashboard-v895';
+const CACHE_NAME = 'dashboard-v896';
 const CORE_ASSETS = [
 './',
 './index.html',
@@ -224,6 +224,8 @@ keys.filter((k) => k !== CACHE_NAME && k !== SHARE_CACHE).map((k) => caches.dele
 // Capture Android app instead (android-relay/, picked up by sharetarget.js's
 // takeRelayShare). An absolute share_target action was tried as a fix on
 // 18 Sept and didn't help, so the manifest keeps the relative "./share".
+const SHARE_MAX_BYTES = 25 * 1024 * 1024;
+const SHARE_MAX_TEXT = 10000;
 async function handleShare(request) {
 const shareUrl = (name) => new URL(name, self.registration.scope).href;
 // Cheap facts about the request itself, read before formData() consumes
@@ -244,9 +246,9 @@ const form = await request.formData();
 const stamp = Date.now();
 const cache = await caches.open(SHARE_CACHE);
 const meta = {
-title: form.get('title') || '',
-text: form.get('text') || '',
-url: form.get('url') || '',
+title: String(form.get('title') || '').slice(0, SHARE_MAX_TEXT),
+text: String(form.get('text') || '').slice(0, SHARE_MAX_TEXT),
+url: String(form.get('url') || '').slice(0, SHARE_MAX_TEXT),
 files: [],
 at: stamp,
 requestContentType,
@@ -268,7 +270,12 @@ formFieldNames: [...new Set([...form.keys()])],
 const fileAttempts = form.getAll('files').filter((f) => f && typeof f === 'object');
 meta.fileAttemptCount = fileAttempts.length;
 meta.emptyFileNames = fileAttempts.filter((f) => !(f.size > 0)).map((f) => f.name || '').filter(Boolean);
-const shared = fileAttempts.filter((f) => f.size > 0);
+let sharedBytes = 0;
+const shared = fileAttempts.filter((f) => {
+if (!(f.size > 0) || sharedBytes + f.size > SHARE_MAX_BYTES) return false;
+sharedBytes += f.size;
+return true;
+});
 for (let i = 0; i < shared.length; i++) {
 const file = shared[i];
 const key = shareUrl(`__share-file-${stamp}-${i}`);
@@ -335,8 +342,16 @@ if (url.origin !== self.location.origin) return;
 if (event.request.method === 'POST' && url.pathname.endsWith('/share')) {
 // Ignore a share POST submitted by another site's page (cross-site form).
 // A genuine Android share has no Origin header or the app's own.
+// Missing headers are NOT blocked (older WebViews/share sheets may omit them).
 const reqOrigin = event.request.headers.get('origin');
+const fetchSite = event.request.headers.get('sec-fetch-site');
 if (reqOrigin && reqOrigin !== 'null' && reqOrigin !== self.location.origin) return;
+if (fetchSite === 'cross-site') return;
+// Origin 'null' (sandboxed/data: pages) is hostile unless the browser vouches it is ours or user-initiated.
+if (reqOrigin === 'null' && fetchSite !== 'none' && fetchSite !== 'same-origin') return;
+// Size caps: 25 MB of files in total, 10k chars per text field.
+const declaredLen = parseInt(event.request.headers.get('content-length') || '0', 10);
+if (declaredLen > SHARE_MAX_BYTES + 1024 * 1024) return;
 event.respondWith(handleShare(event.request));
 return;
 }

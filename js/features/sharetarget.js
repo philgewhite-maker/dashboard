@@ -12,7 +12,13 @@
 // before this runs, the payload is still in the cache next time.
 //
 // Only works from an installed PWA on Android. iOS has no share target.
-import { escapeHtml, scrollAndFlash, SYNC_LINK_HTML } from '../utils.js';
+import { escapeHtml, scrollAndFlash, SYNC_LINK_HTML, safeHref } from '../utils.js';
+
+// Ingestion guard: a shared url that is not http(s)/mailto/tel (javascript:, data:, ...) is dropped rather than stored.
+function cleanShareUrl(u) {
+const h = safeHref(u);
+return h === '#' ? '' : h;
+}
 import { data } from '../state.js';
 import { captureTask, revealTask } from './tasks.js';
 import { CAPTURE_OUTCOMES, matchCaptureRule } from './captureOutcomes.js';
@@ -166,7 +172,7 @@ const url = (share.url || '').trim();
 const textIsUrl = /^https?:\/\/\S+$/i.test(text);
 const embeddedMatch = !textIsUrl && text ? text.match(/https?:\/\/\S+/i) : null;
 const embeddedLink = embeddedMatch ? embeddedMatch[0].replace(/[)\]}>.,!?'"]+$/, '') : '';
-const link = url || (textIsUrl ? text : embeddedLink);
+const link = cleanShareUrl(url || (textIsUrl ? text : embeddedLink));
 
 let taskTitle = title;
 if (!taskTitle && text && !textIsUrl) taskTitle = text.split('\n')[0].slice(0, 120);
@@ -241,7 +247,7 @@ if (!share) return;
 if (share.files.length > 0) {
 const { addCaptureBatch, revealCaptureBatch } = await import('./captureinbox.js');
 const title = (share.title || '').trim();
-const url = (share.url || '').trim();
+const url = cleanShareUrl((share.url || '').trim());
 const text = (share.text || '').trim();
 const label = title || url || text.split('\n')[0].slice(0, 120) || `${share.files.length} shared file${share.files.length === 1 ? '' : 's'}`;
 const { batch, failed, healthImports, matchesImports, markerImports, voiceImports } = await addCaptureBatch({

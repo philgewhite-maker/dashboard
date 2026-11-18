@@ -1605,7 +1605,7 @@ const fitPeople = invMatchedPeople();
 const fitFocus = currentInvFitsId(fitPeople);
 const bounds = data.prefs.setCompletionSizeBounds || {};
 const cupOptions = ['AA', 'A', 'B', 'C', 'D', 'DD', 'E', 'F', 'FF', 'G', 'GG', 'H', 'HH', 'J', 'JJ', 'K'];
-const cupSelect = (name, value) => `<select data-set-completion-bound="${name}" style="max-width:60px;">${cupOptions.map((c) => `<option value="${c}"${c === value ? ' selected' : ''}>${c}</option>`).join('')}</select>`;
+const cupSelect = (name, value) => `<select data-set-completion-bound="${name}" style="max-width:72px;">${cupOptions.map((c) => `<option value="${c}"${c === value ? ' selected' : ''}>${c}</option>`).join('')}</select>`;
 el.innerHTML = `<div class="sync-row" style="margin-bottom:8px;flex-wrap:wrap;">
 <button class="sync-btn sm inv-inline-btn" type="button" data-inv-add-item>+ Add item</button>
 <button class="sync-btn sm inv-inline-btn" type="button" data-find-set-for-her>Find a set for her…</button>
