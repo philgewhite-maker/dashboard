@@ -270,7 +270,7 @@ const whatIf = {
 demand: `<label class="be-whatif">Demand <select data-be-whatif="demand">${[0.6, 0.8, 1, 1.2, 1.5].map((v) => `<option value="${v}"${(o.demand || 1) === v ? ' selected' : ''}>${v === 1 ? 'as calibrated' : `${v > 1 ? '+' : ''}${Math.round((v - 1) * 100)}%`}</option>`).join('')}</select></label>`,
 lead: `<label class="be-whatif">Lead time <select data-be-whatif="lead">${[0.5, 0.75, 1, 1.5, 2].map((v) => `<option value="${v}"${(o.lead || 1) === v ? ' selected' : ''}>${v === 1 ? 'as is' : `×${v}`}</option>`).join('')}</select></label>`,
 cancel: `<label class="be-whatif">Cancellations <select data-be-whatif="cancel">${[0.5, 1, 2, 3].map((v) => `<option value="${v}"${(o.cancel || 1) === v ? ' selected' : ''}>${v === 1 ? 'as is' : `×${v}`}</option>`).join('')}</select></label>`,
-elasticity: `<label class="be-whatif">Sensitivity <input type="number" step="0.1" min="0" data-be-whatif="elasticity" value="${escapeHtml(String(o.elasticity ?? state.ctx.s.elasticity))}" style="width:56px;"></label>`,
+elasticity: `<label class="be-whatif">Sensitivity <input type="number" step="0.1" min="-10" max="0" data-be-whatif="elasticity" value="${escapeHtml(String(-Math.abs(Number(o.elasticity ?? state.ctx.s.elasticity) || 0)))}" style="width:56px;" title="Negative: dearer means fewer bookings"></label>`,
 ownUse: `<label class="be-whatif">Own use <select data-be-whatif="ownUse">${[0, 0.5, 1, 1.5, 2].map((v) => `<option value="${v}"${(o.ownUse ?? 1) === v ? ' selected' : ''}>${v === 1 ? 'as set' : `×${v}`}</option>`).join('')}</select></label>`,
 };
 const rows = r.assumptions.map((a) => `<tr><td>${escapeHtml(a.label)}</td><td>${escapeHtml(a.value)}</td><td class="settings-note" style="margin:0;">${escapeHtml(a.source)}</td><td>${a.editable ? whatIf[a.editable] : ''}</td></tr>`).join('');
@@ -445,7 +445,7 @@ const w = e.target.closest('[data-be-whatif]');
 if (!w) return;
 const v = Number(w.value);
 if (!Number.isFinite(v)) return;
-state.overrides[w.dataset.beWhatif] = v;
+state.overrides[w.dataset.beWhatif] = w.dataset.beWhatif === 'elasticity' ? Math.abs(v) : v; // sensitivity is shown negative
 run();
 });
 }

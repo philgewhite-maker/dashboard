@@ -72,11 +72,11 @@ const topBox = (key, d, btn) => `<div class="be-set-row"><span>Top-rated guests 
 const perListing = listings.map((l) => {
 const key = listingKeys(l).find((k) => stored[k]);
 if (key) { seen.add(key); const d = stored[key];
-return discBlock(`listings.${key}`, d, escapeHtml(listingLabel(l)), '', topBox(key, d, `<button class="sync-btn sm inline" type="button" data-be-lst-del="${escapeHtml(key)}" title="Remove this listing's own steps, so it uses the shared Airbnb steps again">Use the shared steps</button>`)); }
+return discBlock(`listings.${key}`, d, escapeHtml(listingLabel(l)), '', topBox(key, d, `<button class="sync-btn sm inline" type="button" data-be-lst-del="${escapeHtml(key)}" data-be-lst-confirm="Click again to delete them" title="Delete this listing's own steps, so it goes back to the shared Airbnb steps above">Delete these, use shared</button>`)); }
 const ks = listingKeys(l);
 return `<div class="be-disc"><div style="font-size:12px;font-weight:600;margin:6px 0 2px;">${escapeHtml(listingLabel(l))}</div><div class="be-set-row"><span class="settings-note" style="margin:0;">Uses the shared Airbnb steps.</span><button class="sync-btn sm inline" type="button" data-be-lst-new="${escapeHtml(ks[ks.length - 1])}">Give it its own steps</button></div></div>`;
 }).join('');
-const orphans = Object.keys(stored).filter((k) => !seen.has(k)).map((k) => discBlock(`listings.${k}`, stored[k], `Airbnb listing ${escapeHtml(k)} (not matched to a listing here)`, '', topBox(k, stored[k], `<button class="sync-btn sm inline" type="button" data-be-lst-del="${escapeHtml(k)}">Remove</button>`))).join('');
+const orphans = Object.keys(stored).filter((k) => !seen.has(k)).map((k) => discBlock(`listings.${k}`, stored[k], `Airbnb listing ${escapeHtml(k)} (not matched to a listing here)`, '', topBox(k, stored[k], `<button class="sync-btn sm inline" type="button" data-be-lst-del="${escapeHtml(k)}" data-be-lst-confirm="Click again to delete them">Remove</button>`))).join('');
 return `<h4 class="be-set-h">Discounts</h4>
 <div class="settings-note" style="margin:0 0 4px;">As on Airbnb: the nightly rate you set is cut by the largest short-notice step and the largest length step that apply to a booking. The model uses them two ways: it undoes them on past stays to get back to a raw nightly rate, and applies them to the bookings it simulates. These are the shared steps; a listing with its own steps (below) uses those instead.</div>
 ${discBlock('airbnb', s.discounts.airbnb, 'Airbnb', '')}
@@ -349,7 +349,7 @@ ${row('Hidden 1-night demand', `${numBox('oneNightDemandPct', s.oneNightDemandPc
 <h4 class="be-set-h">Discounts and price</h4>
 ${discountsHtml(s)}
 ${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}
-${row('Price sensitivity (v6 level)', numBox('elasticity', s.elasticity, { step: 0.1, width: 56 }), 'The older model\'s single figure (1.5: 10% dearer, about 15% fewer bookings). The live model (v8) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
+${row('Price sensitivity (v6 level)', numBox('elasticity', -Math.abs(Number(s.elasticity) || 0), { step: 0.1, width: 56, min: -10 }), 'The older model\'s single figure, negative like the ones below (-1.5: 10% dearer, about 15% fewer bookings). The live model (v8) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
 ${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
 ${guestPriceHtml(s)}
 <h4 class="be-set-h" id="be-ratings">Ratings and Superhost</h4>
@@ -444,7 +444,7 @@ const s = settings();
 if (path.startsWith('rooms.')) {
 const [, key, field] = path.split('.');
 s.rooms[key] = { ...roomSettings(key), [field]: value };
-} else setPath(s, path, value);
+} else setPath(s, path, path === 'elasticity' ? Math.abs(value) : value); // shown negative, stored as the size v6 uses
 }
 renderEstimatedRates();
 queueSave();
@@ -526,6 +526,13 @@ queueSave(); renderBookingEvaluatorSettings(); return;
 }
 const lstDel = e.target.closest('[data-be-lst-del]');
 if (lstDel) {
+// Deletes the listing's own steps: the first click only arms it.
+if (lstDel.dataset.beLstConfirm && !lstDel.dataset.armed) {
+const label = lstDel.textContent;
+lstDel.dataset.armed = '1'; lstDel.textContent = lstDel.dataset.beLstConfirm;
+setTimeout(() => { if (lstDel.isConnected) { delete lstDel.dataset.armed; lstDel.textContent = label; } }, 4000);
+return;
+}
 delete settings().discounts.listings[lstDel.dataset.beLstDel];
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
