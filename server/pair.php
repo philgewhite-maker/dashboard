@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 /**
  * Device pairing: issue a per-device token in exchange for a one-time code.
  *
@@ -31,7 +34,9 @@
 //
 // Either way it only authorises MINTING a code and managing devices. It
 // is not what a paired device carries.
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // A browser will only let the dashboard call this endpoint from an origin
 // listed here. Same list as every other endpoint.

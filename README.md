@@ -171,9 +171,8 @@ rather than guessed at.
 fetched server-side (SSRF-hardened the same way `recipe-fetch.php` is —
 resolves the hostname, rejects a private/internal address, pins the
 connection to the validated IP) to work around the missing CORS header a
-browser fetch needs. Copy `server/ics-proxy.php.example` to
-`server/ics-proxy.php`, set `$SECRET` to match `sync.php`, upload it next to
-the others. Without it, Sync will fail with a clear error; nothing else on
+browser fetch needs. Upload `server/ics-proxy.php` as it is, next to
+the others (secrets come from `dashboard-config.php`, see Live sync). Without it, Sync will fail with a clear error; nothing else on
 this tab needs it.
 
 ## Tasks (GTD)
@@ -230,13 +229,11 @@ your entire workspace.
 3. **Share the database with the integration**: open it, ⋯ menu →
    Connections → add your integration. Skipping this is the single most
    common failure, and produces a "not found" rather than a permission error.
-4. Copy `server/notion.php.example` to `notion.php`, set `$SECRET` to the
-   same secret as `sync.php` and `$NOTION_TOKEN` to your integration token.
-   Upload to `public_html`.
+4. Set `notion_token` in `dashboard-config.php` to your integration token
+   and upload `server/notion.php` as it is to `public_html`.
 5. Settings → Notion: the proxy URL and the database ID (the 32 characters
    in the database URL), then **Test connection**.
 
-`server/notion.php` is gitignored for the same reason as `sync.php`.
 
 **The workflow**
 
@@ -286,9 +283,12 @@ to re-request and nothing to be popup-blocked.
 
 **Setup**, once on the server and once per device:
 
-1. Copy `server/sync.php.example` to `server/sync.php`, and set `$SECRET` to
-   a long random string. Check `$ALLOWED_ORIGINS` lists wherever you load the
-   app from. Generate a secret with `openssl rand -hex 32`, or on Windows
+1. Copy `server/dashboard-config.php.example` to `dashboard-config.php`
+   **one folder above `public_html`** on the host (never into this repo or
+   OneDrive: the repo is public) and set `master_secret` to a long random
+   string. This one file holds every secret and key the server files use;
+   every other file in `server/` is uploaded exactly as it is. Check
+   `$ALLOWED_ORIGINS` in `sync.php` lists wherever you load the app from. Generate a secret with `openssl rand -hex 32`, or on Windows
    PowerShell (where openssl usually isn't on PATH):
    `$b=[byte[]]::new(32); [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($b); -join ($b|%{$_.ToString('x2')})`
 2. Upload `sync.php` to `public_html` on your host (cPanel → File Manager).
@@ -297,9 +297,9 @@ to re-request and nothing to be popup-blocked.
    existing `.htaccess`, never replacing one) if you move the data file into
    a web-served directory.
 
-`server/sync.php` is gitignored, because this repo is public and the
-configured file contains your secret. Only the `.example` is tracked — don't
-rename it back.
+None of the files in `server/` hold a secret any more, which is why they are
+tracked as plain `.php`; only `dashboard-config.php` does, and it lives on the
+host alone (gitignored by name in case a copy ever lands in the repo).
 3. In Settings, enter the URL (e.g. `https://yourdomain/sync.php`) and the
    same secret, then press **Test & start syncing**.
 4. Repeat step 3 on every other device, same URL and secret.
@@ -343,9 +343,8 @@ now helps with that two ways, for any match that isn't an exact name match
    applies anything automatically — same rule as every other AI-assisted
    match in this app, it only ever informs the decision on screen.
 
-**Setup, once**: copy `server/image-proxy.php.example` to
-`server/image-proxy.php`, set `$SECRET` to the same value as `sync.php`, and
-upload it next to the others. **Needs PHP's `curl` extension enabled** —
+**Setup, once**: upload `server/image-proxy.php` as it is, next to the
+others. **Needs PHP's `curl` extension enabled** —
 unlike `sync.php`/`files.php`, this one actually makes an outbound request.
 Most shared hosting has it on by default; if the endpoint fails immediately
 after uploading, that's the first thing to check.
@@ -412,8 +411,7 @@ you get an editable review screen (name/ingredients/instructions/notes)
 before anything is saved.
 
 **Setup**: like `recipe-fetch.php` needs the same treatment as the other
-server files — copy `server/recipe-fetch.php.example` to
-`server/recipe-fetch.php`, set `$SECRET` to match `sync.php`, upload it next
+server files — upload `server/recipe-fetch.php` as it is, next
 to the others. Without it, photo and PDF import still work; only the web-URL
 import needs it.
 
@@ -434,14 +432,10 @@ Any task can carry files of any type — PDF, Word, spreadsheets, images,
 anything. Open a task in **Tasks → Lists** and use "+ Attach a file".
 
 Attachments need live sync (above) set up first, because they use the same
-host and the same secret. **Setup is one extra file:** copy
-`server/files.php.example` to `server/files.php`, set `$SECRET` to the *same*
-value as `sync.php`, and upload it to `public_html` next to `sync.php`. No
+host and the same secret. **Setup is one extra file:** upload
+`server/files.php` as it is to `public_html` next to `sync.php`. No
 per-device configuration — the app derives the attachments URL from your
 existing sync URL by swapping `sync.php` for `files.php`.
-
-`server/files.php` is gitignored for the same reason as `sync.php`: it holds
-the secret and this repo is public.
 
 **Why files aren't just put in the synced document.** That document is
 rewritten in full on every save, so a single 5MB PDF inside it would make
@@ -612,9 +606,8 @@ place worth reading from even though getting there needs a workaround.
 **Settings → Health data**. A small Android bridge app (e.g. "HC Webhook" /
 "Health Connect Webhook" on Google Play) reads Health Connect on your phone
 and posts whatever data types you grant it to `server/health.php` on this
-same host — one shared secret, same as every other server file. Copy
-`server/health.php.example` to `server/health.php`, set `$SECRET` to match
-`sync.php`, upload it, then point the bridge app's webhook target at that
+same host — one shared secret, same as every other server file. Upload
+`server/health.php` as it is, then point the bridge app's webhook target at that
 URL. If the app has no way to set a custom header, append
 `?secret=<your secret>` to the URL instead — the endpoint accepts either.
 

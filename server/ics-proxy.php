@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -29,7 +32,9 @@ declare(strict_types=1);
 
 // ---- Configuration ---------------------------------------------------
 
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 $MAX_BYTES = 3 * 1024 * 1024;
 $TIMEOUT_SECONDS = 10;
 
@@ -67,7 +72,7 @@ function fail(int $code, string $message): void {
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
 require_once __DIR__ . '/auth.php';
 if (!dash_secret_configured($SECRET)) {
-    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+    fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 }
 // Accepts this file's $SECRET or any per-device token issued by pair.php
 // -- see auth.php for why a device carrying its own token is worth the

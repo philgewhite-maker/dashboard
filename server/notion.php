@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -24,11 +27,13 @@ declare(strict_types=1);
 // ---- Configuration ---------------------------------------------------
 
 // The same secret as sync.php — one string to configure, not two.
-$SECRET = 'PUT-THE-SAME-SECRET-AS-SYNC-PHP-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // Your Notion internal integration token, from
 // notion.so/profile/integrations. Starts with "ntn_".
-$NOTION_TOKEN = 'PUT-YOUR-NOTION-INTEGRATION-TOKEN-HERE';
+$NOTION_TOKEN = dash_config('notion_token');
 
 // Pinned deliberately: Notion makes breaking changes between versions, and
 // an unpinned integration breaks without warning. Raise this only when
@@ -64,8 +69,8 @@ function fail(int $code, string $message): void {
 }
 
 require_once __DIR__ . '/auth.php';
-if (!dash_secret_configured($SECRET)) fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
-if ($NOTION_TOKEN === '' || strpos($NOTION_TOKEN, 'PUT-') === 0) fail(500, 'Server not configured: set $NOTION_TOKEN in notion.php');
+if (!dash_secret_configured($SECRET)) fail(500, 'Server not configured: set master_secret in dashboard-config.php');
+if ($NOTION_TOKEN === '' || strpos($NOTION_TOKEN, 'PUT-') === 0) fail(500, 'Server not configured: set notion_token in dashboard-config.php');
 
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
 // Accepts this file's $SECRET or any per-device token issued by pair.php

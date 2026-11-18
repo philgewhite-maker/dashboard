@@ -18,7 +18,7 @@ import { tieredRowsForDisplay, flattenHealthDailyRow, isFullHistoryMode, setFull
 import { HEALTH_METRICS, metricByKey, createHealthChart, isoDaysAgo } from './healthchart.js';
 
 const REQUEST_TIMEOUT_MS = 15000;
-// health.php's own GET cap (server/health.php.example: $DEFAULT_LIMIT is
+// health.php's own GET cap (server/health.php: $DEFAULT_LIMIT is
 // 500, but ?limit= is honoured up to this) -- asking for the max every
 // parse means the daily rollup is only ever missing data health.php itself
 // has already trimmed off the end of its log, not data this app chose not

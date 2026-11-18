@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -24,7 +27,9 @@ declare(strict_types=1);
 
 // Must match sync.php exactly. Anything that knows it can read, upload and
 // delete your attachments, so treat it like a password.
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // Same value as server/agent-write.php's $AGENT_SECRET -- lets that
 // separate, narrowly-scoped channel upload an attachment for a task
@@ -34,7 +39,7 @@ $SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
 // or delete -- so even a fully compromised agent secret can add a file
 // but never read or remove any existing one. Leave on the placeholder
 // to disable this path entirely.
-$AGENT_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+$AGENT_SECRET = dash_config('agent_secret');
 
 // Where the files live. Defaults to a directory ABOVE this script, which on
 // cPanel means outside public_html — so an uploaded file can never be
@@ -92,7 +97,7 @@ $authorised = false;
 // Scoped path: the agent-write channel may ONLY ever upload a new file,
 // never list, fetch, or delete an existing one -- that's enforced here
 // by the method+action check, not by anything the client claims.
-if ($method === 'POST' && $action === 'upload' && $AGENT_SECRET !== 'PUT-A-LONG-RANDOM-STRING-HERE') {
+if ($method === 'POST' && $action === 'upload' && dash_is_real_secret($AGENT_SECRET)) {
     $agentProvided = $_SERVER['HTTP_X_AGENT_SECRET'] ?? '';
     if ($agentProvided !== '' && hash_equals($AGENT_SECRET, (string) $agentProvided)) {
         $authorised = true;
@@ -106,7 +111,7 @@ if (!$authorised) {
     $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
     require_once __DIR__ . '/auth.php';
     if (!dash_secret_configured($SECRET)) {
-        fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+        fail(500, 'Server not configured: set master_secret in dashboard-config.php');
     }
     // Accepts this file's $SECRET or any per-device token issued by pair.php
     // -- see auth.php for why a device carrying its own token is worth the

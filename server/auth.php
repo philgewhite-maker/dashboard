@@ -20,10 +20,10 @@
  * is the whole point: the thing that travels between devices is useless
  * by the time anyone could find it in a chat log.
  *
- * BACKWARDS COMPATIBLE ON PURPOSE. The master secret in each endpoint
- * keeps working, so uploading these files in any order never locks you
+ * BACKWARDS COMPATIBLE ON PURPOSE. A master secret still set in an older
+ * endpoint upload keeps working, so uploading these files in any order never locks you
  * out, and devices paired the old way carry on until you migrate them.
- * Turn $ALLOW_MASTER_SECRET off once every device has its own token --
+ * Turn allow_master_secret off once every device has its own token --
  * that is the step that actually retires the shared secret, and it is
  * deliberately yours to take rather than something a file upload does to
  * you.
@@ -36,18 +36,27 @@
 
 // ---- Configuration ---------------------------------------------------
 
-// THE master secret, in one place. Until now it was pasted into nine
-// separate files, which is why it had never been rotated: changing it
-// meant nine uploads and five devices, and a half-finished rotation
-// leaves some endpoints answering and others not.
+// Every secret and key the endpoints need lives in ONE file on the web
+// host, dashboard-config.php, one directory ABOVE this script (outside
+// public_html on cPanel, next to dashboard-devices.json). It is never in
+// the repo, so every endpoint file here can be uploaded exactly as it is,
+// with nothing to fill in. Template: dashboard-config.php.example.
 //
-// Set it here and leave every other file's $SECRET on its placeholder --
-// each endpoint falls back to this one. A file that still carries a real
-// secret of its own keeps using it, so an existing deployment doesn't
-// change behaviour until you blank it out.
-//
-// Generate one with: openssl rand -hex 32
-$DASH_MASTER_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+// An endpoint that still carries a real secret of its own (an older
+// upload) keeps using it, so files can be replaced in any order.
+$DASH_CONFIG_FILE = dirname(__DIR__) . '/dashboard-config.php';
+$DASH_CONFIG = is_file($DASH_CONFIG_FILE) ? (require $DASH_CONFIG_FILE) : [];
+if (!is_array($DASH_CONFIG)) $DASH_CONFIG = [];
+
+/** A value from dashboard-config.php, or $default when it isn't set. */
+function dash_config(string $key, $default = '') {
+    global $DASH_CONFIG;
+    return array_key_exists($key, $DASH_CONFIG) ? $DASH_CONFIG[$key] : $default;
+}
+
+// THE master secret (config key master_secret). Generate one with:
+// openssl rand -hex 32
+$DASH_MASTER_SECRET = (string) dash_config('master_secret');
 
 // Where the device registry lives. Same convention as sync.php's
 // $DATA_FILE: one directory ABOVE this script, which on cPanel means
@@ -56,12 +65,12 @@ $DASH_MASTER_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
 // there is no reason to serve it.
 $DASH_DEVICES_FILE = dirname(__DIR__) . '/dashboard-devices.json';
 
-// Set to false once every device has been re-paired and carries its own
-// token. After that the master secret in each endpoint file no longer
-// authenticates anything, and a copy of it found in an old chat is inert.
-// Leave it true until then, or you will lock yourself out of the server
-// that issues the replacements.
-$DASH_ALLOW_MASTER_SECRET = true;
+// allow_master_secret in dashboard-config.php: set to false once every
+// device has been re-paired and carries its own token. After that the
+// master secret no longer authenticates anything, and a copy of it found
+// in an old chat is inert. Leave it true until then, or you will lock
+// yourself out of the server that issues the replacements.
+$DASH_ALLOW_MASTER_SECRET = (bool) dash_config('allow_master_secret', true);
 
 // ---- End of configuration --------------------------------------------
 

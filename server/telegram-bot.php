@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -48,15 +51,17 @@ declare(strict_types=1);
 
 // Same value as sync.php's $SECRET -- proves an ?action=send/GET request
 // really came from Phil's own signed-in device.
-$SECRET = 'PUT-THE-SAME-STRING-AS-SYNC.PHP-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // Telegram's own bot token, from @BotFather. Never sent to the browser.
-$BOT_TOKEN = 'PUT-YOUR-BOTFATHER-TOKEN-HERE';
+$BOT_TOKEN = dash_config('telegram_bot_token');
 
 // A second, separate secret -- proves an incoming ?action=receive POST
 // really came from Telegram (set via setWebhook's secret_token, step 3
 // above), not a random hit against this necessarily-public URL.
-$WEBHOOK_SECRET = 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE';
+$WEBHOOK_SECRET = dash_config('telegram_webhook_secret');
 
 // Outside public_html, like sync.php's own document.
 $DATA_FILE = dirname(__DIR__) . '/telegram-inbox.jsonl';
@@ -108,7 +113,7 @@ $action = $_GET['action'] ?? '';
 // ---- Telegram -> us: an incoming message ------------------------------
 if ($method === 'POST' && $action === 'receive') {
     $provided = $_SERVER['HTTP_X_TELEGRAM_BOT_API_SECRET_TOKEN'] ?? '';
-    if ($WEBHOOK_SECRET === '' || $WEBHOOK_SECRET === 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE') {
+    if (!dash_is_real_secret($WEBHOOK_SECRET)) {
         fail(500, 'Server not configured: set $WEBHOOK_SECRET in telegram-bot.php');
     }
     if (!is_string($provided) || !hash_equals($WEBHOOK_SECRET, $provided)) {
@@ -140,7 +145,7 @@ if ($method === 'POST' && $action === 'receive') {
 // ---- Everything else needs the dashboard's own secret ------------------
 require_once __DIR__ . '/auth.php';
 if (!dash_secret_configured($SECRET)) {
-    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+    fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 }
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
 // Accepts this file's $SECRET or any per-device token issued by pair.php
@@ -153,7 +158,7 @@ if (!dash_authorise((string) $provided, $SECRET)['ok']) {
 
 // ---- Us -> Telegram: send a message on the dashboard's behalf ---------
 if ($method === 'POST' && $action === 'send') {
-    if ($BOT_TOKEN === '' || $BOT_TOKEN === 'PUT-YOUR-BOTFATHER-TOKEN-HERE') {
+    if (!dash_is_real_secret($BOT_TOKEN)) {
         fail(500, 'Server not configured: set $BOT_TOKEN in telegram-bot.php');
     }
     $body = json_decode(file_get_contents('php://input') ?: '', true);
@@ -190,7 +195,7 @@ if ($method === 'POST' && $action === 'send') {
 // here. CURLFile writes the bytes to a temp file first since PHP's curl
 // multipart support needs a real file path, not an in-memory string.
 if ($method === 'POST' && $action === 'sendDocument') {
-    if ($BOT_TOKEN === '' || $BOT_TOKEN === 'PUT-YOUR-BOTFATHER-TOKEN-HERE') {
+    if (!dash_is_real_secret($BOT_TOKEN)) {
         fail(500, 'Server not configured: set $BOT_TOKEN in telegram-bot.php');
     }
     if (!function_exists('curl_init')) {

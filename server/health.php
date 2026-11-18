@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -32,9 +35,9 @@ declare(strict_types=1);
 
 // ---- Configuration ---------------------------------------------------
 
-// Same value as sync.php's $SECRET — one shared secret for every server
-// file, all gitignored the moment they're created.
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // Outside public_html, like sync.php's document — not reachable over the
 // web even if the .htaccess is ever lost.
@@ -76,7 +79,7 @@ function fail(int $code, string $message): void {
 
 require_once __DIR__ . '/auth.php';
 if (!dash_secret_configured($SECRET)) {
-    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+    fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 }
 // A webhook-posting app may not let you set a custom header at all, so the
 // secret is accepted as a query string token too, not just the header the

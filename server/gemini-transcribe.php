@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -24,10 +27,12 @@ declare(strict_types=1);
 // ---- Configuration ---------------------------------------------------
 
 // The same secret as sync.php — one string to configure, not two.
-$SECRET = 'PUT-THE-SAME-SECRET-AS-SYNC.PHP-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // A Gemini API key from Google AI Studio (aistudio.google.com/apikey).
-$GEMINI_API_KEY = 'PUT-YOUR-GEMINI-API-KEY-HERE';
+$GEMINI_API_KEY = dash_config('gemini_api_key');
 
 // Flash tier: fast and cheap, which is all a transcription call needs.
 $GEMINI_MODEL = 'gemini-2.0-flash';
@@ -66,8 +71,8 @@ function fail(int $code, string $message): void {
 }
 
 require_once __DIR__ . '/auth.php';
-if (!dash_secret_configured($SECRET)) fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
-if ($GEMINI_API_KEY === '' || strpos($GEMINI_API_KEY, 'PUT-') === 0) fail(500, 'Server not configured: set $GEMINI_API_KEY in gemini-transcribe.php');
+if (!dash_secret_configured($SECRET)) fail(500, 'Server not configured: set master_secret in dashboard-config.php');
+if ($GEMINI_API_KEY === '' || strpos($GEMINI_API_KEY, 'PUT-') === 0) fail(500, 'Server not configured: set gemini_api_key in dashboard-config.php');
 
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
 // Accepts this file's $SECRET or any per-device token issued by pair.php

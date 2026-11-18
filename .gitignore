@@ -1,23 +1,8 @@
 # This repo is PUBLIC (it's what GitHub Pages serves), so anything committed
-# here is world-readable. sync.php holds the shared secret once configured,
-# so the working copy is ignored and only sync.php.example — which carries
-# the placeholder — is tracked. Copy the example, fill in your secret, and
-# upload that; never rename it back.
-server/sync.php
-# notion.php holds your Notion integration token, which can read and write
-# your entire workspace. Same rule: only the .example is tracked.
-server/notion.php
-# files.php holds the same shared secret as sync.php. Same rule again.
-server/files.php
-# image-proxy.php holds the same shared secret too.
-server/image-proxy.php
-# recipe-fetch.php holds the same shared secret too.
-server/recipe-fetch.php
-# health.php holds the same shared secret too.
-server/health.php
-# telegram-bot.php holds the same shared secret, PLUS a Telegram bot token
-# and a separate webhook secret -- same rule again.
-server/telegram-bot.php
+# here is world-readable. The server files in server/ hold no secrets; every
+# secret and key lives in dashboard-config.php on the web host only. Ignored
+# by name in case a filled-in copy ever lands in this folder.
+dashboard-config.php
 
 # The synced document and its lock/temp files, in case anyone ever points
 # $DATA_FILE inside the repo folder while testing.

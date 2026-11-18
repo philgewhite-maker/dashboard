@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -36,7 +39,9 @@ declare(strict_types=1);
 // ---- Configuration ---------------------------------------------------
 
 // Leave as a placeholder to use auth.php's master secret and device tokens.
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 $STORE_FILE = dirname(__DIR__) . '/dashboard-ai-runs.sqlite';
 
@@ -250,7 +255,7 @@ if (defined('AIRUNS_NO_MAIN')) return;
 // ---- Request handling --------------------------------------------------
 
 require_once __DIR__ . '/auth.php';
-if (!dash_secret_configured($SECRET)) air_fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+if (!dash_secret_configured($SECRET)) air_fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 if (!extension_loaded('pdo_sqlite')) air_fail(500, 'This host has no pdo_sqlite extension');
 
 $user = air_user_for((string) ($_SERVER['HTTP_X_SYNC_SECRET'] ?? ''), $SECRET);

@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -41,7 +44,9 @@ declare(strict_types=1);
 
 // Leave as a placeholder to use auth.php's master secret and device tokens,
 // the same convention as sync-connections.php.
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // One directory ABOVE this script: outside public_html on cPanel, so the
 // database is never web-reachable even if .htaccess is lost.
@@ -254,7 +259,7 @@ if (defined('RECORDS_NO_MAIN')) return;
 // ---- Request handling --------------------------------------------------
 
 require_once __DIR__ . '/auth.php';
-if (!dash_secret_configured($SECRET)) rec_fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+if (!dash_secret_configured($SECRET)) rec_fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 if (!extension_loaded('pdo_sqlite')) rec_fail(500, 'This host has no pdo_sqlite extension');
 
 $user = rec_user_for((string) ($_SERVER['HTTP_X_SYNC_SECRET'] ?? ''), $SECRET);

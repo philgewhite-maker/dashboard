@@ -1,7 +1,7 @@
 // Lets family members be messaged directly via a Telegram bot ("For trip
 // X, does this flight work?"), reply on their own time, and have that
 // reply land back here against the record it was about. See
-// server/telegram-bot.php.example for the server half of this loop.
+// server/telegram-bot.php for the server half of this loop.
 //
 // A family member is a REAL data.connections record (isFamily: true), not
 // a separate registry -- confirmed with the user, since "add them anyway
@@ -37,7 +37,7 @@ async function botConfig() {
 const settings = await getLocalSettings();
 return {
 url: (settings.telegramBotUrl || '').trim(),
-// Same secret as Live sync -- see telegram-bot.php.example's own header
+// Same secret as Live sync -- see telegram-bot.php's own header
 // comment for why this is safe to share (it only ever proves "this
 // request came from my own signed-in device", same job it already does
 // for sync.php/health.php/notion.php).
@@ -65,7 +65,7 @@ return res.json();
 // through botRequest above, which always JSON.stringify's its body;
 // Telegram's own sendDocument needs a real file upload, so this posts
 // the raw bytes instead, with the recipient/filename/caption carried
-// in headers (server/telegram-bot.php.example's own ?action=
+// in headers (server/telegram-bot.php's own ?action=
 // sendDocument reads them back out the same way). No telegramThreads
 // entry recorded here -- a report isn't a question awaiting a reply,
 // unlike askQuestion below.
@@ -106,7 +106,7 @@ return thread;
 }
 
 // Absorbs new entries from the bot's append-only inbox log (GET, no
-// ?action -- see telegram-bot.php.example). Matches each one's chatId to
+// ?action -- see telegram-bot.php). Matches each one's chatId to
 // an isFamily connection and attaches it as the reply to that person's
 // oldest still-open ('sent') thread; a message from an unrecognized chat
 // id is filed under telegramUnclaimed instead of being dropped, since

@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -22,7 +25,7 @@ declare(strict_types=1);
  *   POST ?action=result&id=<id> {ok,html,error} -> {ok:true}    (agent)
  *   GET  ?action=status&id=<id>           -> {id,url,status,html,error}
  *
- * Upload next to commands.php, as claude-test.php (drop the .example).
+ * Upload next to commands.php.
  * Set $SECRET to a FRESH random value -- never reuse commands.php's
  * $SECRET or a paired device's token; the whole point of a separate file
  * is that this credential can leak, be shared with a sandboxed dev
@@ -33,7 +36,8 @@ declare(strict_types=1);
 
 // ---- Configuration ---------------------------------------------------
 
-$SECRET = 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+$SECRET = dash_config('claude_test_secret');
 
 // A sibling of commands.php's own state dir, never inside it -- same
 // reasoning as everywhere else here: no shared storage, no shared code.
@@ -79,8 +83,8 @@ function fail(int $code, string $message): void {
     exit;
 }
 
-if ($SECRET === 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE' || $SECRET === '') {
-    fail(500, 'Server not configured: set $SECRET in claude-test.php');
+if (!dash_is_real_secret($SECRET)) {
+    fail(500, 'Server not configured: set claude_test_secret in dashboard-config.php');
 }
 $provided = $_SERVER['HTTP_X_CLAUDE_TEST_SECRET'] ?? '';
 if (!hash_equals($SECRET, (string) $provided)) {

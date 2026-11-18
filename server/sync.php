@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -24,7 +27,9 @@ declare(strict_types=1);
 // A long random string. The dashboard sends it on every request; anything
 // that knows it can read and overwrite all your data, so treat it like a
 // password. Generate one with: openssl rand -hex 32
-$SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+// The shared secret lives in dashboard-config.php (see auth.php); leave this empty.
+$SECRET = '';
 
 // Where the document lives. Defaults to one directory ABOVE this script,
 // which on cPanel means outside public_html — so the file itself is not
@@ -71,7 +76,7 @@ function fail(int $code, string $message): void {
 $provided = $_SERVER['HTTP_X_SYNC_SECRET'] ?? '';
 require_once __DIR__ . '/auth.php';
 if (!dash_secret_configured($SECRET)) {
-    fail(500, 'Server not configured: set $DASH_MASTER_SECRET in auth.php');
+    fail(500, 'Server not configured: set master_secret in dashboard-config.php');
 }
 // hash_equals compares in constant time, so a wrong secret can't be
 // recovered by timing how long the rejection takes.

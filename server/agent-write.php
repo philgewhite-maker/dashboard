@@ -1,4 +1,7 @@
 <?php
+// Upload this file as it is. Its secrets and keys come from dashboard-config.php
+// on the web host (see auth.php), so older notes below about filling in values
+// in this file no longer apply.
 declare(strict_types=1);
 
 /**
@@ -64,7 +67,8 @@ declare(strict_types=1);
 
 // ---- Configuration ---------------------------------------------------
 
-$AGENT_SECRET = 'PUT-A-LONG-RANDOM-STRING-HERE';
+require_once __DIR__ . '/auth.php'; // loads dashboard-config.php
+$AGENT_SECRET = dash_config('agent_secret');
 
 // Same protected directory as sync.php's $DATA_FILE -- outside
 // public_html, so none of these are directly web-reachable even if the
@@ -134,8 +138,8 @@ function fail(int $code, string $message): void {
     exit;
 }
 
-if ($AGENT_SECRET === 'PUT-A-LONG-RANDOM-STRING-HERE') {
-    fail(500, 'Server not configured: set $AGENT_SECRET in agent-write.php');
+if (!dash_is_real_secret($AGENT_SECRET)) {
+    fail(500, 'Server not configured: set agent_secret in dashboard-config.php');
 }
 
 // Own, independent check -- deliberately NOT routed through auth.php's

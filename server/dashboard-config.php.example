@@ -1,0 +1,42 @@
+<?php
+// dashboard-config.php: every secret and key the dashboard's server files use,
+// in one place. It is the ONLY server file you edit.
+//
+// Where it goes: on the web host, one folder ABOVE the dashboard's PHP files
+// (on cPanel that is outside public_html, next to dashboard-devices.json),
+// named dashboard-config.php. Never put the filled-in copy in this repo or
+// anywhere under OneDrive\Claude: the repo is public.
+//
+// Every other file in server/ is uploaded exactly as it is, with nothing to
+// fill in. A value left on its PUT- placeholder counts as not set, and the
+// endpoint that needs it answers "Server not configured: set <key> in
+// dashboard-config.php".
+//
+// Generate a random secret with: openssl rand -hex 32
+return [
+    // The shared sync secret (sync.php, commands.php, files.php, ... and
+    // pair.php's fallback). Was $SECRET in each file / $DASH_MASTER_SECRET.
+    'master_secret' => 'PUT-A-LONG-RANDOM-STRING-HERE',
+
+    // Set to false once every device has been re-paired with its own token.
+    'allow_master_secret' => true,
+
+    // agent-write.php and files.php (agent uploads). Was $AGENT_SECRET.
+    'agent_secret' => 'PUT-A-LONG-RANDOM-STRING-HERE',
+
+    // claude-test.php. Must differ from every other secret. Was its $SECRET.
+    'claude_test_secret' => 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE',
+
+    // health.php's webhook-only secret. Was its $WEBHOOK_SECRET.
+    'health_webhook_secret' => 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE',
+
+    // gemini-transcribe.php. Was $GEMINI_API_KEY.
+    'gemini_api_key' => 'PUT-YOUR-GEMINI-API-KEY-HERE',
+
+    // notion.php. Was $NOTION_TOKEN.
+    'notion_token' => 'PUT-YOUR-NOTION-INTEGRATION-TOKEN-HERE',
+
+    // telegram-bot.php. Were $BOT_TOKEN and $WEBHOOK_SECRET.
+    'telegram_bot_token' => 'PUT-YOUR-BOTFATHER-TOKEN-HERE',
+    'telegram_webhook_secret' => 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE',
+];

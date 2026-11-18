@@ -215,7 +215,7 @@ all," in the cases large enough to actually risk it.
 
 ## Testing a live-site scraper directly — don't just build diagnostics and hand them back
 
-`server/claude-test.php.example` (deployed as `claude-test.php` next to
+`server/claude-test.php` (deployed as is, next to
 `commands.php` on the web host) is a dedicated, isolated channel for
 testing `page.render`/`page.fetch` against a real URL myself, without
 routing through the user or the real dashboard queue. It has no verb
@@ -259,13 +259,13 @@ asking for a secret or listing them in chat. URL and secret are on disk at
 this checkout, like `nas-test.env`). Read it, `GET ?fields=agentInbox` for the
 current `rev`, then `POST {rev, action:"append", field:"agentInbox", value}`
 with header `X-Agent-Secret`. Batch shape and the projectKey/groupKey slug
-convention are documented at the top of `server/agent-write.php.example`
+convention are documented at the top of `server/agent-write.php`
 (use `projectKey: "dashboard"`, groups `build` / `test-deploy`, contexts
 `With Claude` for build steps). State the returned batch id in chat. Only runs
 from a session on this PC — a cloud session has no access to that file.
 
 **Do this by default, without asking.** Whenever work leaves a step only the
-user can do (uploading a server file or `.php.example` they must deploy,
+user can do (uploading a server file they must deploy,
 running a command on the NAS/web host, a data update or migration they must
 trigger, a device they must reload or test, a decision they owe), push it to
 the agent inbox as a task in the same turn, then say in the reply that you
@@ -295,6 +295,17 @@ scratch content), commit ending `Co-Authored-By: Claude <model>
 wrote the commit, `git push`. This line used to name Sonnet 5
 specifically and went stale the moment a different model picked the work
 up — sign as who you are, don't copy the name out of this file.
+
+## Server files and secrets
+
+Every file in `server/` is uploaded exactly as it is: none holds a secret.
+All secrets and API keys live in ONE host-only file, `dashboard-config.php`,
+one folder above `public_html` (template: `server/dashboard-config.php.example`),
+read through `dash_config('key')` in `auth.php`. A new endpoint that needs a
+secret or key reads it the same way (`require_once __DIR__ . '/auth.php';`
+then `dash_config('new_key')`) and the key is added to the template; never
+put a value, or a `PUT-` placeholder the owner must fill in, into an
+endpoint file, and never go back to `.php.example` endpoints.
 
 ## Deploys that span machines
 
