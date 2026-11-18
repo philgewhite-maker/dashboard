@@ -78,7 +78,7 @@ a{color:var(--accent)}
 <div class="wrap">
 <header>
   <h1>Dashboard data model</h1>
-  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v889</b>.</p>
+  <p class="lede">What the app stores, how the pieces refer to each other, where the same fact is kept twice, and where text stands in for structure. Built from the code and from a read of the live document (field names, types, fill rates and reference checks; no personal values). Verified against build <b>v894</b>.</p>
   <ul class="stats">
     <li><b>109</b><span>top-level keys</span></li>
     <li><b>597</b><span>connections</span></li>
@@ -552,7 +552,7 @@ erDiagram
 
 <section id="people">
   <h2>Connections</h2>
-  <p class="sub">The biggest record: 597 rows, about 2.1 MB of the synced document. It has its own per-record sync.</p>
+  <p class="sub">The biggest record: 622 rows, about 2.0 MB of the synced document. Copied into the per-record store (shadow, v894); its older own sync (sync-connections.php) stands down once it is switched over.</p>
   <figure>
     <div class="scroll">
 <pre class="mermaid">
@@ -748,7 +748,7 @@ erDiagram
   <div class="tablewrap"><table>
     <thead><tr><th>Collection</th><th>Rows</th><th>Has id</th><th>Sync</th><th>Notes</th></tr></thead>
     <tbody>
-    <tr><td class="k">connections</td><td class="num">597</td><td>yes</td><td>own per-record sync</td><td>2.1 MB</td></tr>
+    <tr><td class="k">connections</td><td class="num">622</td><td>yes</td><td>per-record (shadow); older own sync until switched over</td><td>2.0 MB</td></tr>
     <tr><td class="k">tasks</td><td class="num">182</td><td>yes</td><td>per-record</td><td>142 KB</td></tr>
     <tr><td class="k">loyaltyBalances</td><td class="num">382</td><td>yes</td><td>per-record</td><td>append-only readings</td></tr>
     <tr><td class="k">mediaRecCandidates</td><td class="num">203</td><td>yes</td><td>whole document</td><td>derived and cached suggestions</td></tr>

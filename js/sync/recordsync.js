@@ -15,7 +15,7 @@
 //
 // Inactive until records.php answers its ping, so shipping this changes
 // nothing for a server that doesn't have the file yet.
-import { data, setLocalChangeHandler } from '../state.js';
+import { data, setLocalChangeHandler, mergeChatLog } from '../state.js';
 import { kvGet, kvSet } from '../db.js';
 import { isConfigured, getConfig } from './selfhost.js';
 import { COLLECTIONS, rowsOf, rowIndex, rowId, hashValue, rowLabel } from './collections.js';
@@ -204,6 +204,7 @@ else if (theirs === undefined) result = (base !== undefined && hashOf(ours) === 
 else {
 const conflicts = [];
 result = mergeValue(base, ours, theirs, key, conflicts);
+if (conflicts.length && ch.coll === 'connections') result = keepBothSides(result, ours, key, conflicts);
 if (conflicts.length) console.warn(`Record store: ${key} changed on two devices, store value kept for`, conflicts);
 }
 const changed = hashOf(result) !== hashOf(ours);
@@ -211,6 +212,33 @@ if (changed) putRow(entry, ch.id, result);
 await remember(state, ch.coll, ch.id, ch.rev, ch.deleted, ch.data);
 if (theirs === undefined) delete state.base[key]; else state.base[key] = theirs;
 return changed;
+}
+
+// A connection edited on two devices: where both changed the same list (tags,
+// photos, dedup keys) keep both sides' entries, and where both added to one
+// chat thread keep both transcripts' lines, as the older connection sync did
+// (mergeConnectionInto). A plain field both changed still takes the store's
+// value, like every other collection. Works on a copy: `result` can share
+// objects with the store's copy, which is kept as the merge base.
+function keepBothSides(result, ours, key, conflicts) {
+const out = JSON.parse(JSON.stringify(result));
+const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+conflicts.forEach((path) => {
+const rest = path.slice(key.length);
+const chat = rest.match(/^\.identities\[([^\]]+)\]\.chatLog$/);
+if (chat) {
+const mine = (ours.identities || []).find((r) => String(r.id) === chat[1]);
+const row = (out.identities || []).find((r) => String(r.id) === chat[1]);
+if (mine && row && mine.chatLog) mergeChatLog(row, mine.chatLog);
+return;
+}
+const field = rest.match(/^\.([A-Za-z0-9_]+)$/);
+if (!field) return;
+const mine = ours[field[1]], kept = out[field[1]];
+if (!Array.isArray(mine) || !Array.isArray(kept)) return;
+mine.forEach((x) => { if (!kept.some((y) => same(x, y))) kept.push(x); });
+});
+return out;
 }
 
 async function rerender() {
@@ -482,4 +510,4 @@ if (bucket && !state.rows[key][2] && !local.has(key)) bucket.extra.push(id);
 return { active: true, user: serverInfo && serverInfo.user, collections: [...byColl.values()], flipped: flippedKeys() };
 }
 
-export { initRecordSync, runOnce as syncRecordsNow, compareWithStore, flippedKeys, setCollectionFlipped };
+export { initRecordSync, runOnce as syncRecordsNow, compareWithStore, flippedKeys, setCollectionFlipped, keepBothSides };

@@ -9,8 +9,11 @@
 //   prefs     - data.prefs, one row per pref key, so two devices editing
 //               different prefs never collide
 //
-// Scope for now: Tasks, Health, Travel, Planner, Finances, and the Airbnb
-// collections (Overview tab). Everything else stays in the whole document.
+// Scope for now: Tasks, Health, Travel, Planner, Finances, the Airbnb
+// collections (Overview tab) and Connections. Everything else stays in the
+// whole document.
+
+const CONNECTIONS_ENTRY = { key: 'connections', kind: 'records', tab: 'dating', label: 'Connections' };
 
 const COLLECTIONS = [
 // Tasks
@@ -59,6 +62,10 @@ const COLLECTIONS = [
 { key: 'airbnbCleanerEvents', kind: 'singleton', tab: 'overview', label: 'Airbnb cleaner events' },
 { key: 'wifiDevices', kind: 'singleton', tab: 'overview', label: 'Wi-Fi devices' },
 { key: 'wifiVisits', kind: 'records', tab: 'overview', label: 'Wi-Fi visits' },
+// People. Until switched over, connections also keep their older sync
+// (js/sync/connectionsync.js -> sync-connections.php); switching them over
+// here retires that path.
+CONNECTIONS_ENTRY,
 // Shared
 { key: 'prefs', kind: 'prefs', tab: 'settings', label: 'Preferences' },
 ];

@@ -21,6 +21,12 @@
 import { data, queueSave, getLocalSettings, setLocalSetting, setLocalChangeHandler } from '../state.js';
 import { kvGet, kvSet } from '../db.js';
 import { isConfigured, getConfig } from './selfhost.js';
+import { flippedKeys } from './recordsync.js';
+
+// Once Connections are switched over to the record store (Settings -> Record
+// store), that store carries them and this older path stands down: no
+// pushes, no pulls. Switching back resumes it from where it left off.
+const retired = () => flippedKeys().includes('connections');
 
 const PUSH_DEBOUNCE_MS = 2500; // matches autosync.js's own debounce
 const POLL_MS = 45000; // matches autosync.js's own poll cadence
@@ -147,7 +153,7 @@ syncLog(event, `${conn.name || conn.id}: ${fields}`);
 // already fills gaps and unions arrays rather than picking a side), then
 // push the merged result as the next revision on top of theirs.
 async function pushDirty() {
-if (pushing) return;
+if (pushing || retired()) return;
 const url = await connSyncUrl();
 if (!url || !(await isConfigured())) return;
 pushing = true;
@@ -215,7 +221,7 @@ pushing = false;
 // the push-side conflict, just reached from the pull direction) before
 // re-pushing the merged result so the server ends up with the union too.
 async function pullChanged() {
-if (pulling) return;
+if (pulling || retired()) return;
 const url = await connSyncUrl();
 if (!url || !(await isConfigured())) return;
 pulling = true;
