@@ -138,6 +138,7 @@ const LIVE_BEFORE_FIRST_ASK = 7; // a listing went live this many days before it
 const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after checkout (the review's own date is not stored)
 const NEW_STAGE_DAYS_PER_REVIEW = 15; // a listing still short of 3 reviews is taken to gain one every this many days
 const UNDATED_BOOKING_LEAD = 14; // a short stay with no booking date: taken as booked this long before arrival
+const LONG_LET_MIN_NIGHTS = 28; // a stay this long from outside Airbnb is a long let (buildContext)
 const LONG_LET_LEAD_DAYS = 30; // a long let with no booking date: its nights are held from this long before it starts
 const PRICE_HALF_LIFE_DAYS = 60; // a price sample counts half as much for every this many days since it was booked (180 before v907)
 const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
@@ -439,9 +440,14 @@ const demandChannel = new Map((data.prefs.lettingChannels || []).map((c) => [c.i
 const stays = collectStays().map((x) => {
 const rec = recOf.get(x.id) || {};
 const channel = rec.channel || (x.platform === 'other' ? '' : 'airbnb');
-const longLet = !!x.longLet || rec.letType === 'long';
+// A stay of LONG_LET_MIN_NIGHTS or more from outside Airbnb (an income entry typed in, platform 'other') is a long let
+// even when nothing marks it as one: such a run is not a short-let booking (e.g. a 92-night let entered as income).
+const nights = x.checkin && x.checkout ? dayNum(x.checkout) - dayNum(x.checkin) : 0;
+const longLet = !!x.longLet || rec.letType === 'long' || (x.platform === 'other' && nights >= LONG_LET_MIN_NIGHTS);
 const noDemand = longLet || (channel ? demandChannel.get(channel) === false : false);
-return { id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: longLet ? (rec.confirmedOn || rec.bookedOn || '') : x.bookedOn, cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '', channel, longLet, noDemand, reviewed: Number(rec.reviewRating) > 0 || !!rec.reviewSeen };
+// A booking date after check-in cannot be when it was agreed (it is when the record was typed in): treated as unknown.
+const sane = (d) => (d && x.checkin && String(d).slice(0, 10) > x.checkin ? '' : d || '');
+return { id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: sane(longLet ? (rec.confirmedOn || rec.bookedOn || '') : x.bookedOn), cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '', channel, longLet, noDemand, reviewed: Number(rec.reviewRating) > 0 || !!rec.reviewSeen };
 });
 // Listings that are yours: the ones Settings' superhost date applies to. Settings' ownListingIds decides when it is a
 // list; otherwise the same rule the Letting ledger uses (letting.js isMyOwnKey): no owner on the listing, or an owner,
