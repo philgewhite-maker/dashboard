@@ -139,10 +139,15 @@ const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after c
 const NEW_STAGE_DAYS_PER_REVIEW = 15; // a listing still short of 3 reviews is taken to gain one every this many days
 const UNDATED_BOOKING_LEAD = 14; // a short stay with no booking date: taken as booked this long before arrival
 const LONG_LET_LEAD_DAYS = 30; // a long let with no booking date: its nights are held from this long before it starts
-const PRICE_HALF_LIFE_DAYS = 180; // a price sample counts half as much for every this many days since it was booked
+const PRICE_HALF_LIFE_DAYS = 60; // a price sample counts half as much for every this many days since it was booked (180 before v907)
 const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
 // Price calibration switches (ctx.priceOpts overrides them, for the price backtest in modelbacktest.js).
-const PRICE_OPTS = { deseason: false, iterate: 1, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: 0 };
+// Chosen 19 Nov 2026 on the price backtest (priceBacktest, 18 monthly dates, 141 later bookings): mean |log error| 0.228
+// with the v906 settings (no deseason, half-life 180, no market prior) -> 0.212 with these; neighbouring settings scored
+// within 0.003, so the choice is not a lone spike. { deseason: false, iterate: 1, halfLife: 180, marketGamma: 0 } is v906.
+const PRICE_MARKET_GAMMA = 0.3; // power on London's seasonal (stays) shape used as the month price index's prior
+const PRICE_OPTS_V906 = { deseason: false, iterate: 1, halfLife: 180, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: 0 };
+const PRICE_OPTS = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA };
 const STAGE_FIT_MIN = 4; // samples needed each side of a stage change before the listing's own before/after is read
 const STAGE_FIT_WINDOW = 180; // days either side of the change that are compared (limits, but does not remove, the seasonal mix)
 const STAGE_FIT_K = 8; // pseudo-samples holding a stage's price multiplier at its prior
@@ -640,7 +645,7 @@ stageFit[stg] = { prior, observed, n, fitted, capped: fitted !== raw };
 const po = { ...PRICE_OPTS, ...(ctx.priceOpts || {}) };
 samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage]; x.w = Math.pow(0.5, Math.max(0, T - x.booked) / po.halfLife); }));
 // The month-of-year shape of the rate, shared by the rooms: each sample against its own room's median, by the month of
-// the stay, held at 1 by monthK pseudo-samples. A month with fewer than 3 samples has no index.
+// the stay, held by monthK pseudo-samples at London's shape (marketGamma, below) or at 1 with no market prior.
 // Season-neutral base (deseason, from v903): each sample is divided by its month's index before the recency-weighted
 // median, so the base no longer carries the season of whichever months were booked recently and the month index is
 // not applied on top of a base that already holds it. The index and the room medians it is measured against are
@@ -2647,12 +2652,43 @@ return ctx;
 }
 function selfTest() {
 const saved = { ...V9_FLAGS };
+const savedPrice = { ...PRICE_OPTS };
 setV9Flags('all');
+// The hand-worked cases below were set up on the v906 price basis (no season adjustment, 180-day half-life, no market
+// prior); they run on it, and the season-neutral base is checked on its own after them.
+Object.assign(PRICE_OPTS, PRICE_OPTS_V906);
 try {
 const results = selfTestAllOn();
+Object.assign(PRICE_OPTS, savedPrice);
+results.push(...selfTestPriceSeason());
 results.push({ name: 'v9 live defaults: pooling (and its poolW weight) and simulated cancellations off, every other switch on', ok: !V9_DEFAULTS.pool && !V9_DEFAULTS.poolW && !V9_DEFAULTS.fix6 && V9_DEFAULTS.fix1 && V9_DEFAULTS.fix2 && V9_DEFAULTS.fix3 && V9_DEFAULTS.fix4 && V9_DEFAULTS.market, detail: JSON.stringify(V9_DEFAULTS) });
 return results;
-} finally { Object.assign(V9_FLAGS, saved); }
+} finally { Object.assign(V9_FLAGS, saved); Object.assign(PRICE_OPTS, savedPrice); }
+}
+// Season-neutral base (v907). Six quiet-month stays at 80 a night booked a year ago, six October stays at 120 booked
+// last month, no discounts or stage effect. The v906 basis puts the base near the recent 120 and then applies the
+// month index on top; the season-neutral base sits between them and the month figures land nearer each month's own.
+function selfTestPriceSeason() {
+const out = [];
+const check = (name, ok, detail) => out.push({ name, ok: !!ok, detail });
+const st = (id, checkin, bookedOn, nightly) => ({ id, listingId: 'LA', checkin, checkout: dayStr(dayNum(checkin) + 2), bookedOn, income: nightly * 2, status: 'stay', guest: id });
+const stays = [
+...['2026-01-05', '2026-01-06', '2026-01-07', '2026-01-12', '2026-01-13', '2026-01-14'].map((d, k) => st(`j${k}`, d, '2025-12-01', 80)),
+...['2026-10-05', '2026-10-06', '2026-10-07', '2026-10-12', '2026-10-13', '2026-10-14'].map((d, k) => st(`o${k}`, d, '2026-09-20', 120)),
+];
+const run = (po) => {
+const c = testContext({ occupancy: 0.5, more: { newListingDiscountPct: 0, stagePriors: { newAdrPct: 0, superhostAdrPct: 0 } } });
+c.rooms[0].priceWeekday = null; c.rooms[0].priceWeekend = null; c.stays = stays; c.priceOpts = po;
+delete c.params; delete c.gridCache; delete c.demandCache;
+return calibrate(c).prices[0];
+};
+const old = run(PRICE_OPTS_V906);
+const now = run({ ...PRICE_OPTS });
+const err = (p, m, want) => Math.abs(Math.log(p.byMonth[m] / want));
+check('Season-neutral base: below the recency-led v906 base, and January and October each land nearer their own price',
+now.base < old.base && err(now, 0, 80) < err(old, 0, 80) && err(now, 9, 120) <= err(old, 9, 120) + 1e-9 && now.byMonth.every((v) => v != null),
+`base ${old.base.toFixed(1)} -> ${now.base.toFixed(1)}; Jan ${old.byMonth[0] == null ? 'none' : old.byMonth[0].toFixed(1)} -> ${now.byMonth[0].toFixed(1)} (paid 80); Oct ${old.byMonth[9] == null ? 'none' : old.byMonth[9].toFixed(1)} -> ${now.byMonth[9].toFixed(1)} (paid 120)`);
+return out;
 }
 function selfTestAllOn() {
 const results = [];
@@ -3448,7 +3484,7 @@ v = add('stage', 'Rating stage', v, v, 'none: a set price is used as it is', { s
 } else {
 const ix = p.byMonth[m] != null && p.base > 0 ? p.byMonth[m] / p.base : null;
 v = add('base', 'Base', 0, p.base / stageMult, stage === 'rated' ? p.source : `${p.source}, taken back to a rated footing (÷ x${stageMult.toFixed(2)}, re-applied below)`, { samples: p.n, source: p.source });
-v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month (fewer than 3 stays in it)' : `month index x${ix.toFixed(2)}`, { index: ix });
+v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month' : `month index x${ix.toFixed(2)} (your stays in this month, held towards London's season; the base is season-neutral)`, { index: ix });
 v = add('weekday', 'Weekday', v, we ? (p.weekend != null ? p.weekend / stageMult : v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
 const fit = (params.stageFit || {})[stage];
 v = add('stage', 'Rating stage', v, v * stageMult, stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${stageMult.toFixed(2)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`, { stage, mult: stageMult });
