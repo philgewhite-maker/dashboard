@@ -1210,8 +1210,9 @@ renderUndated(stays);
 renderIncomeTrace(stays);
 renderLegend(stays);
 refreshProjectionStatus();
-renderDeadVoids();
-renderVoidPlans();
+// A plan box being edited is never rebuilt under the user (a sync or save can re-render mid-edit).
+const editing = document.activeElement && document.activeElement.closest && document.activeElement.closest('[data-vp-row]');
+if (!editing) { renderDeadVoids(); renderVoidPlans(); }
 drawTimeline(stays);
 drawPace(stays);
 occupancyGate.mark();
@@ -1410,7 +1411,9 @@ window.addEventListener('resize', () => {
 clearTimeout(occResizeTimer);
 occResizeTimer = setTimeout(() => {
 const c = document.getElementById('occ-timeline-canvas');
-if (c && c.offsetParent !== null) renderLettingOccupancy();
+// Canvases only: a phone's keyboard opening fires resize, and rebuilding the
+// void lists then would destroy the box being typed into.
+if (c && c.offsetParent !== null) { const stays = stayView(); drawTimeline(stays); drawPace(stays); }
 }, 150);
 });
 window.addEventListener('themechange', renderLettingOccupancy);
