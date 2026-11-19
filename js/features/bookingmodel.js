@@ -141,6 +141,8 @@ const UNDATED_BOOKING_LEAD = 14; // a short stay with no booking date: taken as 
 const LONG_LET_LEAD_DAYS = 30; // a long let with no booking date: its nights are held from this long before it starts
 const PRICE_HALF_LIFE_DAYS = 180; // a price sample counts half as much for every this many days since it was booked
 const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
+// Price calibration switches (ctx.priceOpts overrides them, for the price backtest in modelbacktest.js).
+const PRICE_OPTS = { deseason: false, iterate: 1, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0 };
 const STAGE_FIT_MIN = 4; // samples needed each side of a stage change before the listing's own before/after is read
 const STAGE_FIT_WINDOW = 180; // days either side of the change that are compared (limits, but does not remove, the seasonal mix)
 const STAGE_FIT_K = 8; // pseudo-samples holding a stage's price multiplier at its prior
@@ -635,17 +637,29 @@ stagePrice[stg] = fitted;
 stageFit[stg] = { prior, observed, n, fitted, capped: fitted !== raw };
 });
 // Every sample on the footing of its room's stage today, weighted by how recently it was booked.
-samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage]; x.w = Math.pow(0.5, Math.max(0, T - x.booked) / PRICE_HALF_LIFE_DAYS); }));
-// The month-of-year shape of the rate, shared by the rooms: each sample against its own room's plain median, by the
-// month of the stay, held at 1 by PRICE_MONTH_K pseudo-samples. A month with fewer than 3 samples has no index.
-const plainMed = samples.map((sm) => (sm.length >= 3 ? median(sm.map((x) => x.cur)) : null));
+const po = { ...PRICE_OPTS, ...(ctx.priceOpts || {}) };
+samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage]; x.w = Math.pow(0.5, Math.max(0, T - x.booked) / po.halfLife); }));
+// The month-of-year shape of the rate, shared by the rooms: each sample against its own room's median, by the month of
+// the stay, held at 1 by monthK pseudo-samples. A month with fewer than 3 samples has no index.
+// Season-neutral base (deseason, from v903): each sample is divided by its month's index before the recency-weighted
+// median, so the base no longer carries the season of whichever months were booked recently and the month index is
+// not applied on top of a base that already holds it. The index and the room medians it is measured against are
+// refined together (iterate passes: a room seen mostly in busy months no longer has a high "average" that makes its
+// busy months look ordinary). A month with no index is left as it is.
+let monthIdx = new Array(12).fill(null);
+const neutral = (x) => (po.deseason && monthIdx[x.month] != null ? x.cur / monthIdx[x.month] : x.cur);
+for (let pass = 0; pass < (po.deseason ? po.iterate : 1); pass++) {
+const roomMed = samples.map((sm) => (sm.length >= 3 ? median(sm.map(neutral)) : null));
 const monthRel = Array.from({ length: 12 }, () => []);
-samples.forEach((sm, i) => { if (plainMed[i] > 0) sm.forEach((x) => monthRel[x.month].push(x.cur / plainMed[i])); });
-const monthIdx = monthRel.map((xs) => (xs.length >= 3 ? Math.exp(xs.length * Math.log(median(xs)) / (xs.length + PRICE_MONTH_K)) : null));
+samples.forEach((sm, i) => { if (roomMed[i] > 0) sm.forEach((x) => monthRel[x.month].push(x.cur / roomMed[i])); });
+let raw = monthRel.map((xs) => (xs.length >= 3 ? Math.exp(xs.length * Math.log(median(xs)) / (xs.length + po.monthK)) : null));
+if (po.smooth > 0) raw = raw.map((v, m) => { if (v == null) return null; const nb = [raw[(m + 11) % 12], raw[(m + 1) % 12]].filter((u) => u != null); return nb.length ? Math.exp((1 - po.smooth) * Math.log(v) + po.smooth * nb.reduce((a, u) => a + Math.log(u), 0) / nb.length) : v; });
+monthIdx = raw;
+}
 const prices = ctx.rooms.map((room, i) => {
 const sm = samples[i];
 const uplift = uplifts[i];
-const overall = weightedMedian(sm.map((x) => ({ v: x.cur, w: x.w })));
+const overall = weightedMedian(sm.map((x) => ({ v: neutral(x), w: x.w })));
 const base = overall ?? median(everyRaw) ?? DEFAULT_PRICE;
 const byMonth = monthIdx.map((ix) => (ix != null && overall != null ? base * ix : null));
 const clean = room.cleaningIncome != null && room.cleaningIncome !== '' ? Number(room.cleaningIncome) : (feeMedian(cleanFees[i]) ?? feeMedian(everyCleaning) ?? 0);
@@ -671,13 +685,13 @@ weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
 byMonth, base, uplift, clean, n: sm.length, nEarn, avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
 nNewListing: sm.filter((x) => x.nl > 0).length, avgTopRated: mean(sm.map((x) => x.tr)), stage: roomStage[i], trace,
-source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export), recent ones counting most (half as much every ${PRICE_HALF_LIFE_DAYS} days), each put on today's rating stage` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
+source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export), recent ones counting most (half as much every ${po.halfLife} days), each put on today's rating stage${po.deseason ? ' and taken out of its month’s season' : ''}` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
 };
 });
 
 // The calibration so far. availabilityOf and exposureGrid read the stay-length curve and the weekday mix from it,
 // and the lead-time fit below needs both of those, so it is filled in as each piece is worked out.
-const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx };
+const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples };
 const avs = ctx.rooms.map((_, i) => availabilityOf(ctx, P, i));
 
 // Stay length: requests (an enquiry at its weight), plus stays that didn't come from one.

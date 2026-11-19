@@ -274,4 +274,66 @@ runMs: Math.round(performance.now() - t0),
 };
 }
 
-export { backtest };
+// Price-only backtest: how well the calibrated nightly rate predicts what later bookings actually paid.
+// For each date T (the first of each month back to `months` ago), the model is calibrated on the world as known on T
+// (truncate, above) with each variant's ctx.priceOpts, and each stay BOOKED in the next `horizon` days is predicted as
+// the room's base taken back to a rated footing x the month index for its check-in month. The actual is the same stay's
+// rate from the full calibration (discounts and weekend uplift undone, on a rated footing), so both sides are
+// like for like. Score per variant: mean and median |ln(pred / actual)| (0.10 is about 10% off) and the mean
+// ln(pred / actual) (bias: above 0 predicts too high). Nothing is written anywhere.
+//   const r = await (await import('./js/features/modelbacktest.js')).priceBacktest(); console.table(r.table); r
+async function priceBacktest(opts = {}) {
+const model = opts.model || await import('./bookingmodel.js');
+const { buildContext, calibrate } = model;
+const horizon = Math.max(1, Number(opts.horizon) || 90);
+const months = Math.max(1, Number(opts.months) || 18);
+const variants = opts.variants || {
+current: { deseason: false, iterate: 1 },
+deseason1: { deseason: true, iterate: 1 },
+deseason3: { deseason: true, iterate: 3 },
+};
+const full = buildContext(opts.today ? { today: opts.today } : {});
+const today = full.today;
+const fullP = calibrate(full);
+const fullSt = fullP.stagePrice || { rated: 1 };
+const T0 = dayNum(today);
+const [y, m] = today.split('-').map(Number);
+const asOf = [];
+for (let k = 1; k <= months; k++) asOf.push(new Date(Date.UTC(y, m - 1 - k, 1)).toISOString().slice(0, 10));
+asOf.reverse();
+const acc = {}; Object.keys(variants).forEach((v) => { acc[v] = []; });
+let staysScored = 0;
+for (const date of asOf) {
+const T = dayNum(date);
+// Actuals: stays booked after T and within the horizon (and before today).
+const targets = [];
+fullP.priceSamples.forEach((sm, i) => sm.forEach((x) => { if (x.booked > T && x.booked <= Math.min(T + horizon, T0)) targets.push({ i, x, actual: x.wd / (fullSt[x.stage] || 1) }); }));
+if (!targets.length) continue;
+for (const [name, po] of Object.entries(variants)) {
+const ctx = truncate(full, date, opts, {});
+ctx.priceOpts = po;
+let P;
+try { P = calibrate(ctx); } catch (e) { continue; }
+targets.forEach(({ i, x, actual }) => {
+const p = P.prices[i];
+if (!p || !(p.n >= 3) || p.weekday != null || !(actual > 0)) return;
+const stageMult = (P.stagePrice || {})[(P.roomStage || [])[i] || 'rated'] || 1;
+const ix = p.byMonth[x.month] != null && p.base > 0 ? p.byMonth[x.month] / p.base : 1;
+const pred = (p.base / stageMult) * ix;
+acc[name].push({ e: Math.log(pred / actual), room: i, month: x.month, asOf: date });
+});
+}
+staysScored += targets.length;
+await new Promise((res) => setTimeout(res, 0));
+}
+const med = (xs) => { const a = xs.slice().sort((p, q) => p - q); const n = a.length; return n ? (n % 2 ? a[(n - 1) / 2] : (a[n / 2 - 1] + a[n / 2]) / 2) : null; };
+const table = Object.entries(acc).map(([name, xs]) => ({
+variant: name, n: xs.length,
+meanAbsLog: r2(xs.reduce((a, z) => a + Math.abs(z.e), 0) / (xs.length || 1) * 100) / 100,
+medianAbsLog: r2(med(xs.map((z) => Math.abs(z.e))) * 100) / 100,
+bias: r2(xs.reduce((a, z) => a + z.e, 0) / (xs.length || 1) * 100) / 100,
+}));
+return { today, asOf, horizon, staysScored, table, detail: acc };
+}
+
+export { backtest, priceBacktest };
