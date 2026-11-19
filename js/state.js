@@ -1849,7 +1849,8 @@ createdAt: new Date().toISOString(),
 // ISO UTC strings from the agent's polls; `role` and `label` are the only fields typed in here:
 // '' (unassigned) | 'guest' | 'me' | 'family' | 'visitor' | 'cleaner' | 'household' | 'ignore'. Only '' and 'guest' are matched to stays.
 function blankWifiDevice(fields = {}) {
-return { hostname: '', net: 'home', firstSeen: '', lastSeen: '', role: '', label: '', ...fields };
+// stayId: the stay this device was moved to by hand when two stays overlap ('' = automatic, see wifipresence.js matchStays).
+return { hostname: '', net: 'home', firstSeen: '', lastSeen: '', role: '', label: '', stayId: '', ...fields };
 }
 
 // One continuous stretch of a device on the Wi-Fi (the agent closes it after WIFI_LEAVE_MINUTES away). `to` is null while

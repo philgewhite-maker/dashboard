@@ -79,12 +79,23 @@ return store;
 // is someone else's (a previous guest, the owner) and is excluded. Two stays whose windows both contain the first sighting
 // (the one guest SSID serves both rooms, and a turnover day overlaps the stay before) list the device on both, marked
 // `ambiguousWith` the other stays' ids: it can't be told which room.
+// Two ways an overlap is settled to one stay instead:
+// - `stayId` on the device (picked by hand in the stay's expander) wins outright, while it names one of the candidates.
+// - A check-in-day arrival: a cluster of CLUSTER_MIN or more new guest devices first seen within CLUSTER_GAP_MS of each
+//   other (chained), on the check-in day of exactly one candidate stay, where every other candidate checked in on an
+//   earlier day. The guest already staying would have joined days before, so the cluster is the new guest's (`basis`
+//   'checkin'). A single new device that day is still left as "can't tell".
+// Every device keeps `candidates` (all stays whose window holds its first sighting) so it can be moved between them.
 // `lastSeen` is the latest sighting among those devices' visits that began by checkout noon; `open` is true while one is
 // still running. Cancelled stays and same-day bookings (checkout not after check-in) are skipped.
+const CLUSTER_GAP_MS = 90 * 60000;
+const CLUSTER_MIN = 2;
+function localDay(t) { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; }
 function matchStays(stays, devices, visits) {
 const live = (stays || []).filter((s) => s && s.status !== 'cancelled' && s.checkin && s.checkout && s.checkout > s.checkin)
 .map((s) => ({ stay: s, start: localMs(s.checkin, 0), end: localMs(s.checkout, 12), devices: [] }));
 const visitsByMac = new Map();
+const placed = [];
 (visits || []).forEach((v) => { if (!visitsByMac.has(v.mac)) visitsByMac.set(v.mac, []); visitsByMac.get(v.mac).push(v); });
 Object.keys(devices || {}).forEach((mac) => {
 const dev = devices[mac];
@@ -93,7 +104,29 @@ const mine = visitsByMac.get(mac) || [];
 const firsts = [ms(dev.firstSeen), ...mine.map((v) => ms(v.from))].filter((t) => t != null);
 if (!firsts.length) return;
 const first = Math.min(...firsts);
-const hits = live.filter((w) => first >= w.start && first <= w.end);
+const candidates = live.filter((w) => first >= w.start && first <= w.end);
+if (candidates.length) placed.push({ mac, dev, mine, first, candidates });
+});
+// Check-in-day clusters: sort the multi-candidate arrivals by first sighting and chain those within CLUSTER_GAP_MS.
+const firstsAll = placed.map((p) => p.first).sort((a, b) => a - b);
+const clusterSize = (t) => {
+let lo = firstsAll.indexOf(t); let hi = lo;
+while (lo > 0 && firstsAll[lo] - firstsAll[lo - 1] <= CLUSTER_GAP_MS) lo -= 1;
+while (hi < firstsAll.length - 1 && firstsAll[hi + 1] - firstsAll[hi] <= CLUSTER_GAP_MS) hi += 1;
+return hi - lo + 1;
+};
+placed.forEach((p) => {
+const { mac, dev, mine, first, candidates } = p;
+let hits = candidates;
+let basis = candidates.length > 1 ? 'overlap' : 'window';
+const picked = dev.stayId && candidates.find((w) => w.stay.id === dev.stayId);
+if (picked) { hits = [picked]; basis = 'picked'; } else if (candidates.length > 1) {
+const day = localDay(first);
+const arriving = candidates.filter((w) => w.stay.checkin === day);
+if (arriving.length === 1 && candidates.every((w) => w === arriving[0] || w.stay.checkin < day) && clusterSize(first) >= CLUSTER_MIN) {
+hits = arriving; basis = 'checkin';
+}
+}
 hits.forEach((w) => {
 const during = mine.filter((v) => ms(v.from) != null && ms(v.from) <= w.end);
 const lastTimes = during.map((v) => ms(v.lastSeen || v.from)).filter((t) => t != null);
@@ -103,6 +136,8 @@ mac, device: dev, firstSeen: first,
 lastSeen: lastTimes.length ? Math.max(...lastTimes) : first,
 open: during.some((v) => v.to == null),
 ambiguousWith: hits.filter((o) => o !== w).map((o) => o.stay.id),
+candidates: candidates.map((o) => o.stay.id),
+basis,
 });
 });
 });
@@ -191,6 +226,20 @@ ok('overlap: on both stays', a.devices.some((d) => d.mac === 'E1') && b.devices.
 ok('overlap: flagged with the other stay', a.devices.find((d) => d.mac === 'E1').ambiguousWith.join() === 'B' && b.devices.find((d) => d.mac === 'E1').ambiguousWith.join() === 'A');
 ok('overlap: unambiguous device stays single', b.devices.every((d) => d.mac !== 'E2') && a.devices.find((d) => d.mac === 'E2').ambiguousWith.length === 0);
 ok('overlap: stay-level flag', a.ambiguous === true);
+}
+// 5b. A cluster joining on B's check-in day (A checked in earlier) goes to B only; a lone device that day stays shared;
+// a hand-picked stayId wins; a stayId naming a stay that isn't a candidate is ignored.
+{
+const devices = { K1: dev(at(2026, 3, 12, 20, 6)), K2: dev(at(2026, 3, 12, 20, 27)), K3: dev(at(2026, 3, 12, 20, 27)) };
+let res = matchStays([stayA, stayB], devices, []);
+ok('check-in cluster: on B only', find(res, 'A').devices.length === 0 && find(res, 'B').devices.length === 3 && find(res, 'B').devices.every((d) => d.basis === 'checkin' && d.ambiguousWith.length === 0 && d.candidates.join() === 'A,B'));
+res = matchStays([stayA, stayB], { L1: dev(at(2026, 3, 12, 20, 6)) }, []);
+ok('check-in lone device: still shared', find(res, 'A').devices.length === 1 && find(res, 'B').devices[0].basis === 'overlap');
+res = matchStays([stayA, stayB], { ...devices, K2: dev(at(2026, 3, 12, 20, 27), { stayId: 'A' }), K3: dev(at(2026, 3, 12, 20, 27), { stayId: 'Z' }) }, []);
+ok('picked stay wins, unknown pick ignored', find(res, 'A').devices.map((d) => d.mac).join() === 'K2' && find(res, 'A').devices[0].basis === 'picked' && find(res, 'B').devices.map((d) => d.mac).sort().join() === 'K1,K3');
+const same = { ...stayB, id: 'C', checkin: '2026-03-12' };
+res = matchStays([stayA, stayB, same], devices, []);
+ok('two stays arriving the same day: still shared', find(res, 'B').devices.every((d) => d.basis === 'overlap'));
 }
 // 6. An open visit: still connected, last seen is its lastSeen.
 {
@@ -405,11 +454,20 @@ if (s.persisting === false) parts.push("the agent isn't saving history (its data
 return parts.join(' · ');
 }
 
+const stayById = (id) => (data.airbnbReservations || []).find((r) => r.id === id);
+// Move a device between the stays it could belong to (wifiDevices[mac].stayId); "" goes back to automatic.
+function moveSelectHtml(d) {
+if (d.candidates.length < 2) return '';
+const opts = d.candidates.map(stayById).filter(Boolean).map((r) => `<option value="${escapeHtml(r.id)}"${d.device.stayId === r.id ? ' selected' : ''}>${escapeHtml(r.guestName || 'Guest')} (in ${escapeHtml(r.checkin.slice(8))}/${escapeHtml(r.checkin.slice(5, 7))})</option>`).join('');
+return `<select class="mini wifi-move" data-wifi-stay="${escapeHtml(d.mac)}" title="Which stay this device belongs to"><option value=""${d.device.stayId ? '' : ' selected'}>Auto</option>${opts}</select>`;
+}
 function stayDevicesHtml(item, chipFor) {
 return item.devices.map((d) => {
-const other = d.ambiguousWith.map((id) => (data.airbnbReservations || []).find((r) => r.id === id)).filter(Boolean);
-const tell = other.length ? ` <span class="wifi-amb" title="One guest Wi-Fi serves both rooms, so this device can't be tied to one of them.">can't tell which room · also ${other.map((r) => chipFor(r)).join(' ')}</span>` : '';
-return `<span class="wifi-dev-chip">${escapeHtml(deviceName(d.device, d.mac))} <small>${clock(d.firstSeen)}</small></span>${tell}`;
+const other = d.ambiguousWith.map(stayById).filter(Boolean);
+const tell = other.length ? ` <span class="wifi-amb" title="One guest Wi-Fi serves both rooms, so this device can't be tied to one of them.">can't tell which room · also ${other.map((r) => chipFor(r)).join(' ')}</span>`
+: d.basis === 'checkin' ? ' <span class="wifi-basis" title="Joined with other new devices on this stay&#39;s check-in day; the other guest checked in earlier.">arrived on check-in day</span>'
+: d.basis === 'picked' ? ' <span class="wifi-basis">set by you</span>' : '';
+return `<span class="wifi-dev-chip">${escapeHtml(deviceName(d.device, d.mac))} <small>${clock(d.firstSeen)}</small></span>${tell}${moveSelectHtml(d)}`;
 }).join(' ');
 }
 
@@ -541,6 +599,15 @@ if (role) data.wifiDevices[mac].role = role.value;
 if (label) data.wifiDevices[mac].label = label.value.trim();
 queueSave();
 renderWifiPresence();
+});
+// The stay-expander "which stay" picker lives on the Airbnb panel (and anywhere else stayWifiHtml is shown).
+document.addEventListener('change', (e) => {
+const sel = e.target.closest && e.target.closest('select[data-wifi-stay]');
+if (!sel || !data.wifiDevices[sel.dataset.wifiStay]) return;
+data.wifiDevices[sel.dataset.wifiStay].stayId = sel.value;
+queueSave();
+renderWifiPresence();
+import('./airbnb.js').then((m) => m.renderAirbnb()).catch(() => {});
 });
 renderWifiPresence();
 // First pull shortly after open, then every few minutes while the app is visible and sync is set up. Each pull costs the

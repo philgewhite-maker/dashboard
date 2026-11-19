@@ -4790,6 +4790,8 @@ background:var(--slate-bg);color:var(--slate);
 .wifi-dev-chip{border:1px solid var(--line);border-radius:10px;padding:1px 7px;white-space:nowrap;}
 .wifi-dev-chip small{color:var(--muted);}
 .wifi-amb{color:var(--amber);}
+.wifi-basis{color:var(--muted);font-style:italic;}
+.wifi-move{font-size:12px;}
 .wifi-clean-row{display:flex;flex-wrap:wrap;gap:2px 10px;padding:4px 0;font-size:13px;border-bottom:1px solid var(--line);}
 .wifi-clean-row:last-child{border-bottom:0;}
 .wifi-clean-day{color:var(--muted);min-width:6.5em;}
