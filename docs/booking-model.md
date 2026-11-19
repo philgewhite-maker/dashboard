@@ -87,6 +87,7 @@ table is learnt from all rooms' records pooled (PRICING-PLAN.md section D).
 | `PRICE_HALF_LIFE_DAYS` | 60 days | A price sample counts half as much every 60 days (180 before v907) |
 | `PRICE_OPTS.deseason` | on | Each price sample is divided by its month's index before the base is taken, so the base is season-neutral and the month index is not applied twice (v907) |
 | `PRICE_MARKET_GAMMA` | 0.3 | The month price index is held towards London's seasonal shape to this power (5 pseudo-stays), so a month with few or none of your stays still has a season (v907) |
+| `AUTO_DEMAND_K` | 60 nights | The demand factor bleeds in from scored nights: k^(n/(n+60)), k fitted from empty nights against forecasts normalised to factor 1, kept to 0.5–2; a factor you apply overrides it (v909) |
 | `PAST_MIN_NIGHTS` | 5 | Minimum stay assumed before shorter requests started appearing |
 | `LAMBDA_MAX` | 4 | Ceiling on requests per check-in date |
 | `LEAD_SIGMA_PRIOR` | 1.3 | Spread of the lead-time curve (Airbnb-wide figure) |

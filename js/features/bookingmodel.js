@@ -473,11 +473,14 @@ const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
 (data.lettingLedger || []).forEach((e) => { if (e.confirmationCode && codes.has(e.confirmationCode)) earnedStayIds.add(`led:${e.id}`); });
-// The factors the monthly review applied, times any what-if for this one evaluation.
+// The factors the monthly review applied, times any what-if for this one evaluation. Demand: a factor you applied for
+// this model version wins; otherwise the bled-in factor from how past projections did (autoDemand, below).
 const cal = s.calibration || {};
 const ov = overrides.scale || {};
 const scale = { ...ov };
-[['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = k === 'demand' ? demandFactorOf(cal) : Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
+const manualDemand = demandFactorOf(cal);
+const auto = manualDemand === 1 ? autoDemandFor(rooms, stays, today) : null;
+[['demand', 'demand'], ['lead', 'lead'], ['cancel', 'cancel']].forEach(([k]) => { const c = k === 'demand' ? (auto ? auto.factor : manualDemand) : Number(cal[k]) || 1; if (c !== 1 || ov[k] != null) scale[k] = c * (ov[k] != null ? ov[k] : 1); });
 // Nights Airbnb's feed marks "Not available" (a host's manual blocks): not free nights, so not voids.
 const blocks = (data.airbnbBlocks || []).map((b) => ({ listingId: b.listingId, from: b.from, to: b.to }));
 const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((l) => l.id);
@@ -486,7 +489,7 @@ const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((
 // attempts are kept: as in basketReference, a newer failure for a hotel and date hides an older success.
 const hotelPrices = (data.hotelPrices || []).filter((r) => r && r.hotel && r.checkin && r.sampledAt).map((r) => ({ hotel: r.hotel, basket: r.basket, checkin: r.checkin, sampledAt: r.sampledAt, price: r.price == null ? null : Number(r.price), ok: !!r.ok }));
 const priceLedger = (data.priceLedger || []).filter((r) => r && r.roomKey && r.date).map((r) => ({ roomKey: r.roomKey, date: r.date, price: r.price, minStay: r.minStay, override: r.override, history: (r.history || []).map((h) => ({ at: h.at, price: h.price, minStay: h.minStay, override: h.override, source: h.source })) }));
-return { today, s, priceRefSettings, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, blocks, feedListingIds, ownListings, hotelPrices, priceLedger };
+return { today, s, priceRefSettings, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, autoDemand: auto, blocks, feedListingIds, ownListings, hotelPrices, priceLedger };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -2483,6 +2486,61 @@ const best = top && top.net - base.net >= Math.max(3, Math.abs(base.net) * 0.03)
 return { base, options, best, curMin, clean, gain: best ? Math.round((best.net - base.net) * 100) / 100 : 0 };
 }
 
+// ---- Bled-in demand factor -------------------------------------------------------------------------------------------
+// Instead of waiting for 40 scored nights and a button press, the demand factor moves a little with every night that
+// passes. Each elapsed free night a saved projection (this model version, not under a void plan) covered is scored once,
+// against its earliest forecast. A forecast made with factor d said the night stays empty with chance 1 - p; at factor
+// 1 that is (1 - p)^(1/d) (a night stays empty with a chance of about exp(-rate), and d multiplies the rate). The
+// factor that would have fitted is k = ln(actual empty share) / ln(expected empty share at factor 1), clamped to
+// 0.25-4, then pulled towards 1 by AUTO_DEMAND_K pseudo-nights: factor = k^(n / (n + K)). With 10 nights scored it has
+// moved about 14% of the way (in log terms), with 60 half way, with 240 four fifths. Kept to 0.5-2.
+const AUTO_DEMAND_K = 60;
+function autoDemandFrom(rows, K = AUTO_DEMAND_K) {
+const n = rows.length;
+if (!n) return { factor: 1, n: 0, weight: 0, raw: 1, emptyAct: 0, emptyExp: 0 };
+const emptyAct = rows.reduce((a, r) => a + (r.booked ? 0 : 1), 0);
+const emptyExp = rows.reduce((a, r) => a + Math.pow(Math.max(0.001, 1 - Math.min(0.999, r.p)), 1 / (r.d > 0 ? r.d : 1)), 0);
+const share = (x) => Math.min(Math.max(x, 0.5), n - 0.5) / n;
+const raw = Math.min(4, Math.max(0.25, Math.log(share(emptyAct)) / Math.log(share(emptyExp))));
+const weight = n / (n + K);
+const factor = Math.min(2, Math.max(0.5, Math.exp(weight * Math.log(raw))));
+return { factor, n, weight, raw, emptyAct, emptyExp };
+}
+let autoDemandMemo = { key: '', value: null };
+function autoDemandFor(rooms, stays, today) {
+const projections = (data.bookingProjections || []).filter((p) => (p.modelVersion || 1) === MODEL_VERSION);
+const last = projections.reduce((m, p) => (String(p.madeAt) > m ? String(p.madeAt) : m), '');
+const key = `${today}|${projections.length}|${last}|${stays.length}|${stays.reduce((a, x) => a + (x.status === 'stay' ? 1 : 0), 0)}`;
+if (autoDemandMemo.key === key) return autoDemandMemo.value;
+const roomOf = new Map();
+rooms.forEach((r) => r.listingIds.forEach((id) => roomOf.set(id, r.key)));
+const booked = new Set();
+stays.forEach((x) => {
+if (x.status !== 'stay' || x.unconfirmed || !roomOf.has(x.listingId) || !x.checkin || !x.checkout) return;
+for (let d = dayNum(x.checkin); d < dayNum(x.checkout); d++) booked.add(`${roomOf.get(x.listingId)}|${d}`);
+});
+const T = dayNum(today);
+const seen = new Map();
+projections.slice().sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt))).forEach((p) => {
+const made = dayNum(String(p.madeAt).slice(0, 10) || p.today);
+const d = p.assumptions && p.assumptions.calibration ? Number(p.assumptions.calibration.demand) || 1 : 1;
+(p.voids || []).forEach((v) => {
+const from = dayNum(v.from);
+for (let i = 0; i < v.nights; i++) {
+const n = from + i;
+if (n >= T || n <= made) continue;
+const date = dayStr(n);
+if ((p.plans || []).some((q) => q.roomKey === v.roomKey && date >= q.from && date < q.to)) continue;
+const k = `${v.roomKey}|${n}`;
+if (!seen.has(k)) seen.set(k, { p: (v.nightProb || [])[i] || 0, d, booked: booked.has(k) });
+}
+});
+});
+const value = autoDemandFrom([...seen.values()]);
+autoDemandMemo = { key, value };
+return value;
+}
+
 // What the model assumed when it made a projection, kept with it so a later review can say why it
 // was off: per room and month of the year, the occupancy and request rate; and the shared figures.
 function assumptionsSnapshot(ctx, params) {
@@ -2694,6 +2752,16 @@ const err = (p, m, want) => Math.abs(Math.log(p.byMonth[m] / want));
 check('Season-neutral base: below the recency-led v906 base, and January and October each land nearer their own price',
 now.base < old.base && err(now, 0, 80) < err(old, 0, 80) && err(now, 9, 120) <= err(old, 9, 120) + 1e-9 && now.byMonth.every((v) => v != null),
 `base ${old.base.toFixed(1)} -> ${now.base.toFixed(1)}; Jan ${old.byMonth[0] == null ? 'none' : old.byMonth[0].toFixed(1)} -> ${now.byMonth[0].toFixed(1)} (paid 80); Oct ${old.byMonth[9] == null ? 'none' : old.byMonth[9].toFixed(1)} -> ${now.byMonth[9].toFixed(1)} (paid 120)`);
+// Bled-in demand factor (v909). 60 nights forecast at p = 0.75 under factor 2 are 50% empty at factor 1 ((0.25)^(1/2)),
+// so 30 expected empty. Only 15 were empty (25%): on its own k = ln 0.25 / ln 0.5 = 2; with 60 nights against 60
+// pseudo-nights it counts half (in log terms): 2^0.5 = 1.414. No nights: 1. Ten nights: barely moved.
+const rows = (n, empty) => Array.from({ length: n }, (_, i) => ({ p: 0.75, d: 2, booked: i >= empty }));
+const a60 = autoDemandFrom(rows(60, 15));
+const a10 = autoDemandFrom(rows(10, 2));
+const a0 = autoDemandFrom([]);
+check('Bled-in demand: forecasts normalised to factor 1, k = 2 at full weight, half of it (x1.41) at 60 nights, little at 10, 1 with none',
+Math.abs(a60.emptyExp - 30) < 1e-9 && Math.abs(a60.raw - 2) < 1e-9 && Math.abs(a60.factor - Math.SQRT2) < 1e-9 && a10.factor > 1 && a10.factor < 1.2 && a0.factor === 1,
+`60 nights: expected empty ${a60.emptyExp.toFixed(1)}, raw x${a60.raw.toFixed(2)}, factor x${a60.factor.toFixed(3)}; 10 nights: x${a10.factor.toFixed(3)}; none: x${a0.factor}`);
 return out;
 }
 function selfTestAllOn() {
@@ -3518,4 +3586,4 @@ cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100),
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown };
+export { autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown };

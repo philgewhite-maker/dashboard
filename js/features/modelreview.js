@@ -7,19 +7,16 @@
 //  - accept/reject verdicts (data.bookingRequests[].evaluation): for each request you evaluated and
 //    then accepted or turned down, the expected income of its free stretch against what that stretch
 //    actually earned.
-// Nothing is changed by looking. The review can propose a demand factor and applies it only when
-// you press Apply (prefs.bookingEvaluator.calibration, used by every later evaluation and projection).
+// Nothing is changed by looking. The demand factor bleeds in by itself as nights are scored (bookingmodel.js
+// autoDemandFor); a factor you apply (prefs.bookingEvaluator.calibration) overrides it until you go back to it.
 import { data, queueSave } from '../state.js';
 import { escapeHtml, todayStr, dateStrAdd, scrollAndFlash } from '../utils.js';
 import { nightRateRooms } from './letting.js';
 import { collectStays } from './lettingoccupancy.js';
 import { stayChipHtml, bindStayChips } from './airbnb.js';
-import { MODEL_VERSION, demandFactorOf } from './bookingmodel.js';
+import { MODEL_VERSION, demandFactorOf, buildContext, AUTO_DEMAND_K } from './bookingmodel.js';
 
-const MIN_NIGHTS_FOR_PROPOSAL = 40;
 const MIN_NIGHTS_FOR_BUCKET = 25;
-const PROPOSAL_SHRINK_K = 60; // pseudo-nights pulling a proposed factor back towards 1
-const PROPOSAL_MIN_MOVE = 0.08;
 
 const money = (v) => `£${Math.round(v).toLocaleString('en-GB')}`;
 const dayMs = 86400000;
@@ -29,6 +26,12 @@ const short = (d) => new Date(`${d}T00:00:00`).toLocaleDateString('en-GB', { day
 const pctTxt = (v) => `${Math.round(v * 100)}%`;
 const ratioTxt = (exp, act) => (exp > 0.5 ? `${Math.round((act / exp) * 100)}%` : '–');
 
+// The demand factor every evaluation and projection uses now, and where it comes from.
+function demandInForce() {
+const cal = calibrationNow();
+const ctx = buildContext();
+return { factor: ctx.scale.demand || 1, manual: cal.demand !== 1, auto: ctx.autoDemand };
+}
 function calibrationNow() {
 const c = (data.prefs.bookingEvaluator || {}).calibration || {};
 return { demand: demandFactorOf(c), lead: Number(c.lead) || 1, cancel: Number(c.cancel) || 1, appliedOn: c.appliedOn || '', note: c.note || '', history: Array.isArray(c.history) ? c.history : [] };
@@ -154,37 +157,17 @@ const mine = rows.filter((r) => r.first && r.first.p >= lo && r.first.p < hi);
 const s = summarise(mine, 'first');
 return { label: `${Math.round(lo * 100)}–${Math.min(100, Math.round(hi * 100))}%`, n: s.n, predicted: s.n ? s.expN / s.n : 0, actual: s.n ? s.actN / s.n : 0 };
 });
-view.proposals = proposals(rows);
+view.proposals = proposals();
 return view;
 }
 
-// A demand factor that would have fitted: observed booked nights over expected, for forecasts made under
-// the factor now in force, pulled back towards 1 by how little evidence there is.
-function proposals(rows) {
-const cal = calibrationNow();
-const same = rows.filter((r) => r.first && Math.abs(r.first.demand - cal.demand) < 0.005);
-const s = summarise(same, 'first');
-const out = [];
-if (s.n < MIN_NIGHTS_FOR_PROPOSAL || s.expN < 5) {
-out.push({ kind: 'note', text: `Not enough evidence for a proposal yet: ${s.n} night${s.n === 1 ? '' : 's'} checked against forecasts made with the current factor (needs ${MIN_NIGHTS_FOR_PROPOSAL}).` });
-return out;
-}
-const ratio = s.actN / s.expN;
-// The factor multiplies the request rate. A night stays empty with a chance of about exp(-rate), so k times the rate turns an
-// empty share v into v^k: the factor that would have fitted is ln(actual empty share) / ln(expected empty share).
-const vacExp = s.n - s.expN; const vacAct = Math.max(s.n - s.actN, 0.5);
-const vacRatio = Math.log(Math.min(vacAct, s.n - 0.5) / s.n) / Math.log(Math.min(vacExp, s.n - 0.5) / s.n);
-const shrunk = 1 + (vacRatio - 1) * (s.n / (s.n + PROPOSAL_SHRINK_K));
-if (Math.abs(shrunk - 1) < PROPOSAL_MIN_MOVE) {
-out.push({ kind: 'note', text: `Bookings arrived about as often as projected (${Math.round(ratio * 100)}% of the expected nights over ${s.n} nights): no change proposed.` });
-return out;
-}
-const suggested = Math.max(0.4, Math.min(8, Math.round(cal.demand * shrunk * 100) / 100));
-out.push({
-kind: 'demand', value: suggested, from: cal.demand, n: s.n,
-text: `Over ${s.n} nights, ${s.actN} were booked against ${s.expN.toFixed(1)} expected (${Math.round(ratio * 100)}%), so ${vacAct.toFixed(0)} stayed empty against ${vacExp.toFixed(1)} expected. Multiplying the request rate by ×${suggested.toFixed(2)} (now ×${cal.demand.toFixed(2)}) would have fitted better.`,
-});
-return out;
+// What the demand factor is doing: bled in from the scored nights, or held at a factor you applied.
+function proposals() {
+const f = demandInForce();
+const a = f.auto;
+if (f.manual) return [{ kind: 'note', text: `Held at ×${f.factor.toFixed(2)}, a factor you applied. The scored nights would give ×${a ? a.factor.toFixed(2) : '1.00'} by now; go back to that below.` }];
+if (!a || !a.n) return [{ kind: 'note', text: 'Demand factor ×1.00: no scored nights yet. It starts moving by itself as soon as projected nights pass.' }];
+return [{ kind: 'note', text: `Demand factor ×${a.factor.toFixed(2)}, bled in from ${a.n} scored night${a.n === 1 ? '' : 's'}: ${a.emptyAct} stayed empty against ${a.emptyExp.toFixed(1)} expected at ×1.00, which on its own says ×${a.raw.toFixed(2)}. It counts ${Math.round(a.weight * 100)}% of that so far (${a.n} nights against ${AUTO_DEMAND_K} pseudo-nights at ×1.00) and moves further with every night that passes.` }];
 }
 
 // ---- Accepted and declined estimates against outcomes --------------------------------------------
@@ -336,12 +319,13 @@ if (out && out.parentElement.lastElementChild) out.parentElement.lastElementChil
 
 function reviewHtml() {
 const cal = calibrationNow();
+const dif = demandInForce();
 const pr = projectionReview();
 const reqs = requestReview();
 const projCount = (data.bookingProjections || []).filter((p) => (p.modelVersion || 1) === MODEL_VERSION).length;
 const older = (data.bookingProjections || []).length - projCount;
 const lines = [];
-lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from an earlier version of the model ${older === 1 ? 'is' : 'are'} not scored.` : ''} Calibration in force: empty nights divided by ×${cal.demand.toFixed(2)}${cal.appliedOn ? ` (applied ${escapeHtml(cal.appliedOn)})` : ''}.</div>`);
+lines.push(`<div class="settings-note" style="margin:4px 0 8px;">Compares what the model projected, and what it estimated when you evaluated a request, with what happened. ${projCount} saved projection${projCount === 1 ? '' : 's'}; ${pr.rows.length} night${pr.rows.length === 1 ? '' : 's'} checked so far.${older ? ` ${older} earlier projection${older === 1 ? '' : 's'} from an earlier version of the model ${older === 1 ? 'is' : 'are'} not scored.` : ''} Demand factor in force: ×${dif.factor.toFixed(2)} (${dif.manual ? `applied by you${cal.appliedOn ? ` ${escapeHtml(cal.appliedOn)}` : ''}` : 'bled in from scored nights'}).</div>`);
 if (!pr.rows.length) {
 const first = (data.bookingProjections || []).slice().sort((a, b) => String(a.madeAt).localeCompare(String(b.madeAt)))[0];
 lines.push(`<div class="settings-note" style="margin:6px 0;">Nothing to compare yet. ${first ? `Projections are checked once their nights have passed: the first one was made on ${escapeHtml(String(first.madeAt).slice(0, 10))} and covers up to ${escapeHtml(dateStrAdd(first.to, -1))}.` : 'Run "Project the next three months" in the occupancy section, and come back after the month has gone.'}</div>`);
@@ -363,13 +347,13 @@ lines.push(`<details class="settings-subgroup"><summary>Chance forecast against 
 }
 // Proposals.
 const props = pr.proposals;
-lines.push(`<div style="margin:10px 0 4px;"><b style="font-size:12px;">What it suggests</b></div>`);
+lines.push(`<div style="margin:10px 0 4px;"><b style="font-size:12px;">Demand factor</b></div>`);
 props.forEach((p) => {
 if (p.kind === 'note') lines.push(`<div class="settings-note" style="margin:2px 0;">${escapeHtml(p.text)}</div>`);
 else lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span style="font-size:12px;">${escapeHtml(p.text)}</span><button class="sync-btn sm inline" type="button" data-mr-apply="${p.value}" data-mr-n="${p.n}">Apply ×${p.value.toFixed(2)}</button></div>`);
 });
-if (cal.demand !== 1 || cal.history.length) {
-lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span class="settings-note" style="margin:0;">Applied so far: ${cal.history.length ? cal.history.map((h) => `${escapeHtml(h.on)} ×${Number(h.demand).toFixed(2)} (${h.note ? escapeHtml(h.note) : `from ${h.n} nights`})`).join('; ') : 'none'}.</span><button class="sync-btn sm inline" type="button" data-mr-reset>Back to ×1.00</button></div>`);
+if (dif.manual || cal.history.length) {
+lines.push(`<div class="sync-row" style="align-items:center;margin:2px 0;"><span class="settings-note" style="margin:0;">Applied by you so far: ${cal.history.length ? cal.history.map((h) => `${escapeHtml(h.on)} ×${Number(h.demand).toFixed(2)} (${h.note ? escapeHtml(h.note) : `from ${h.n} nights`})`).join('; ') : 'none'}.</span>${dif.manual ? '<button class="sync-btn sm inline" type="button" data-mr-reset>Back to the bled-in factor</button>' : ''}</div>`);
 }
 lines.push(recentHtml());
 lines.push(earlyBlockHtml());
