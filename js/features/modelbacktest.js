@@ -21,6 +21,7 @@
 //                  learned from outcomes after T; 'current' keeps today's factors (a known leak, for comparison)
 //   keepPlans      true keeps today's void plans (default false: a plan for a past window may post-date T)
 //   today          override for today's date (testing only)
+//   priceOpts      price calibration switches for every date (bookingmodel.js PRICE_OPTS); default the model's own
 //   onProgress     (done, total, asOf) => void
 
 const DAY_MS = 86400000;
@@ -132,6 +133,7 @@ const { MODEL_VERSION, buildContext, calibrate, makeProjection } = model;
 const horizon = Math.max(1, Number(opts.horizon) || 90);
 const runs = Math.max(50, Number(opts.runs) || 1500);
 const full = buildContext(opts.today ? { today: opts.today } : {});
+if (opts.priceOpts) full.priceOpts = opts.priceOpts; // price calibration switches (bookingmodel.js PRICE_OPTS), carried into every truncated copy
 const today = full.today;
 const asOf = (opts.asOf && opts.asOf.length ? opts.asOf.slice() : defaultAsOf(today, horizon)).sort();
 const roomOf = new Map();
