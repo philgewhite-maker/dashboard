@@ -142,7 +142,7 @@ const LONG_LET_LEAD_DAYS = 30; // a long let with no booking date: its nights ar
 const PRICE_HALF_LIFE_DAYS = 180; // a price sample counts half as much for every this many days since it was booked
 const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
 // Price calibration switches (ctx.priceOpts overrides them, for the price backtest in modelbacktest.js).
-const PRICE_OPTS = { deseason: false, iterate: 1, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0 };
+const PRICE_OPTS = { deseason: false, iterate: 1, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: 0 };
 const STAGE_FIT_MIN = 4; // samples needed each side of a stage change before the listing's own before/after is read
 const STAGE_FIT_WINDOW = 180; // days either side of the change that are compared (limits, but does not remove, the seasonal mix)
 const STAGE_FIT_K = 8; // pseudo-samples holding a stage's price multiplier at its prior
@@ -652,7 +652,14 @@ for (let pass = 0; pass < (po.deseason ? po.iterate : 1); pass++) {
 const roomMed = samples.map((sm) => (sm.length >= 3 ? median(sm.map(neutral)) : null));
 const monthRel = Array.from({ length: 12 }, () => []);
 samples.forEach((sm, i) => { if (roomMed[i] > 0) sm.forEach((x) => monthRel[x.month].push(x.cur / roomMed[i])); });
-let raw = monthRel.map((xs) => (xs.length >= 3 ? Math.exp(xs.length * Math.log(median(xs)) / (xs.length + po.monthK)) : null));
+// marketGamma > 0: each month is held towards London's seasonal shape raised to that power (MARKET_SEASON is a count of
+// stays, not a price; prices move less than demand, hence the power) instead of towards 1, and a month with fewer than
+// 3 of your stays (or none) still gets that shape rather than no index.
+const prior = (m) => (po.marketGamma > 0 ? Math.pow(MARKET_SEASON[m], po.marketGamma) : 1);
+let raw = monthRel.map((xs, m) => {
+if (po.marketGamma > 0) return Math.exp((xs.length ? xs.length * Math.log(median(xs)) : 0) / (xs.length + po.monthK) + po.monthK * Math.log(prior(m)) / (xs.length + po.monthK));
+return xs.length >= 3 ? Math.exp(xs.length * Math.log(median(xs)) / (xs.length + po.monthK)) : null;
+});
 if (po.smooth > 0) raw = raw.map((v, m) => { if (v == null) return null; const nb = [raw[(m + 11) % 12], raw[(m + 1) % 12]].filter((u) => u != null); return nb.length ? Math.exp((1 - po.smooth) * Math.log(v) + po.smooth * nb.reduce((a, u) => a + Math.log(u), 0) / nb.length) : v; });
 monthIdx = raw;
 }
