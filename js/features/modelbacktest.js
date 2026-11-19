@@ -294,7 +294,8 @@ deseason3: { deseason: true, iterate: 3 },
 };
 const full = buildContext(opts.today ? { today: opts.today } : {});
 const today = full.today;
-const fullP = calibrate(full);
+// Calibrated on its own copy: calibrate leaves functions on the context, which truncate's structuredClone cannot copy.
+const fullP = calibrate(buildContext({ today }));
 const fullSt = fullP.stagePrice || { rated: 1 };
 const T0 = dayNum(today);
 const [y, m] = today.split('-').map(Number);
