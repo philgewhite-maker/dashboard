@@ -4924,3 +4924,10 @@ input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=color],[ty
 .tab-btn{flex:0 0 auto;scroll-snap-align:start;}
 }
 .stay-paidout{font-size:12px;color:var(--muted);align-self:center;}
+/* Superhost panel on a phone: the letting panels' flex:1 1 7rem becomes HEIGHT inside these column labels, so pin the boxes;
+   and let the table's grey asides wrap under their number so Rating and Result fit without sideways scrolling. */
+#letting-panel .sh-set .settings-input,#letting-forecast-panel .sh-set .settings-input,#letting-analytics-panel .sh-set .settings-input{flex:0 0 auto;width:90px;min-width:0;max-width:none;}
+@media (max-width:700px){
+.sh-table th,.sh-table td{white-space:normal;padding-right:6px;vertical-align:top;}
+.sh-table td .sh-dim{display:inline-block;white-space:nowrap;}
+}

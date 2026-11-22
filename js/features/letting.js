@@ -740,7 +740,7 @@ ${superhost ? superhostChipHtml(superhost, key) : ''}
 <div class="letting-owner-body"${collapsed ? ' hidden' : ''}>
 ${superhost ? superhostPanelHtml(superhost, key) : ''}
 ${mine ? '' : `<div class="sync-row" style="margin:4px 0 8px;flex-wrap:wrap;align-items:center;">
-<input type="month" class="settings-input" data-report-period="${escapeHtml(key)}" style="max-width:130px;" title="The month this report covers -- defaults to last month.">
+<input type="month" class="settings-input" data-report-period="${escapeHtml(key)}" value="${(() => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`; })()}" style="max-width:130px;" title="The month this report covers -- defaults to last month.">
 <button class="sync-btn sm inline" type="button" data-report-generate="${escapeHtml(key)}">&#128196; Generate report</button>
 <span class="sync-status" data-report-status="${escapeHtml(key)}"></span>
 </div>`}
