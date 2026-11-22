@@ -62,7 +62,7 @@ const MODEL_VERSION = 8;
 // The random seeds are built with v6's number, and without the settings v7 adds (guestPrice, elasticityPrior), so v6
 // and v7 draw the same randomness for the same inputs, and editing those settings does not reshuffle the draws.
 const SEED_VERSION = 6;
-const seedSettings = (s) => { const { guestPrice, elasticityPrior, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
+const seedSettings = (s) => { const { guestPrice, elasticityPrior, events, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
 // Rating stage (see listingStages) and the price calibration built on it. Every figure here is an assumption.
 const LIVE_BEFORE_FIRST_ASK = 7; // a listing went live this many days before its first request or booking
 const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after checkout (the review's own date is not stored)

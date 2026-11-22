@@ -321,7 +321,9 @@ targets.forEach(({ i, x, actual }) => {
 const p = P.prices[i];
 if (!p || !(p.n >= 3) || p.weekday != null || !(actual > 0)) return;
 const stageMult = (P.stagePrice || {})[(P.roomStage || [])[i] || 'rated'] || 1;
-const ix = p.byMonth[x.month] != null && p.base > 0 ? p.byMonth[x.month] / p.base : 1;
+// The season for the stay's own nights: the interpolated curve when the calibration uses one, else the month bucket.
+let ix = p.byMonth[x.month] != null && p.base > 0 ? p.byMonth[x.month] / p.base : 1;
+if (P.priceInterp && model.seasonPrice && p.base > 0 && x.nights > 0) { let sum = 0; for (let d = 0; d < x.nights; d++) sum += model.seasonPrice(p, x.start + d, true); ix = sum / x.nights / p.base; }
 const pred = (p.base / stageMult) * ix;
 acc[name].push({ e: Math.log(pred / actual), room: i, month: x.month, asOf: date });
 });

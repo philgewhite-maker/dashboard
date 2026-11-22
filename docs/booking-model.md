@@ -87,6 +87,9 @@ table is learnt from all rooms' records pooled (PRICING-PLAN.md section D).
 | `PRICE_HALF_LIFE_DAYS` | 60 days | A price sample counts half as much every 60 days (180 before v907) |
 | `PRICE_OPTS.deseason` | on | Each price sample is divided by its month's index before the base is taken, so the base is season-neutral and the month index is not applied twice (v907) |
 | `PRICE_MARKET_GAMMA` | 0.3 | The month price index is held towards London's seasonal shape to this power (5 pseudo-stays), so a month with few or none of your stays still has a season (v907) |
+| `PRICE_OPTS.interp` | on | The month index is read as a curve through the month midpoints (log-linear between the two nearest, December wraps to January) instead of a step on the 1st; off on the v906 basis the old self-tests use (v912) |
+| `EVENT_MAX_NIGHTS` | 10 nights | A yearly calendar event this short or shorter is "in the history" (its stays are in the month index): uplift plus an offset. Longer: left to the season curve (v912) |
+| `EVENT_OFFSET_DAYS` | 14 days | The offset window either side of an in-history event (v912) |
 | `AUTO_DEMAND_K` | 60 nights | The demand factor bleeds in from scored nights: k^(n/(n+60)), k fitted from empty nights against forecasts normalised to factor 1, kept to 0.5–2; a factor you apply overrides it (v909) |
 | `PAST_MIN_NIGHTS` | 5 | Minimum stay assumed before shorter requests started appearing |
 | `LAMBDA_MAX` | 4 | Ceiling on requests per check-in date |
@@ -146,6 +149,16 @@ at today's settings the demand level and stay-length mix are still v6's for ever
 moves: the cleaning fee and discounts weigh a little less in a dearer stay's all-in price, so its response to a change
 in them differs slightly, and the random draws part from v7's (the largest multiplier changes). The fallback
 top-rated-guest share is now 50% (the saved setting already was).
+
+## Yearly events calendar (v912)
+
+Settings, Booking evaluator, Yearly events (`prefs.bookingEvaluator.events`): `{id, name, roomKey ('' = every room), rule 'fixed'|'nth'|'once', month, day, weekday, nth (1-4 or -1 last), date, nights, upliftPct}`. `eventOccurrences` turns one into day ranges; `eventFactorsAt(ctx, room, night)` gives the multipliers, used by both `basePrice` and `nightBreakdown` (after weekday and stage, before rate-review proposals).
+
+- **Yearly, up to 10 nights**: the month index already holds past spikes of this kind (it learns from what stays earned), so a bare uplift would count twice. The event's nights take x(1+u); the other nights of the window (14 days either side) take x(1 - u k / (N - k)), k event nights, N window nights, so the window's average factor is exactly 1. Overlapping windows multiply.
+- **Yearly, over 10 nights**: season, not an event. No uplift, no offset; the season curve carries it.
+- **Once**: a plain uplift on its nights, no offset (it was never in the average).
+- **Rate-review proposals** that overlap (same room, any night) an event that prices are ignored: the calendar wins. Others apply as before.
+- **History check** (`eventHistoryCheck`): for each yearly event of up to 10 nights, your stays inside a past occurrence (at least half their nights) against stays starting in the window beside it, each against the season curve, give an implied uplift shown next to the one set (null with fewer than 2 event stays or 3 neighbours; flagged when 15 points or more apart).
 
 ## Known limitations
 

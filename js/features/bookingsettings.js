@@ -31,6 +31,7 @@ if (!s.elasticityPrior || typeof s.elasticityPrior !== 'object' || s.elasticityP
 if (!Array.isArray(s.elasticityPrior.season) || s.elasticityPrior.season.length !== 12) s.elasticityPrior.season = [...d.elasticityPrior.season];
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
+if (!Array.isArray(s.events) || s.events === d.events) s.events = Array.isArray(s.events) ? s.events.map((x) => ({ ...x })) : [];
 data.prefs.bookingEvaluator = s;
 return s;
 }
@@ -244,6 +245,56 @@ llc.result = m.checkLongLet({ roomKey: llc.roomKey, from: llc.from, to: llc.to, 
 llc.busy = false; renderLongLetCheck();
 }
 
+// Yearly events (prefs.bookingEvaluator.events; see eventFactorsAt in bookingmodel.js): a list with each one's rule in words,
+// and the check of what your own stays say (filled in by fillEventChecks once the model has calibrated).
+const EV_ORD = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th', '-1': 'last' };
+const EV_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function eventRuleWords(ev) {
+if (ev.rule === 'once') return `once, ${ev.date || '?'}`;
+if (ev.rule === 'nth') return `every ${EV_ORD[ev.nth] || ev.nth} ${EV_WEEKDAYS[ev.weekday] || '?'} of ${MONTH_SHORT[ev.month - 1] || '?'}`;
+return `every ${ev.day} ${MONTH_SHORT[ev.month - 1] || '?'}`;
+}
+function eventsHtml(s, rooms) {
+const evs = s.events || [];
+const opts = (xs, sel) => xs.map(([v, l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(sel) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
+const pct = (v) => `${Number(v) >= 0 ? '+' : '−'}${Math.abs(Number(v) || 0)}%`;
+return `<h4 class="be-set-h" id="be-events-h">Yearly events</h4>
+<div class="settings-note" style="margin:0 0 4px;">Dates that lift the price, every year or once. A yearly event of 10 nights or fewer is already in your past prices, so its uplift is balanced by a small cut on the nights either side, keeping the period's average where your history has it. A longer yearly one is season, left to the season curve. A one-off is a plain uplift. A rate-review proposal that overlaps one of these is ignored: the calendar wins.</div>
+<div id="be-events">
+${evs.map((ev) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml(ev.name || 'Event')}</span><span>${escapeHtml(eventRuleWords(ev))}, ${escapeHtml(String(ev.nights))} night${Number(ev.nights) === 1 ? '' : 's'}, ${escapeHtml(pct(ev.upliftPct))}, ${escapeHtml(ev.roomKey ? ((rooms.find((r) => r.key === ev.roomKey) || {}).label || 'Room') : 'every room')}</span><span class="settings-note" style="margin:0;" data-be-ev-check="${escapeHtml(ev.id)}"></span><span class="del-x" data-be-ev-del="${escapeHtml(ev.id)}" title="Remove">&times;</span></div>`).join('')}
+</div>
+<div class="sync-row" style="align-items:center;">
+<input type="text" id="be-ev-name" class="settings-input" placeholder="Name" style="width:130px;">
+<select id="be-ev-room" class="settings-input"><option value="">Every room</option>${rooms.map((r) => `<option value="${escapeHtml(r.key)}">${escapeHtml(r.label)}</option>`).join('')}</select>
+<select id="be-ev-rule" class="settings-input">${opts([['fixed', 'Same date every year'], ['nth', 'Nth weekday of a month'], ['once', 'Once']], 'fixed')}</select>
+<span data-be-ev-for="nth" style="display:none;align-items:center;gap:4px;"><select id="be-ev-nth" class="settings-input">${opts([[1, '1st'], [2, '2nd'], [3, '3rd'], [4, '4th'], [-1, 'last']], 1)}</select><select id="be-ev-weekday" class="settings-input">${opts(EV_WEEKDAYS.map((w, i) => [i, w]), 0)}</select> of</span>
+<span data-be-ev-for="fixed" style="display:inline-flex;align-items:center;gap:4px;"><input type="number" id="be-ev-day" class="settings-input" value="1" min="1" max="31" step="1" style="width:56px;" title="Day of the month"></span>
+<span data-be-ev-for="fixed nth" style="display:inline-flex;align-items:center;gap:4px;"><select id="be-ev-month" class="settings-input">${opts(MONTH_SHORT.map((m, i) => [i + 1, m]), 1)}</select></span>
+<span data-be-ev-for="once" style="display:none;align-items:center;gap:4px;"><input type="date" id="be-ev-date" class="settings-input" title="First night"></span>
+<input type="number" id="be-ev-nights" class="settings-input" value="1" min="1" max="60" step="1" style="width:56px;" title="Nights it lifts the price">nights
+<input type="number" id="be-ev-uplift" class="settings-input" value="20" min="-90" max="500" step="1" style="width:60px;" title="Uplift on those nights">%
+<button class="sync-btn sm inline" type="button" id="be-ev-add">Add</button>
+</div>`;
+}
+// What your own stays say about each yearly event, beside the uplift set (eventHistoryCheck): flagged when 15 points or more apart.
+function fillEventChecks(ctx, p, mod) {
+const box = document.getElementById('be-events');
+if (!box) return;
+const checks = new Map(mod.eventHistoryCheck(ctx, p).map((c) => [c.eventId, c]));
+box.querySelectorAll('[data-be-ev-check]').forEach((el) => {
+const ev = (ctx.events || []).find((x) => x.id === el.dataset.beEvCheck);
+if (!ev) return;
+if (ev.rule === 'once') { el.textContent = 'one-off: only the uplift, nothing in your history to check'; return; }
+if (Number(ev.nights) > mod.EVENT_MAX_NIGHTS) { el.textContent = `longer than ${mod.EVENT_MAX_NIGHTS} nights: left to the season curve`; return; }
+const c = checks.get(ev.id);
+if (!c || c.impliedPct == null) { el.textContent = 'not enough of your stays yet'; return; }
+el.textContent = `your stays: ${c.impliedPct >= 0 ? '+' : '−'}${Math.abs(c.impliedPct)}% (${c.n} stay${c.n === 1 ? '' : 's'} vs ${c.nNeighbours} nearby)`;
+const far = Math.abs(c.impliedPct - Number(ev.upliftPct)) > 15;
+el.style.color = far ? 'var(--amber)' : '';
+el.title = far ? `Your stays imply ${c.impliedPct}% against the ${ev.upliftPct}% set here: 15 points or more apart` : '';
+});
+}
+
 // Which listings are yours: checkboxes, with "auto" (ownListingIds null) shown as the model's own guess, ticked as it would be.
 async function renderOwnListings() {
 const el = document.getElementById('be-own-listings');
@@ -276,9 +327,11 @@ async function renderEstimatedRates() {
 const el = document.getElementById('be-est-rates');
 if (!el) return;
 try {
-const { buildContext, calibrate } = await import('./bookingmodel.js');
+const mod = await import('./bookingmodel.js');
+const { buildContext, calibrate } = mod;
 const ctx = buildContext();
 const p = calibrate(ctx);
+try { fillEventChecks(ctx, p, mod); } catch (err) { console.error('Event check failed:', err); }
 const money = (v) => `£${Math.round(v)}`;
 const rows = ctx.rooms.map((room, i) => {
 const pr = p.prices[i];
@@ -336,6 +389,7 @@ ${(s.unavailable || []).map((u) => `<div class="be-set-row"><span class="be-set-
 <input type="date" id="be-unavail-to" class="settings-input" title="Last night not offered">
 <button class="sync-btn sm inline" type="button" id="be-unavail-add">Add</button>
 </div>
+${eventsHtml(s, rooms)}
 <h4 class="be-set-h">The request itself</h4>
 ${row('Direct booking income counts', `×${numBox('directWeight', s.directWeight, { step: 0.05, width: 56 })}`)}
 ${row('Guest with no reviews', `×${numBox('guestNoReviews', s.guestNoReviews, { step: 0.05, width: 56 })}`)}
@@ -406,6 +460,7 @@ queueSave(); renderOwnListings();
 })();
 return;
 }
+if (e.target.id === 'be-ev-rule') { el.querySelectorAll('[data-be-ev-for]').forEach((x) => { x.style.display = x.dataset.beEvFor.split(' ').includes(e.target.value) ? 'inline-flex' : 'none'; }); return; }
 if (e.target.id === 'll-guest') { llGuest = e.target.value; llOff = new Set(); llMsg = ''; renderLongLet(); return; }
 if (e.target.dataset.llRow) { if (e.target.checked) llOff.delete(e.target.dataset.llRow); else llOff.add(e.target.dataset.llRow); renderLongLet(); return; }
 const gpIn = e.target.closest('[data-gp-key]');
@@ -550,9 +605,29 @@ if (!roomKey || !from || !to || to < from) return;
 settings().unavailable.push({ id: uid(), roomKey, from, to });
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
+const evDel = e.target.closest('[data-be-ev-del]');
+if (evDel) {
+const s = settings();
+s.events = s.events.filter((x) => x.id !== evDel.dataset.beEvDel);
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+if (e.target.closest('#be-ev-add')) {
+const val = (id) => document.getElementById(id).value;
+const rule = val('be-ev-rule');
+const ev = { id: uid(), name: val('be-ev-name').trim() || 'Event', roomKey: val('be-ev-room'), rule, nights: Math.min(60, Math.max(1, Math.round(Number(val('be-ev-nights'))) || 1)), upliftPct: Number(val('be-ev-uplift')) };
+if (!Number.isFinite(ev.upliftPct)) return;
+if (rule === 'once') { ev.date = val('be-ev-date'); if (!ev.date) return; }
+else {
+ev.month = Math.min(12, Math.max(1, Math.round(Number(val('be-ev-month'))) || 1));
+if (rule === 'nth') { ev.nth = Number(val('be-ev-nth')); ev.weekday = Number(val('be-ev-weekday')); }
+else ev.day = Math.min(31, Math.max(1, Math.round(Number(val('be-ev-day'))) || 1));
+}
+settings().events.push(ev);
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
 if (!e.target.closest('#be-reset')) return;
-const { rooms, unavailable, calibration, voidPlans } = settings();
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans };
+const { rooms, unavailable, calibration, voidPlans, events } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events };
 queueSave();
 renderBookingEvaluatorSettings();
 });

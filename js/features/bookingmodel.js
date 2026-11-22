@@ -132,7 +132,7 @@ const FIT_TAU_MIN = 0.25; // floor on the between-room spread of (fit - prior) u
 // The random seeds are built with v6's number, and without the settings v7 adds (guestPrice, elasticityPrior), so v6
 // and v7 draw the same randomness for the same inputs, and editing those settings does not reshuffle the draws.
 const SEED_VERSION = 6;
-const seedSettings = (s) => { const { guestPrice, elasticityPrior, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
+const seedSettings = (s) => { const { guestPrice, elasticityPrior, events, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
 // Rating stage (see listingStages) and the price calibration built on it. Every figure here is an assumption.
 const LIVE_BEFORE_FIRST_ASK = 7; // a listing went live this many days before its first request or booking
 const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after checkout (the review's own date is not stored)
@@ -147,8 +147,16 @@ const PRICE_MONTH_K = 5; // pseudo-samples holding each month's price index at 1
 // with the v906 settings (no deseason, half-life 180, no market prior) -> 0.212 with these; neighbouring settings scored
 // within 0.003, so the choice is not a lone spike. { deseason: false, iterate: 1, halfLife: 180, marketGamma: 0 } is v906.
 const PRICE_MARKET_GAMMA = 0.3; // power on London's seasonal (stays) shape used as the month price index's prior
-const PRICE_OPTS_V906 = { deseason: false, iterate: 1, halfLife: 180, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: 0 };
-const PRICE_OPTS = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA };
+// interp (v912): the month index is read as a curve through the month midpoints (seasonPrice) instead of a step at each
+// month boundary. Not backtested: the choice is the owner's (a step of up to ~20% overnight on the 1st is not how prices move).
+const PRICE_OPTS_V906 = { deseason: false, iterate: 1, halfLife: 180, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: 0, interp: false };
+const PRICE_OPTS = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA, interp: true };
+// Yearly events (Settings -> Booking evaluator -> Yearly events; see eventFactorsAt). A recurring event of at most
+// EVENT_MAX_NIGHTS nights is one the price history already contains (its stays sit inside the month index), so its uplift
+// is paired with an offset on the EVENT_OFFSET_DAYS either side that keeps the period's average where the history has it.
+// A longer recurring one is season, left to the curve. Both figures are this build's choices, unsourced.
+const EVENT_MAX_NIGHTS = 10;
+const EVENT_OFFSET_DAYS = 14;
 const STAGE_FIT_MIN = 4; // samples needed each side of a stage change before the listing's own before/after is read
 const STAGE_FIT_WINDOW = 180; // days either side of the change that are compared (limits, but does not remove, the seasonal mix)
 const STAGE_FIT_K = 8; // pseudo-samples holding a stage's price multiplier at its prior
@@ -489,7 +497,7 @@ const feedListingIds = (data.airbnbListings || []).filter((l) => l.icsUrl).map((
 // attempts are kept: as in basketReference, a newer failure for a hotel and date hides an older success.
 const hotelPrices = (data.hotelPrices || []).filter((r) => r && r.hotel && r.checkin && r.sampledAt).map((r) => ({ hotel: r.hotel, basket: r.basket, checkin: r.checkin, sampledAt: r.sampledAt, price: r.price == null ? null : Number(r.price), ok: !!r.ok }));
 const priceLedger = (data.priceLedger || []).filter((r) => r && r.roomKey && r.date).map((r) => ({ roomKey: r.roomKey, date: r.date, price: r.price, minStay: r.minStay, override: r.override, history: (r.history || []).map((h) => ({ at: h.at, price: h.price, minStay: h.minStay, override: h.override, source: h.source })) }));
-return { today, s, priceRefSettings, firstClean, rooms, stays, requests, proposals, listingLabels, earnings, earnedStayIds, scale, autoDemand: auto, blocks, feedListingIds, ownListings, hotelPrices, priceLedger };
+return { today, s, priceRefSettings, firstClean, rooms, stays, requests, proposals, events: Array.isArray(s.events) ? s.events : [], listingLabels, earnings, earnedStayIds, scale, autoDemand: auto, blocks, feedListingIds, ownListings, hotelPrices, priceLedger };
 }
 
 // ---- Calibration ----------------------------------------------------------------------------
@@ -712,7 +720,7 @@ source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' 
 
 // The calibration so far. availabilityOf and exposureGrid read the stay-length curve and the weekday mix from it,
 // and the lead-time fit below needs both of those, so it is filled in as each piece is worked out.
-const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples };
+const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples, priceInterp: !!po.interp };
 const avs = ctx.rooms.map((_, i) => availabilityOf(ctx, P, i));
 
 // Stay length: requests (an enquiry at its weight), plus stays that didn't come from one.
@@ -953,20 +961,176 @@ for (let i = 1; i <= LOS_MAX; i++) if (u <= params.losCdf[i]) return i;
 return LOS_MAX;
 }
 
+// The room's season-neutral price put through its month index. With `interp` (PRICE_OPTS.interp) each month's value sits at
+// the month's midpoint and a night takes the log-linear blend of the two nearest midpoints (December wraps to January); a
+// month with no value takes the room's base. Without it, the month's own value as before. seasonAt also says which two months.
+const MONTH_ABBR = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function seasonAt(p, n, interp) {
+const m = monthOf(n);
+if (!interp) return { value: p.byMonth[m] ?? p.base, m0: m, m1: m, t: 0 };
+const y = new Date(n * DAY_MS).getUTCFullYear();
+const mid = (yy, mm) => { const a = Date.UTC(yy, mm, 1) / DAY_MS; return a + (Date.UTC(yy, mm + 1, 1) / DAY_MS - a - 1) / 2; };
+const here = mid(y, m);
+const before = n < here;
+const ma = before ? (m + 11) % 12 : m;
+const mb = before ? m : (m + 1) % 12;
+const a = before ? mid(y, m - 1) : here;
+const b = before ? here : mid(y, m + 1);
+const va = p.byMonth[ma] ?? p.base;
+const vb = p.byMonth[mb] ?? p.base;
+if (!(va > 0) || !(vb > 0)) return { value: p.byMonth[m] ?? p.base, m0: ma, m1: mb, t: 0, va, vb };
+const t = (n - a) / (b - a);
+return { value: Math.exp((1 - t) * Math.log(va) + t * Math.log(vb)), m0: ma, m1: mb, t, va, vb };
+}
+const seasonPrice = (p, n, interp) => seasonAt(p, n, interp).value;
+
+// ---- Yearly events (Settings -> Booking evaluator -> Yearly events) ---------------------------
+// prefs.bookingEvaluator.events: [{id, name, roomKey ('' = every room), rule 'fixed'|'nth'|'once', month 1-12, day 1-31,
+// weekday 0 (Sun)-6, nth 1-4 or -1 (last), date 'YYYY-MM-DD' (once), nights 1-60, upliftPct}].
+const eventsOf = (ctx) => (ctx && Array.isArray(ctx.events) ? ctx.events : ctx && ctx.s && Array.isArray(ctx.s.events) ? ctx.s.events : []);
+const eventNights = (ev) => Math.min(60, Math.max(1, Math.round(Number(ev.nights)) || 1));
+// A recurring event short enough to be "in the history" (its stays are in the month index): uplift plus an offset round it.
+const eventInHistory = (ev) => ev.rule !== 'once' && eventNights(ev) <= EVENT_MAX_NIGHTS;
+// Day-number ranges {start, end} (end exclusive = start + nights) of an event that touch fromDay..toDay (inclusive).
+function eventOccurrences(ev, fromDay, toDay) {
+const out = [];
+const nights = eventNights(ev);
+const push = (start) => { if (Number.isFinite(start) && start + nights > fromDay && start <= toDay) out.push({ start, end: start + nights }); };
+if (ev.rule === 'once') { if (ev.date) push(dayNum(ev.date)); return out; }
+const m = Math.min(12, Math.max(1, Math.round(Number(ev.month)) || 1)) - 1;
+const y0 = new Date(fromDay * DAY_MS).getUTCFullYear() - 1;
+const y1 = new Date(toDay * DAY_MS).getUTCFullYear();
+for (let y = y0; y <= y1; y++) {
+if (ev.rule === 'nth') {
+const wd = Math.min(6, Math.max(0, Math.round(Number(ev.weekday)) || 0));
+const nth = Math.round(Number(ev.nth)) || 1;
+if (nth < 0) { const last = Date.UTC(y, m + 1, 0) / DAY_MS; push(last - ((dowOf(last) - wd + 7) % 7)); }
+else { const first = Date.UTC(y, m, 1) / DAY_MS; push(first + ((wd - dowOf(first) + 7) % 7) + (Math.min(4, nth) - 1) * 7); }
+} else {
+const dim = Date.UTC(y, m + 1, 0) / DAY_MS - Date.UTC(y, m, 1) / DAY_MS + 1;
+push(Date.UTC(y, m, Math.min(dim, Math.max(1, Math.round(Number(ev.day)) || 1))) / DAY_MS);
+}
+}
+return out;
+}
+const NO_FACTORS = Object.freeze([]);
+// Per-context memo (rebuilt if the events array changes): the factor lists by room and year, and whether a proposal is overridden.
+function eventCache(ctx) {
+const evs = eventsOf(ctx);
+if (!ctx._eventCache || ctx._eventCache.evs !== evs) ctx._eventCache = { evs, years: new Map(), props: new Map() };
+return ctx._eventCache;
+}
+// The events that price a night in this room: the room's own and the every-room ones, skipping a long recurring one
+// (season, not an event).
+function roomEvents(ctx, ri) {
+const key = ((ctx.rooms || [])[ri] || {}).key;
+return eventsOf(ctx).filter((ev) => ev && (!ev.roomKey || ev.roomKey === key) && Number.isFinite(Number(ev.upliftPct)) && (ev.rule === 'once' || eventInHistory(ev)));
+}
+// The multipliers a calendar event puts on a night: [{key: 'event'|'eventOffset', label, factor, reason, event}].
+// An event's own nights take x(1 + u). A recurring one (in the history) also takes the offset
+//   x(1 - u k / (N - k)) on the other nights of its window (EVENT_OFFSET_DAYS either side; k event nights, N window nights),
+// which leaves the window's mean factor at exactly 1 (clamped at x0.1 for a very large u). A one-off has no offset: it was
+// never in the average. Overlapping windows multiply. basePrice and nightBreakdown both read this.
+function eventFactorsAt(ctx, roomIdx, n) {
+const evs = eventsOf(ctx);
+if (!evs.length) return NO_FACTORS;
+const cache = eventCache(ctx);
+const y = new Date(n * DAY_MS).getUTCFullYear();
+const ck = `${roomIdx}|${y}`;
+let map = cache.years.get(ck);
+if (!map) {
+map = new Map();
+const add = (d, f) => { const l = map.get(d); if (l) l.push(f); else map.set(d, [f]); };
+const from = Date.UTC(y, 0, 1) / DAY_MS - EVENT_OFFSET_DAYS;
+const to = Date.UTC(y, 11, 31) / DAY_MS + EVENT_OFFSET_DAYS;
+roomEvents(ctx, roomIdx).forEach((ev) => {
+const u = Number(ev.upliftPct) / 100;
+const name = ev.name || 'Event';
+const pct = (x) => `${x >= 0 ? '+' : '−'}${Math.abs(Math.round(x * 10) / 10)}%`;
+eventOccurrences(ev, from, to).forEach((oc) => {
+for (let d = oc.start; d < oc.end; d++) add(d, { key: 'event', label: 'Event', factor: 1 + u, reason: `${name}: ${pct(u * 100)}`, event: ev });
+if (ev.rule === 'once') return;
+const k = oc.end - oc.start;
+const N = k + 2 * EVENT_OFFSET_DAYS;
+const f = Math.max(0.1, 1 - u * k / (N - k));
+for (let d = oc.start - EVENT_OFFSET_DAYS; d < oc.end + EVENT_OFFSET_DAYS; d++) {
+if (d >= oc.start && d < oc.end) continue;
+add(d, { key: 'eventOffset', label: 'Event offset', factor: f, reason: `${name} nearby: ${pct((f - 1) * 100)} so the period’s average holds`, event: ev });
+}
+});
+});
+cache.years.set(ck, map);
+}
+return map.get(n) || NO_FACTORS;
+}
+// An actioned rate-review proposal that touches a night of a calendar event's occurrence (same room) is ignored in the
+// price: the calendar wins.
+function proposalOverridden(ctx, roomIdx, pr) {
+if (!eventsOf(ctx).length) return false;
+const cache = eventCache(ctx);
+let byPr = cache.props.get(roomIdx);
+if (!byPr) { byPr = new Map(); cache.props.set(roomIdx, byPr); }
+if (byPr.has(pr)) return byPr.get(pr);
+const a = dayNum(pr.startDate);
+const b = dayNum(pr.endDate || pr.startDate);
+const hit = roomEvents(ctx, roomIdx).some((ev) => eventOccurrences(ev, a, b).length > 0);
+byPr.set(pr, hit);
+return hit;
+}
+
 // The payout a night would earn, before discounts: your setting, else what the room has
 // earned in that month of the year, else overall; plus any event uplift on the date.
 function basePrice(ctx, params, roomIdx, n) {
 const p = params.prices[roomIdx];
-const monthly = p.weekday ?? p.byMonth[monthOf(n)] ?? p.base;
+const monthly = p.weekday ?? seasonPrice(p, n, params.priceInterp);
 let v = weekendNight(n) ? (p.weekend ?? monthly * p.uplift) : monthly;
 const room = ctx.rooms[roomIdx];
 const day = dayStr(n);
+eventFactorsAt(ctx, roomIdx, n).forEach((f) => { v *= f.factor; });
 ctx.proposals.forEach((pr) => {
-if (!room.listingIds.includes(pr.listingId) || !pr.startDate || day < pr.startDate || day > (pr.endDate || pr.startDate)) return;
+if (!room.listingIds.includes(pr.listingId) || !pr.startDate || day < pr.startDate || day > (pr.endDate || pr.startDate) || proposalOverridden(ctx, roomIdx, pr)) return;
 if (Number.isFinite(Number(pr.upliftPct)) && pr.upliftPct != null) v *= 1 + Number(pr.upliftPct) / 100;
 else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v += Number(pr.upliftAmount);
 });
 return v;
+}
+// What your own stays say about each recurring event in the history (<= EVENT_MAX_NIGHTS nights), for Settings to set
+// beside the uplift typed in. Event stays: calibration samples (params.priceSamples) with at least half their nights inside
+// a past occurrence; neighbours: samples starting inside the +/- EVENT_OFFSET_DAYS window without touching the event.
+// Each is put against the season curve at its start (its price on today's footing / seasonPrice); the implied uplift is the
+// ratio of the two medians less 1. null when there are fewer than 2 event stays or 3 neighbours. => [{eventId, n, nNeighbours, impliedPct}]
+function eventHistoryCheck(ctx, params) {
+const T = dayNum(ctx.today);
+const out = [];
+eventsOf(ctx).forEach((ev) => {
+if (!ev || !ev.id || !eventInHistory(ev)) return;
+const key = (r) => (ctx.rooms[r] || {}).key;
+const evRatios = []; const nbRatios = [];
+(params.priceSamples || []).forEach((sm, ri) => {
+if (ev.roomKey && ev.roomKey !== key(ri)) return;
+const p = params.prices[ri];
+if (!p) return;
+const occs = eventOccurrences(ev, T - 760, T).filter((o) => o.start < T);
+sm.forEach((x) => {
+const nn = Math.max(1, x.nights || 1);
+const end = x.start + nn;
+let inEvent = false; let touches = false; let near = false;
+occs.forEach((o) => {
+const ov = Math.min(end, o.end) - Math.max(x.start, o.start);
+if (ov > 0) touches = true;
+if (ov >= 0.5 * nn) inEvent = true;
+if (x.start >= o.start - EVENT_OFFSET_DAYS && x.start < o.end + EVENT_OFFSET_DAYS) near = true;
+});
+const sp = seasonPrice(p, x.start, params.priceInterp);
+if (!(x.cur > 0) || !(sp > 0)) return;
+if (inEvent) evRatios.push(x.cur / sp);
+else if (near && !touches) nbRatios.push(x.cur / sp);
+});
+});
+const n = evRatios.length; const nb = nbRatios.length;
+out.push({ eventId: ev.id, n, nNeighbours: nb, impliedPct: n >= 2 && nb >= 3 ? Math.round((median(evRatios) / median(nbRatios) - 1) * 1000) / 10 : null });
+});
+return out;
 }
 // The discount steps a room's simulated bookings take: those of the listing it is let through today.
 function roomDiscount(ctx, params, ri) { return discountsOf(ctx.s, 'airbnb', (params.roomListing || [])[ri] || null); }
@@ -2725,9 +2889,68 @@ try {
 const results = selfTestAllOn();
 Object.assign(PRICE_OPTS, savedPrice);
 results.push(...selfTestPriceSeason());
+results.push(...selfTestEvents());
 results.push({ name: 'v9 live defaults: pooling (and its poolW weight) and simulated cancellations off, every other switch on', ok: !V9_DEFAULTS.pool && !V9_DEFAULTS.poolW && !V9_DEFAULTS.fix6 && V9_DEFAULTS.fix1 && V9_DEFAULTS.fix2 && V9_DEFAULTS.fix3 && V9_DEFAULTS.fix4 && V9_DEFAULTS.market, detail: JSON.stringify(V9_DEFAULTS) });
 return results;
 } finally { Object.assign(V9_FLAGS, saved); Object.assign(PRICE_OPTS, savedPrice); }
+}
+// Yearly events and the interpolated season curve (v912). A flat price of 100 on a hand-built context, so every figure is
+// the event factor itself; the nightBreakdown case runs on a calibrated test context.
+function selfTestEvents() {
+const out = [];
+const check = (name, ok, detail) => out.push({ name, ok: !!ok, detail });
+const d = (s) => dayNum(s);
+const occ = (ev, a, b) => eventOccurrences(ev, d(a), d(b));
+const base = { id: 'e', name: 'Test', roomKey: '', nights: 1, upliftPct: 30 };
+const nth1 = occ({ ...base, rule: 'nth', month: 10, weekday: 0, nth: 1 }, '2026-01-01', '2026-12-31');
+check('Event rule: 1st Sunday of October 2026 is the 4th', nth1.length === 1 && nth1[0].start === d('2026-10-04') && nth1[0].end === d('2026-10-05'), nth1.map((o) => dayStr(o.start)).join(','));
+const last = occ({ ...base, rule: 'nth', month: 11, weekday: 5, nth: -1 }, '2026-01-01', '2026-12-31');
+check('Event rule: last Friday of November 2026 is the 27th', last.length === 1 && last[0].start === d('2026-11-27'), last.map((o) => dayStr(o.start)).join(','));
+const fixed = occ({ ...base, rule: 'fixed', month: 12, day: 25, nights: 3 }, '2026-12-26', '2026-12-27');
+check('Event rule: 25 Dec for 3 nights covers 26-27 Dec, one occurrence', fixed.length === 1 && fixed[0].start === d('2026-12-25') && fixed[0].end === d('2026-12-28'), fixed.map((o) => `${dayStr(o.start)}>${dayStr(o.end)}`).join(','));
+const wrap = occ({ ...base, rule: 'fixed', month: 12, day: 30, nights: 5 }, '2027-01-02', '2027-01-03');
+check('Event rule: an occurrence from 30 Dec runs into January and is found from the new year', wrap.length === 1 && wrap[0].start === d('2026-12-30') && wrap[0].end === d('2027-01-04'), wrap.map((o) => dayStr(o.start)).join(','));
+const once = occ({ ...base, rule: 'once', date: '2026-06-11', nights: 3 }, '2026-01-01', '2027-12-31');
+check('Event rule: a one-off gives just its date', once.length === 1 && once[0].start === d('2026-06-11') && once[0].end === d('2026-06-14'), once.map((o) => dayStr(o.start)).join(','));
+// A flat room at 100 (set price): basePrice is then 100 x the event factors.
+const mk = (events, proposals = []) => ({ ctx: { today: '2026-05-01', s: {}, events, rooms: [{ key: 'A', listingIds: ['LA'] }], proposals }, params: { prices: [{ weekday: 100, weekend: 100, base: 100, uplift: 1, byMonth: new Array(12).fill(100) }], priceInterp: true } });
+const price = (k, day) => basePrice(k.ctx, k.params, 0, d(day));
+const rec = mk([{ ...base, rule: 'fixed', month: 6, day: 10, nights: 4, upliftPct: 30 }]);
+const s0 = d('2026-06-10');
+let sum = 0; let N = 0;
+for (let n = s0 - EVENT_OFFSET_DAYS; n < s0 + 4 + EVENT_OFFSET_DAYS; n++) { sum += basePrice(rec.ctx, rec.params, 0, n); N++; }
+check('Recurring event: uplift on its nights, and the window averages exactly 100 (mean-preserving offset)', Math.abs(price(rec, '2026-06-11') - 130) < 1e-9 && price(rec, '2026-06-05') < 100 && Math.abs(sum / N - 100) < 1e-9 && N === 4 + 2 * EVENT_OFFSET_DAYS && price(rec, '2026-07-20') === 100, `event night ${price(rec, '2026-06-11').toFixed(2)}, nearby ${price(rec, '2026-06-05').toFixed(2)}, window mean ${(sum / N).toFixed(6)}`);
+const one = mk([{ ...base, rule: 'once', date: '2026-06-10', nights: 4, upliftPct: 30 }]);
+check('One-off event: uplift on its nights only, no offset', Math.abs(price(one, '2026-06-11') - 130) < 1e-9 && price(one, '2026-06-05') === 100 && price(one, '2026-06-14') === 100, `${price(one, '2026-06-11').toFixed(2)} / ${price(one, '2026-06-05')}`);
+const long = mk([{ ...base, rule: 'fixed', month: 6, day: 10, nights: EVENT_MAX_NIGHTS + 1, upliftPct: 30 }]);
+check('Recurring event longer than the cap: no uplift, no offset', price(long, '2026-06-12') === 100 && price(long, '2026-06-05') === 100, `${price(long, '2026-06-12')}`);
+const room = mk([{ ...base, rule: 'once', date: '2026-06-10', nights: 4, upliftPct: 30, roomKey: 'B' }]);
+check('Event for another room does not touch this one', price(room, '2026-06-11') === 100, `${price(room, '2026-06-11')}`);
+const pr = mk([{ ...base, rule: 'once', date: '2026-06-10', nights: 4, upliftPct: 30 }], [{ listingId: 'LA', startDate: '2026-06-11', endDate: '2026-06-11', upliftPct: 50 }, { listingId: 'LA', startDate: '2026-09-01', endDate: '2026-09-01', upliftPct: 50 }]);
+check('Proposal overlapping a calendar event is ignored; one elsewhere still applies', Math.abs(price(pr, '2026-06-11') - 130) < 1e-9 && Math.abs(price(pr, '2026-09-01') - 150) < 1e-9, `${price(pr, '2026-06-11').toFixed(2)} / ${price(pr, '2026-09-01').toFixed(2)}`);
+// nightBreakdown on a calibrated context, with the season curve on and an event.
+const c = testContext({ occupancy: 0.5 });
+const p0 = c.params.prices[0];
+Object.assign(p0, { weekday: null, weekend: null, base: 100, uplift: 1.1, byMonth: [80, 80, 85, 90, 95, 100, 110, 120, 115, 110, 102, 90] });
+c.params.priceInterp = true;
+c.events = [{ ...base, id: 'bd', rule: 'fixed', month: 11, day: 20, nights: 2, upliftPct: 25 }];
+let worst = 0; let evSteps = 0; let offSteps = 0;
+for (let n = d('2026-11-01'); n < d('2026-12-31'); n++) {
+const b = nightBreakdown(c, c.params, 0, n);
+worst = Math.max(worst, Math.abs(b.listPrice - basePrice(c, c.params, 0, n)));
+evSteps += b.steps.filter((x) => x.key === 'event').length; offSteps += b.steps.filter((x) => x.key === 'eventOffset').length;
+}
+const bk = nightBreakdown(c, c.params, 0, d('2026-11-03'));
+check('nightBreakdown: list price equals basePrice with an event and the season curve; event and offset steps shown', worst < 1e-9 && evSteps === 2 && offSteps === 28 && /season curve/.test((bk.steps.find((x) => x.key === 'season') || {}).reason || ''), `worst gap ${worst.toExponential(2)}, ${evSteps} event and ${offSteps} offset steps; ${(bk.steps.find((x) => x.key === 'season') || {}).reason}`);
+// Interpolated season: continuous across month boundaries, the month's value at its midpoint, the step when off.
+const sp = { base: 100, byMonth: [80, 80, 85, 90, 95, 100, 110, 120, 115, 110, 102, 90] };
+let jump = 0;
+for (let n = d('2026-01-01'); n < d('2027-12-31'); n++) jump = Math.max(jump, Math.abs(Math.log(seasonPrice(sp, n + 1, true) / seasonPrice(sp, n, true))));
+const mid = seasonPrice(sp, d('2026-10-16'), true);
+check('Season curve: adjacent nights differ by under 1% (incl. 31 Oct to 1 Nov and Dec to Jan), the month value at mid-month, the old step when off', jump < 0.01 && Math.abs(mid - 110) < 1e-9 && seasonPrice(sp, d('2026-10-31'), false) === 110 && seasonPrice(sp, d('2026-11-01'), false) === 102, `largest nightly move ${(jump * 100).toFixed(2)}%, mid-October ${mid.toFixed(3)}`);
+const hole = seasonPrice({ base: 100, byMonth: [null, ...sp.byMonth.slice(1)] }, d('2026-01-16'), true);
+check('Season curve: a month with no value takes the base', Math.abs(hole - 100) < 1e-9, hole.toFixed(3));
+return out;
 }
 // Season-neutral base (v907). Six quiet-month stays at 80 a night booked a year ago, six October stays at 120 booked
 // last month, no discounts or stage effect. The v906 basis puts the base near the recent 120 and then applies the
@@ -3531,7 +3754,8 @@ rooms: ctx.rooms.map((room, i) => ({ key: room.key, ...params.prices[i].trace, d
 //   season   x the month's price index (p.byMonth / p.base; none when the month has no index or a price is set)
 //   weekday  Fri/Sat: x the room's weekend uplift, or your weekend price
 //   stage    x today's rating-stage multiplier (params.stagePrice), which p.base already carries
-//   event    each actioned rate-review proposal on the date, as basePrice applies it
+//   event    each calendar event on the date (eventFactorsAt: its uplift, 'eventOffset' for the offset round it), then each actioned
+//            rate-review proposal on the date (not one that overlaps a calendar event), as basePrice applies them
 // => listPrice, equal to basePrice(ctx, params, ri, n). Then the discounts a booking made on `bookedOn` (default today)
 // takes, as playArrivals applies them: short notice (lead = n - bookedOn), length (expected over the room's stay-length
 // curve, each length weighted by its nights, since a night is more often inside a long stay than its share of stays
@@ -3556,16 +3780,18 @@ v = add('season', 'Season', v, v, 'none: a set price is used as it is');
 v = add('weekday', 'Weekday', v, we ? (p.weekend ?? v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
 v = add('stage', 'Rating stage', v, v, 'none: a set price is used as it is', { stage });
 } else {
-const ix = p.byMonth[m] != null && p.base > 0 ? p.byMonth[m] / p.base : null;
+const sa = params.priceInterp ? seasonAt(p, n, true) : null;
+const ix = sa ? (p.base > 0 ? sa.value / p.base : null) : (p.byMonth[m] != null && p.base > 0 ? p.byMonth[m] / p.base : null);
 v = add('base', 'Base', 0, p.base / stageMult, stage === 'rated' ? p.source : `${p.source}, taken back to a rated footing (÷ x${stageMult.toFixed(2)}, re-applied below)`, { samples: p.n, source: p.source });
-v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month' : `month index x${ix.toFixed(2)} (your stays in this month, held towards London's season; the base is season-neutral)`, { index: ix });
+v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month' : sa ? `season curve x${ix.toFixed(2)} (between ${MONTH_ABBR[sa.m0]} x${(sa.va / p.base).toFixed(2)} and ${MONTH_ABBR[sa.m1]} x${(sa.vb / p.base).toFixed(2)}; your stays by month, held towards London's season; the base is season-neutral)` : `month index x${ix.toFixed(2)} (your stays in this month, held towards London's season; the base is season-neutral)`, { index: ix });
 v = add('weekday', 'Weekday', v, we ? (p.weekend != null ? p.weekend / stageMult : v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
 const fit = (params.stageFit || {})[stage];
 v = add('stage', 'Rating stage', v, v * stageMult, stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${stageMult.toFixed(2)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`, { stage, mult: stageMult });
 }
 const day = dayStr(n);
+eventFactorsAt(ctx, ri, n).forEach((f) => { v = add(f.key, f.label, v, v * f.factor, f.reason, { event: f.event, factor: f.factor }); });
 ctx.proposals.forEach((pr) => {
-if (!room.listingIds.includes(pr.listingId) || !pr.startDate || day < pr.startDate || day > (pr.endDate || pr.startDate)) return;
+if (!room.listingIds.includes(pr.listingId) || !pr.startDate || day < pr.startDate || day > (pr.endDate || pr.startDate) || proposalOverridden(ctx, ri, pr)) return;
 if (Number.isFinite(Number(pr.upliftPct)) && pr.upliftPct != null) v = add('event', 'Event', v, v * (1 + Number(pr.upliftPct) / 100), `${pr.reason || 'event'}: +${Number(pr.upliftPct)}%`, { proposal: pr });
 else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v = add('event', 'Event', v, v + Number(pr.upliftAmount), `${pr.reason || 'event'}: +£${Number(pr.upliftAmount)}`, { proposal: pr });
 });
@@ -3586,4 +3812,4 @@ cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100),
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown };
+export { autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };

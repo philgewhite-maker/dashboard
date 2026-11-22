@@ -181,7 +181,8 @@ const bCur = model.nightBreakdown(ctxCur, params, ri, n, extraFor(ctxCur, v, dat
 const bProp = model.nightBreakdown(ctxProp, params, ri, n, extraFor(ctxProp, v, date));
 // Each step carries its status, so a proposed one is drawn and listed as proposed.
 bProp.steps.forEach((s) => {
-if (s.key === 'event') { const rec = proposalRecordOf(s.proposal); s.status = rec ? proposalStatus(rec) : 'applied'; s.rec = rec; }
+if (s.key === 'event' && s.proposal) { const rec = proposalRecordOf(s.proposal); s.status = rec ? proposalStatus(rec) : 'applied'; s.rec = rec; }
+else if (s.key === 'event' || s.key === 'eventOffset') s.status = 'applied'; // a calendar event (Settings, Yearly events): always in the price
 else if (s.key === 'void') s.status = /setting/.test(s.label) ? 'setting' : gi.plan ? 'applied' : gi.status || 'suggested';
 });
 const vc = voidOf(cur, v); const vp = voidOf(prop, v);
@@ -192,7 +193,7 @@ expected: vc.nightIncome[idx], prob: vc.nightProb[idx], expectedProp: vp.nightIn
 const events = recs.map((p) => ({ key: p.id, rec: p, reason: p.reason || 'Event', from: p.startDate < today ? today : p.startDate, to: (p.endDate || p.startDate) >= to ? dateStrAdd(to, -1) : (p.endDate || p.startDate), status: proposalStatus(p) }));
 // An applied proposal the model priced whose stored record can't be matched still gets a band, named from the step.
 nights.forEach((nt) => (nt.breakdown ? nt.breakdown.steps : []).forEach((s) => {
-if (s.key !== 'event' || s.rec) return;
+if (s.key !== 'event' || s.rec || !s.proposal) return;
 const key = `${s.proposal.startDate}|${s.proposal.reason}`;
 const e = events.find((x) => x.key === key);
 if (e) e.to = nt.date; else events.push({ key, rec: null, reason: s.proposal.reason || 'Event', from: nt.date, to: nt.date, status: 'applied' });
@@ -206,7 +207,7 @@ const STATUS_CLASS = (st) => (isApplied(st) ? '' : ' pb-prop');
 function stepGroups(b) {
 // Columns for the table: discounts summed into one (each stays named in the tooltip and notes), the rest one per step.
 const g = Object.fromEntries(STEP_COLUMNS.map(([k]) => [k, 0]));
-b.steps.forEach((s) => { const k = DISCOUNT_KEYS.includes(s.key) ? 'discounts' : s.key; g[k] += s.amount; });
+b.steps.forEach((s) => { const k = DISCOUNT_KEYS.includes(s.key) ? 'discounts' : s.key === 'eventOffset' ? 'event' : s.key; g[k] += s.amount; });
 return g;
 }
 // The drawn segments, in a fixed order: applied steps first, then the proposed part of the event and of the gap cut
@@ -216,7 +217,7 @@ const segs = [];
 const push = (key, amount, proposed) => { if (Math.abs(amount) >= 0.005) segs.push({ key, amount, proposed }); };
 const sum = (xs) => xs.reduce((a, s) => a + s.amount, 0);
 UP_KEYS.filter((k) => k !== 'event').forEach((k) => push(k, sum(b.steps.filter((s) => s.key === k)), false));
-const ev = b.steps.filter((s) => s.key === 'event');
+const ev = b.steps.filter((s) => s.key === 'event' || s.key === 'eventOffset');
 push('event', sum(ev.filter((s) => isApplied(s.status))), false);
 push('event', sum(ev.filter((s) => !isApplied(s.status))), true);
 push('discounts', sum(b.steps.filter((s) => DISCOUNT_KEYS.includes(s.key))), false);
