@@ -409,12 +409,28 @@ function sourceChart(calc, events) {
   return plotHtml(`<svg viewBox="0 0 ${W} ${h}" class="md-svg" role="img" aria-label="Requests per open night: London's shape, the model's rate and what arrived, with actual over model on the right-hand axis"${hovAttr(pts)}>${f.grid}${poly('market', f.Y, 'stroke="var(--sage)" stroke-width="2.25" stroke-dasharray="6 4"', 'src:market')}${poly('model', f.Y, 'stroke="var(--amber)" stroke-width="2"', 'src:model')}<g${lay('src:actual')}>${dots}</g>${poly('actual', f.Y, 'stroke="var(--slate)" stroke-width="2.5"', 'src:actual')}<g${lay('src:err')}>${poly('err', errY, 'stroke="var(--ink)" stroke-width="1.75"')}${rightAxis}</g>${eventLayer(events, f.X, h)}${crossLine(h)}</svg>`);
 }
 
+const RATIO_SCALES = [
+  { lim: Math.log2(1.25), ticks: [0.8, 0.9, 1, 1.1, 1.25] },
+  { lim: Math.log2(1.5), ticks: [2 / 3, 0.8, 1, 1.25, 1.5] },
+  { lim: 1, ticks: [0.5, 0.75, 1, 1.5, 2] },
+  { lim: 2, ticks: [0.25, 0.5, 1, 2, 4] },
+];
+const ratioLabel = (r) => ({ 0.25: '¼×', 0.5: '½×', 0.75: '¾×' })[+r.toFixed(2)] || (Math.abs(r - 2 / 3) < 0.01 ? '⅔×' : `${+r.toFixed(2)}×`);
+function quantile(xs, q) {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.floor(q * s.length))];
+}
+
 function ratioChart(calc, list, events, label, id) {
   const h = 150;
   const x0 = calc.first; const x1 = calc.today + 1;
-  const lg = (v) => Math.log2(v);
-  const f = frame({ h, x0, x1, yMin: -2, yMax: 2, ticks: [-2, -1, 0, 1, 2], fmt: (v) => ['¼×', '½×', '1×', '2×', '4×'][v + 2] });
-  const dots = list.map((p) => `<circle cx="${f.X(p.t).toFixed(1)}" cy="${f.Y(lg(p.r)).toFixed(1)}" r="3" fill="var(--slate)" opacity="0.45"/>`).join('');
+  // The scale fits the data: the smallest band on the ladder holding 95% of the points, so a price that sits
+  // within a few percent of the model isn't drawn against a ¼×-4× scale. Points beyond it sit on the edge, hollow.
+  const span = RATIO_SCALES.find((sc) => sc.lim >= quantile(list.map((p) => Math.abs(Math.log2(p.r))), 0.95) * 1.1) || RATIO_SCALES[RATIO_SCALES.length - 1];
+  const lg = (v) => Math.max(-span.lim, Math.min(span.lim, Math.log2(v)));
+  const f = frame({ h, x0, x1, yMin: -span.lim, yMax: span.lim, ticks: span.ticks.map((t) => Math.log2(t)), fmt: (v) => ratioLabel(2 ** v) });
+  const dots = list.map((p) => { const off = Math.abs(Math.log2(p.r)) > span.lim; return `<circle cx="${f.X(p.t).toFixed(1)}" cy="${f.Y(lg(p.r)).toFixed(1)}" r="3" ${off ? 'fill="none" stroke="var(--slate)" stroke-width="1.5" opacity="0.8"' : 'fill="var(--slate)" opacity="0.45"'}/>`; }).join('');
   const roll = [];
   for (let w = calc.first; w <= calc.today; w += 7) {
     const win = list.filter((p) => p.t > w + 7 - RECENT && p.t <= w + 7);
