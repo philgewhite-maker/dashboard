@@ -159,6 +159,7 @@ Settings, Booking evaluator, Yearly events (`prefs.bookingEvaluator.events`): `{
 - **Once**: a plain uplift on its nights, no offset (it was never in the average).
 - **Rate-review proposals** that overlap (same room, any night) an event that prices are ignored: the calendar wins. Others apply as before.
 - **History check** (`eventHistoryCheck`): for each yearly event of up to 10 nights, your stays inside a past occurrence (at least half their nights) against stays starting in the window beside it, each against the season curve, give an implied uplift shown next to the one set (null with fewer than 2 event stays or 3 neighbours; flagged when 15 points or more apart).
+- **Dates are shared (v913)** in `js/eventcalendar.js` (no DOM, no app state), so the direct booking site's event pages use the same rules: `eventDatesBetween(events, from, to)` gives `[{eventId, name, roomKey, first, checkout, nights, year, status}]`. Rules: `fixed`, `nth`, `easter` (`offset` days from Easter Sunday, computed), `once`. An event marked `announced` (fixtures, festivals) treats its rule as a rough guess: a year with any `dates` (announced first nights; several allowed, e.g. each home match) uses those instead, status `confirmed`; a year without uses the rule, status `estimated`. Pricing treats both the same; Settings flags the next estimated one in amber, and a page should show it as "dates to be confirmed".
 
 ## Known limitations
 

@@ -84,6 +84,7 @@
 // So with no basket v9 is NOT v8 (v8.x builds were; the selfTest compares v9's own no-basket run instead).
 import { data, DEFAULT_PREFS } from '../state.js';
 import { todayStr } from '../utils.js';
+import { eventOccurrences, eventNights, selfTestEventCalendar } from '../eventcalendar.js';
 import { roomBlocks } from '../icsparse.js';
 import { activeListingId } from '../roomowner.js';
 import { collectStays } from './lettingoccupancy.js';
@@ -985,34 +986,12 @@ return { value: Math.exp((1 - t) * Math.log(va) + t * Math.log(vb)), m0: ma, m1:
 const seasonPrice = (p, n, interp) => seasonAt(p, n, interp).value;
 
 // ---- Yearly events (Settings -> Booking evaluator -> Yearly events) ---------------------------
-// prefs.bookingEvaluator.events: [{id, name, roomKey ('' = every room), rule 'fixed'|'nth'|'once', month 1-12, day 1-31,
-// weekday 0 (Sun)-6, nth 1-4 or -1 (last), date 'YYYY-MM-DD' (once), nights 1-60, upliftPct}].
+// prefs.bookingEvaluator.events: the shape is documented in js/eventcalendar.js.
 const eventsOf = (ctx) => (ctx && Array.isArray(ctx.events) ? ctx.events : ctx && ctx.s && Array.isArray(ctx.s.events) ? ctx.s.events : []);
-const eventNights = (ev) => Math.min(60, Math.max(1, Math.round(Number(ev.nights)) || 1));
+// Dates come from the shared calendar (js/eventcalendar.js): fixed / nth weekday / Easter-relative / once, with announced
+// real dates replacing a rough rule year by year. An estimated occurrence prices the same as a confirmed one.
 // A recurring event short enough to be "in the history" (its stays are in the month index): uplift plus an offset round it.
 const eventInHistory = (ev) => ev.rule !== 'once' && eventNights(ev) <= EVENT_MAX_NIGHTS;
-// Day-number ranges {start, end} (end exclusive = start + nights) of an event that touch fromDay..toDay (inclusive).
-function eventOccurrences(ev, fromDay, toDay) {
-const out = [];
-const nights = eventNights(ev);
-const push = (start) => { if (Number.isFinite(start) && start + nights > fromDay && start <= toDay) out.push({ start, end: start + nights }); };
-if (ev.rule === 'once') { if (ev.date) push(dayNum(ev.date)); return out; }
-const m = Math.min(12, Math.max(1, Math.round(Number(ev.month)) || 1)) - 1;
-const y0 = new Date(fromDay * DAY_MS).getUTCFullYear() - 1;
-const y1 = new Date(toDay * DAY_MS).getUTCFullYear();
-for (let y = y0; y <= y1; y++) {
-if (ev.rule === 'nth') {
-const wd = Math.min(6, Math.max(0, Math.round(Number(ev.weekday)) || 0));
-const nth = Math.round(Number(ev.nth)) || 1;
-if (nth < 0) { const last = Date.UTC(y, m + 1, 0) / DAY_MS; push(last - ((dowOf(last) - wd + 7) % 7)); }
-else { const first = Date.UTC(y, m, 1) / DAY_MS; push(first + ((wd - dowOf(first) + 7) % 7) + (Math.min(4, nth) - 1) * 7); }
-} else {
-const dim = Date.UTC(y, m + 1, 0) / DAY_MS - Date.UTC(y, m, 1) / DAY_MS + 1;
-push(Date.UTC(y, m, Math.min(dim, Math.max(1, Math.round(Number(ev.day)) || 1))) / DAY_MS);
-}
-}
-return out;
-}
 const NO_FACTORS = Object.freeze([]);
 // Per-context memo (rebuilt if the events array changes): the factor lists by room and year, and whether a proposal is overridden.
 function eventCache(ctx) {
@@ -2890,6 +2869,7 @@ const results = selfTestAllOn();
 Object.assign(PRICE_OPTS, savedPrice);
 results.push(...selfTestPriceSeason());
 results.push(...selfTestEvents());
+{ const ec = selfTestEventCalendar(); results.push({ name: 'event calendar: date rules, Easter, announced dates', ok: ec.pass, detail: ec.fails.join('; ') }); }
 results.push({ name: 'v9 live defaults: pooling (and its poolW weight) and simulated cancellations off, every other switch on', ok: !V9_DEFAULTS.pool && !V9_DEFAULTS.poolW && !V9_DEFAULTS.fix6 && V9_DEFAULTS.fix1 && V9_DEFAULTS.fix2 && V9_DEFAULTS.fix3 && V9_DEFAULTS.fix4 && V9_DEFAULTS.market, detail: JSON.stringify(V9_DEFAULTS) });
 return results;
 } finally { Object.assign(V9_FLAGS, saved); Object.assign(PRICE_OPTS, savedPrice); }

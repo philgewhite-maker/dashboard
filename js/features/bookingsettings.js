@@ -8,6 +8,7 @@ import { escapeHtml, uid, todayStr, dateStrAdd, bindLogoFallbacks } from '../uti
 import { channelBadgeHtml } from '../providers.js';
 import { linkProviders } from '../migrations.js';
 import { nightRateRooms } from './letting.js';
+import { eventRuleWords, nextOccurrence, normaliseEvent } from '../eventcalendar.js';
 
 const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
@@ -32,6 +33,7 @@ if (!Array.isArray(s.elasticityPrior.season) || s.elasticityPrior.season.length 
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
 if (!Array.isArray(s.events) || s.events === d.events) s.events = Array.isArray(s.events) ? s.events.map((x) => ({ ...x })) : [];
+if (s.events.some((x) => !x || !Array.isArray(x.dates))) s.events = s.events.filter(Boolean).map(normaliseEvent); // once per event (pre-v913 ones have no dates)
 data.prefs.bookingEvaluator = s;
 return s;
 }
@@ -247,30 +249,38 @@ llc.busy = false; renderLongLetCheck();
 
 // Yearly events (prefs.bookingEvaluator.events; see eventFactorsAt in bookingmodel.js): a list with each one's rule in words,
 // and the check of what your own stays say (filled in by fillEventChecks once the model has calibrated).
-const EV_ORD = { 1: '1st', 2: '2nd', 3: '3rd', 4: '4th', '-1': 'last' };
 const EV_WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-function eventRuleWords(ev) {
-if (ev.rule === 'once') return `once, ${ev.date || '?'}`;
-if (ev.rule === 'nth') return `every ${EV_ORD[ev.nth] || ev.nth} ${EV_WEEKDAYS[ev.weekday] || '?'} of ${MONTH_SHORT[ev.month - 1] || '?'}`;
-return `every ${ev.day} ${MONTH_SHORT[ev.month - 1] || '?'}`;
+const evDate = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+// The next occurrence in words, and for an announced event its real dates so far, each removable, plus a box to add one.
+function eventDatesHtml(ev) {
+const nx = nextOccurrence(ev, todayStr());
+const day = (n) => new Date(n * 86400000).toISOString().slice(0, 10);
+const next = nx ? `next: ${nx.status === 'estimated' ? '~' : ''}${evDate(day(nx.start))}${nx.status === 'estimated' ? ' (estimated from the rule: add the real date when it is announced)' : ''}` : 'no future date';
+const nextHtml = `<span class="settings-note" style="margin:0;${nx && nx.status === 'estimated' ? 'color:var(--amber);' : ''}">${escapeHtml(next)}</span>`;
+if (!ev.announced) return nextHtml;
+const id = escapeHtml(ev.id);
+return `${nextHtml}<span class="be-ev-dates">${(ev.dates || []).map((d) => `<span class="heat-flag">${escapeHtml(evDate(d))} <span class="del-x" data-be-ev-date-del="${id}" data-date="${escapeHtml(d)}" title="Remove this date">&times;</span></span>`).join(' ')}
+<input type="date" class="settings-input" data-be-ev-date-in="${id}" title="An announced first night" style="width:140px;"><button class="sync-btn sm inline" type="button" data-be-ev-date-add="${id}">Add date</button></span>`;
 }
 function eventsHtml(s, rooms) {
 const evs = s.events || [];
 const opts = (xs, sel) => xs.map(([v, l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(sel) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
 const pct = (v) => `${Number(v) >= 0 ? '+' : '−'}${Math.abs(Number(v) || 0)}%`;
 return `<h4 class="be-set-h" id="be-events-h">Yearly events</h4>
-<div class="settings-note" style="margin:0 0 4px;">Dates that lift the price, every year or once. A yearly event of 10 nights or fewer is already in your past prices, so its uplift is balanced by a small cut on the nights either side, keeping the period's average where your history has it. A longer yearly one is season, left to the season curve. A one-off is a plain uplift. A rate-review proposal that overlaps one of these is ignored: the calendar wins.</div>
+<div class="settings-note" style="margin:0 0 4px;">Dates that lift the price, every year or once. The same dates feed the direct booking site's event pages. For a date announced each year (a fixture list, a festival), set the rough rule and tick "announced": the rule is the guess until you add that year's real date, which then replaces it. A yearly event of 10 nights or fewer is already in your past prices, so its uplift is balanced by a small cut on the nights either side, keeping the period's average where your history has it. A longer yearly one is season, left to the season curve. A one-off is a plain uplift. A rate-review proposal that overlaps one of these is ignored: the calendar wins.</div>
 <div id="be-events">
-${evs.map((ev) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml(ev.name || 'Event')}</span><span>${escapeHtml(eventRuleWords(ev))}, ${escapeHtml(String(ev.nights))} night${Number(ev.nights) === 1 ? '' : 's'}, ${escapeHtml(pct(ev.upliftPct))}, ${escapeHtml(ev.roomKey ? ((rooms.find((r) => r.key === ev.roomKey) || {}).label || 'Room') : 'every room')}</span><span class="settings-note" style="margin:0;" data-be-ev-check="${escapeHtml(ev.id)}"></span><span class="del-x" data-be-ev-del="${escapeHtml(ev.id)}" title="Remove">&times;</span></div>`).join('')}
+${evs.map((ev) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml(ev.name || 'Event')}</span><span>${escapeHtml(eventRuleWords(ev))}, ${escapeHtml(String(ev.nights))} night${Number(ev.nights) === 1 ? '' : 's'}, ${escapeHtml(pct(ev.upliftPct))}, ${escapeHtml(ev.roomKey ? ((rooms.find((r) => r.key === ev.roomKey) || {}).label || 'Room') : 'every room')}</span><span class="settings-note" style="margin:0;" data-be-ev-check="${escapeHtml(ev.id)}"></span>${eventDatesHtml(ev)}<span class="del-x" data-be-ev-del="${escapeHtml(ev.id)}" title="Remove">&times;</span></div>`).join('')}
 </div>
 <div class="sync-row" style="align-items:center;">
 <input type="text" id="be-ev-name" class="settings-input" placeholder="Name" style="width:130px;">
 <select id="be-ev-room" class="settings-input"><option value="">Every room</option>${rooms.map((r) => `<option value="${escapeHtml(r.key)}">${escapeHtml(r.label)}</option>`).join('')}</select>
-<select id="be-ev-rule" class="settings-input">${opts([['fixed', 'Same date every year'], ['nth', 'Nth weekday of a month'], ['once', 'Once']], 'fixed')}</select>
+<select id="be-ev-rule" class="settings-input">${opts([['fixed', 'Same date every year'], ['nth', 'Nth weekday of a month'], ['easter', 'From Easter'], ['once', 'Once']], 'fixed')}</select>
+<span data-be-ev-for="easter" style="display:none;align-items:center;gap:4px;"><select id="be-ev-offset" class="settings-input">${opts([[-3, 'Maundy Thursday'], [-2, 'Good Friday'], [-1, 'Easter Saturday'], [0, 'Easter Sunday'], [1, 'Easter Monday'], [-7, 'Palm Sunday'], [7, 'a week after Easter Sunday'], [49, 'Whit Sunday']], -2)}</select></span>
 <span data-be-ev-for="nth" style="display:none;align-items:center;gap:4px;"><select id="be-ev-nth" class="settings-input">${opts([[1, '1st'], [2, '2nd'], [3, '3rd'], [4, '4th'], [-1, 'last']], 1)}</select><select id="be-ev-weekday" class="settings-input">${opts(EV_WEEKDAYS.map((w, i) => [i, w]), 0)}</select> of</span>
 <span data-be-ev-for="fixed" style="display:inline-flex;align-items:center;gap:4px;"><input type="number" id="be-ev-day" class="settings-input" value="1" min="1" max="31" step="1" style="width:56px;" title="Day of the month"></span>
 <span data-be-ev-for="fixed nth" style="display:inline-flex;align-items:center;gap:4px;"><select id="be-ev-month" class="settings-input">${opts(MONTH_SHORT.map((m, i) => [i + 1, m]), 1)}</select></span>
 <span data-be-ev-for="once" style="display:none;align-items:center;gap:4px;"><input type="date" id="be-ev-date" class="settings-input" title="First night"></span>
+<label data-be-ev-for="fixed nth" style="display:inline-flex;align-items:center;gap:4px;" title="The real date is announced each year: the rule is only a rough guess until you add it"><input type="checkbox" id="be-ev-announced"> announced</label>
 <input type="number" id="be-ev-nights" class="settings-input" value="1" min="1" max="60" step="1" style="width:56px;" title="Nights it lifts the price">nights
 <input type="number" id="be-ev-uplift" class="settings-input" value="20" min="-90" max="500" step="1" style="width:60px;" title="Uplift on those nights">%
 <button class="sync-btn sm inline" type="button" id="be-ev-add">Add</button>
@@ -605,6 +615,21 @@ if (!roomKey || !from || !to || to < from) return;
 settings().unavailable.push({ id: uid(), roomKey, from, to });
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
+const evDateAdd = e.target.closest('[data-be-ev-date-add]');
+if (evDateAdd) {
+const ev = settings().events.find((x) => x.id === evDateAdd.dataset.beEvDateAdd);
+const inp = document.querySelector(`[data-be-ev-date-in="${CSS.escape(evDateAdd.dataset.beEvDateAdd)}"]`);
+if (!ev || !inp || !inp.value) return;
+ev.dates = [...new Set([...(ev.dates || []), inp.value])].sort();
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+const evDateDel = e.target.closest('[data-be-ev-date-del]');
+if (evDateDel) {
+const ev = settings().events.find((x) => x.id === evDateDel.dataset.beEvDateDel);
+if (!ev) return;
+ev.dates = (ev.dates || []).filter((d) => d !== evDateDel.dataset.date);
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
 const evDel = e.target.closest('[data-be-ev-del]');
 if (evDel) {
 const s = settings();
@@ -621,8 +646,10 @@ else {
 ev.month = Math.min(12, Math.max(1, Math.round(Number(val('be-ev-month'))) || 1));
 if (rule === 'nth') { ev.nth = Number(val('be-ev-nth')); ev.weekday = Number(val('be-ev-weekday')); }
 else ev.day = Math.min(31, Math.max(1, Math.round(Number(val('be-ev-day'))) || 1));
+ev.announced = document.getElementById('be-ev-announced').checked;
 }
-settings().events.push(ev);
+if (rule === 'easter') { delete ev.month; delete ev.day; ev.announced = false; ev.offset = Number(val('be-ev-offset')) || 0; }
+settings().events.push(normaliseEvent(ev));
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 if (!e.target.closest('#be-reset')) return;

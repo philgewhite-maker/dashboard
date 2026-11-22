@@ -304,7 +304,8 @@ unavailable: [],
 // [{id, roomKey, from, to, minNights|null, discountPct, madeOn}]: what you set on Airbnb for a stretch of nights (a minimum
 // stay and/or a price cut), so projections play those nights that way (js/features/bookingmodel.js, lettingoccupancy.js).
 voidPlans: [],
-// [{id, name, roomKey ('' = every room), rule 'fixed'|'nth'|'once', month 1-12, day 1-31, weekday 0 (Sun)-6, nth 1-4 or -1 (last),
+// [{id, name, roomKey ('' = every room), rule 'fixed'|'nth'|'easter'|'once', month 1-12, day 1-31, weekday 0 (Sun)-6, nth 1-4 or -1 (last), offset (easter),
+// announced bool, dates ['YYYY-MM-DD'] (announced real first nights, replacing the rule in their year),
 // date 'YYYY-MM-DD' (once), nights 1-60, upliftPct}]: the yearly events calendar that lifts a night's price (bookingmodel.js eventFactorsAt).
 events: [],
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):
