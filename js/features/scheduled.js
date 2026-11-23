@@ -15,7 +15,7 @@
 // client (js/sync/googleauth.js) issues a ~1 hour access token with no
 // refresh token, so Calendar, Mail, Contacts and Google Tasks physically
 // cannot run without a signed-in page.
-import { data, queueSave } from '../state.js';
+import { data, queueSave, flushSave } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
 import { track } from './activity.js';
@@ -264,8 +264,43 @@ return Number.isFinite(n) && n > 0 ? n : DEFAULT_INTERVAL_HOURS;
 const RETRY_GAP_MS = 5 * 60000;
 const retryAfter = {};
 
+// ---- One device at a time -------------------------------------------------
+// Every open device runs the same scheduled tasks, and two running one at once (both reading the same mail, both
+// posting the same payouts) only made merge conflicts. So before running, a device claims its due tasks:
+// it takes the server's latest copy, stamps {claimBy, claimAt} on each task still due, and pushes straight away.
+// The server takes one write at a time (a push against an old revision is refused and merged), and the merge rule
+// for scheduledRuns (js/sync/merge.js) keeps the claim that reached the server first, so the device that loses sees
+// the other's claim after its merge and leaves the task alone. Its panels still update: the results arrive with the
+// next pull and are redrawn like any other change from another device. A claim lapses after CLAIM_TTL_MS, so a
+// device closed mid-run holds nothing up for long. Without live sync configured, every device just runs.
+const CLAIM_TTL_MS = 15 * 60000;
+function deviceTag() {
+try {
+let t = localStorage.getItem('dash-device-tag');
+if (!t) { t = Math.random().toString(36).slice(2, 10); localStorage.setItem('dash-device-tag', t); }
+return t;
+} catch (e) { return 'this-device'; }
+}
+function claimedElsewhere(task) {
+const r = runs()[task.id];
+return !!(r && r.claimBy && r.claimBy !== deviceTag() && r.claimAt && Date.now() - new Date(r.claimAt).getTime() < CLAIM_TTL_MS);
+}
+async function claimDue(tasks) {
+let sync = null;
+try { sync = await import('../sync/autosync.js'); await sync.pull(); } catch (e) { sync = null; }
+const due = tasks.filter((t) => isDue(t));
+if (!due.length) return [];
+const me = deviceTag();
+const at = new Date().toISOString();
+due.forEach((t) => { runs()[t.id] = { ...(runs()[t.id] || {}), claimBy: me, claimAt: at }; });
+queueSave();
+try { await flushSave(); if (sync) await sync.push({ force: true }); } catch (e) { /* offline: run anyway, the merge still settles it */ }
+return due.filter((t) => (runs()[t.id] || {}).claimBy === me);
+}
+
 function isDue(task) {
 if (retryAfter[task.id] && Date.now() < retryAfter[task.id]) return false;
+if (claimedElsewhere(task)) return false;
 const last = runs()[task.id]?.at;
 if (!last) return true;
 return Date.now() - new Date(last).getTime() >= intervalHours() * 3600000;
@@ -312,7 +347,10 @@ running = true;
 let t = null;
 try {
 const signedIn = await canAttemptGoogleAction().catch(() => false);
-const due = SCHEDULED_TASKS.filter((task) => isEnabled(task) && isDue(task));
+// Only what this device can run is claimed: a Google task without a sign-in is left for a device that has one.
+const runnable = SCHEDULED_TASKS.filter((task) => isEnabled(task) && isDue(task) && !(task.needsGoogle && (!signedIn || navigator.onLine === false)));
+const mine = new Set((runnable.length ? await claimDue(runnable) : []).map((task) => task.id));
+const due = SCHEDULED_TASKS.filter((task) => mine.has(task.id));
 // Stay invisible when nothing is due (the common case on every app open);
 // otherwise one card names each task as it runs and what happened to it.
 if (due.length) {
@@ -326,7 +364,11 @@ const ran = [];
 const notSignedIn = [];
 let step = 0;
 for (const task of SCHEDULED_TASKS) {
-if (!isEnabled(task) || !isDue(task)) continue;
+if (!isEnabled(task)) continue;
+if (!mine.has(task.id)) {
+if (task.needsGoogle && !signedIn && isDue(task)) notSignedIn.push(task.label);
+continue;
+}
 if (task.needsGoogle && !signedIn) { notSignedIn.push(task.label); continue; }
 // Offline: skip without stamping, so it runs on the next open once back online.
 if (task.needsGoogle && navigator.onLine === false) { continue; }
@@ -352,7 +394,7 @@ continue;
 }
 await clickAndWait(btn);
 // The button's handler flags a network-caused failure; don't record that as a completed run.
-if (btn.dataset.netFail === '1') { retryAfter[task.id] = Date.now() + RETRY_GAP_MS; failures.push(`${task.label} (couldn't reach Google, will retry)`); continue; }
+if (btn.dataset.netFail === '1') { retryAfter[task.id] = Date.now() + RETRY_GAP_MS; runs()[task.id] = { ...runs()[task.id], claimBy: '', claimAt: '' }; failures.push(`${task.label} (couldn't reach Google, will retry)`); continue; }
 ran.push(task.label);
 runs()[task.id] = { at: new Date().toISOString(), trigger };
 }
@@ -420,7 +462,7 @@ el.innerHTML = `<table class="limits-table">
 const r = runs()[t.id];
 return `<tr>
 <td>${escapeHtml(t.label)}<div class="settings-note" style="margin:0;">${t.noteHtml || escapeHtml(t.note)}</div></td>
-<td>${escapeHtml(agoLabel(r?.at))}${r?.skipped ? ` <span class="settings-note" style="display:inline;margin:0;">(${escapeHtml(r.skipped)})</span>` : ''}</td>
+<td>${escapeHtml(agoLabel(r?.at))}${claimedElsewhere(t) ? ' <span class="settings-note" style="display:inline;margin:0;">(running on another device)</span>' : ''}${r?.skipped ? ` <span class="settings-note" style="display:inline;margin:0;">(${escapeHtml(r.skipped)})</span>` : ''}</td>
 <td>${t.needsGoogle ? 'Yes' : 'No'}</td>
 <td><input type="checkbox" data-scheduled-toggle="${t.id}" ${isEnabled(t) ? 'checked' : ''}></td>
 </tr>`;

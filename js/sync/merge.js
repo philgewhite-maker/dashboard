@@ -52,7 +52,17 @@ const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0);
 
 function resolveBenign(base, ours, theirs, path) {
 if (SCHEDULED_RUN.test(path) && isPlainObject(ours) && isPlainObject(theirs)) {
-return { value: String(ours.at || '') > String(theirs.at || '') ? ours : theirs };
+// The later completed run wins; the claim (js/features/scheduled.js, one device at a time) goes with whichever side
+// changed it, the server's first: the claim that reached the server first stands, so the device that loses this
+// merge sees it and leaves the task alone.
+const later = String(ours.at || '') > String(theirs.at || '') ? ours : theirs;
+const b = isPlainObject(base) ? base : {};
+const changedClaim = (x) => (x.claimBy || '') !== (b.claimBy || '') || (x.claimAt || '') !== (b.claimAt || '');
+const claim = changedClaim(theirs) ? theirs : changedClaim(ours) ? ours : later;
+const value = { ...later };
+delete value.claimBy; delete value.claimAt;
+if (claim.claimBy) { value.claimBy = claim.claimBy; value.claimAt = claim.claimAt; }
+return { value };
 }
 if (SPEND_COUNTER.test(path) && typeof ours === 'number' && typeof theirs === 'number') {
 return { value: Math.max(0, num(base) + (ours - num(base)) + (theirs - num(base))) };
