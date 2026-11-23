@@ -4381,6 +4381,8 @@ max-width:none;
 .letting-chart-legend{display:flex;flex-direction:column;gap:6px;margin-bottom:8px;}
 .letting-chart-legend-item{display:inline-flex;align-items:center;gap:5px;font-size:11px;color:var(--muted);}
 .letting-chart-legend-line{width:12px;height:0;border-top:1.75px solid var(--ink);opacity:.55;flex:none;}
+.letting-chart-legend-line.dashed{border-top-style:dashed;}
+.letting-tax-expected td{color:var(--muted);font-style:italic;}
 .letting-chart-group-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;padding:4px 0;border-top:1px solid var(--line);}
 .letting-chart-group-row:first-child{border-top:none;}
 .letting-chart-group-targets{display:flex;flex-wrap:wrap;gap:4px 12px;margin-left:auto;}

@@ -19,7 +19,7 @@ import { createViewGate } from '../viewstamp.js';
 import { escapeHtml, uid, logoBadgeHtml, bindLogoFallbacks } from '../utils.js';
 import { matchBrandLogo } from '../brandLogos.js';
 import { splitLedgerNote } from '../migrations.js';
-import { projectionForMonth, statusText } from './bookingprojection.js';
+import { projectionForMonth, statusText, latestProjection, showProjection } from './bookingprojection.js';
 import { assessmentFor, superhostChipHtml, superhostPanelHtml, bindSuperhost, ratingControlHtml } from './superhost.js';
 
 // Per-device view state, not data: which people's sections are folded away
@@ -633,13 +633,42 @@ bucket.total += Number(e.gross);
 bucket[e.platform === 'other' ? 'other' : 'airbnb'] += Number(e.gross);
 byYear.set(ty, bucket);
 });
+// Still to come, on the same gross basis: stays booked but not yet charged (dated at checkout, as accrueLettings
+// will date them), and the saved projection's expected income for the free nights of this owner's rooms (dated by
+// night). Shown as a second "expected" line per tax year, never mixed into the revenue so far.
+const ahead = new Map(); // ty -> { booked, projected }
+const aheadOf = (ty) => { let b = ahead.get(ty); if (!b) { b = { booked: 0, projected: 0 }; ahead.set(ty, b); } return b; };
+upcomingReservationsFor(key).forEach((r) => {
+const inc = Number(r.income);
+const ty = taxYearFor(r.checkout);
+if (inc > 0 && ty) aheadOf(ty).booked += inc;
+});
+const proj = showProjection() ? latestProjection() : null;
+if (proj) {
+const listingOfRoom = new Map((proj.rooms || []).map((rm) => [rm.key, (data.airbnbListings || []).find((l) => l.id === rm.listingId)]));
+(proj.voids || []).forEach((v) => {
+const listing = listingOfRoom.get(v.roomKey);
+if (!listing || ownerKeyFor(listing) !== key) return;
+for (let i = 0; i < v.nights; i++) {
+const inc = Number((v.nightIncome || [])[i]) || 0;
+const ty = taxYearFor(addDaysIso(v.from, i));
+if (inc > 0 && ty) aheadOf(ty).projected += inc;
+}
+});
+}
+ahead.forEach((_, ty) => { if (!byYear.has(ty)) byYear.set(ty, { total: 0, airbnb: 0, other: 0 }); });
+const r2 = (x) => Math.round(x * 100) / 100;
+const taxOn = (rev) => { const excess = Math.max(0, r2(rev - allowance)); const tax = r2(excess * (ratePct / 100)); return { excess, tax, net: r2(rev - tax) }; };
 return [...byYear.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([taxYear, bucket]) => {
-const revenue = Math.round(bucket.total * 100) / 100;
-const excess = Math.max(0, Math.round((revenue - allowance) * 100) / 100);
-const tax = Math.round(excess * (ratePct / 100) * 100) / 100;
+const revenue = r2(bucket.total);
+const { excess, tax, net } = taxOn(revenue);
+const a = ahead.get(taxYear);
+const booked = a ? r2(a.booked) : 0;
+const projected = a ? r2(a.projected) : 0;
+const expected = booked + projected > 0.004 ? { revenue: r2(revenue + booked + projected), ...taxOn(revenue + booked + projected) } : null;
 return {
-taxYear, revenue, allowance, excess, ratePct, tax, net: Math.round((revenue - tax) * 100) / 100,
-airbnb: Math.round(bucket.airbnb * 100) / 100, other: Math.round(bucket.other * 100) / 100,
+taxYear, revenue, allowance, excess, ratePct, tax, net,
+airbnb: r2(bucket.airbnb), other: r2(bucket.other), booked, projected, expected,
 };
 });
 }
@@ -654,14 +683,20 @@ const noSettings = !ratePct && !allowance;
 return `<div class="letting-tax" style="margin-top:8px;">
 <div class="settings-note" style="margin:0 0 4px;"><strong>By tax year</strong>${noSettings ? ' — no rate/allowance set for them yet in <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#letting-tax-settings">Settings</span> (showing revenue only).' : ` (${ratePct}% over ${escapeHtml(money(allowance))} allowance)`}</div>
 <table class="limits-table"><tbody>
-<tr><th>Tax year</th><th style="text-align:right;">Revenue</th><th style="text-align:right;">Excess</th><th style="text-align:right;">Tax due</th><th style="text-align:right;">Net</th></tr>
+<tr><th>Tax year</th><th style="text-align:right;" title="Earned so far. An Expected line adds stays booked but not yet charged and, with the projection shown, what the free nights are expected to earn">Revenue</th><th style="text-align:right;">Excess</th><th style="text-align:right;">Tax due</th><th style="text-align:right;">Net</th></tr>
 ${taxYears.map((t) => `<tr>
 <td>${escapeHtml(t.taxYear)}${t.airbnb > 0.004 && t.other > 0.004 ? `<div class="settings-note" style="margin:2px 0 0;font-size:10px;">Airbnb ${escapeHtml(money(t.airbnb))} &middot; Other ${escapeHtml(money(t.other))}</div>` : ''}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.revenue))}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.excess))}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.tax))}</td>
 <td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:600;">${escapeHtml(money(t.net))}</td>
-</tr>`).join('')}
+</tr>${t.expected ? `<tr class="letting-tax-expected">
+<td>Expected<div class="settings-note" style="margin:2px 0 0;font-size:10px;">${[t.booked > 0.004 ? `+${escapeHtml(money(t.booked))} booked` : '', t.projected > 0.004 ? `+${escapeHtml(money(t.projected))} projected` : ''].filter(Boolean).join(' &middot; ')}</div></td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.expected.revenue))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.expected.excess))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;">${escapeHtml(money(t.expected.tax))}</td>
+<td style="text-align:right;font-variant-numeric:tabular-nums;font-weight:600;">${escapeHtml(money(t.expected.net))}</td>
+</tr>` : ''}`).join('')}
 </tbody></table>
 </div>`;
 }
@@ -1678,7 +1713,7 @@ return `<div class="letting-chart-group-row">
 </div>`;
 }).join('')
 + '<span class="letting-chart-legend-item"><span class="occ-key-solid"></span>Airbnb</span><span class="letting-chart-legend-item"><span class="occ-key-striped"></span>Direct / other</span><span class="letting-chart-legend-item"><span class="occ-key-dots"></span>Projected</span>'
-+ `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span>`;
++ `<span class="letting-chart-legend-item">${avgSwatch}3-month avg</span><span class="letting-chart-legend-item"><span class="letting-chart-legend-line dashed" aria-hidden="true"></span>3-month avg with projection</span>`;
 el.querySelectorAll('[data-letting-chart-group]').forEach((cb) => {
 cb.addEventListener('change', () => {
 const key = cb.dataset.lettingChartGroup;
@@ -1891,6 +1926,15 @@ ctx.fillText(`+${money0(pj)}`, cx, yTop + h / 2);
 capped += pj;
 });
 }
+// The month's total above its bar: what has been earned or booked, plus the projected cap (marked ~) where there is one.
+const barTotal = monthTotals[i] + monthProjected[i];
+if (barTotal > 0.5) {
+const label = bw >= 34 ? money0(barTotal) : barTotal >= 1000 ? `£${(barTotal / 1000).toFixed(1)}k` : money0(barTotal);
+ctx.fillStyle = monthProjected[i] > 0.004 ? muted : ink;
+ctx.font = `${monthProjected[i] > 0.004 ? 'italic ' : ''}600 9px 'Inter', sans-serif`;
+ctx.textAlign = 'center'; ctx.textBaseline = 'bottom';
+ctx.fillText(`${monthProjected[i] > 0.004 ? '~' : ''}${label}`, cx, scaleY(barTotal) - 2);
+}
 if (i === lettingChartHoverIndex) {
 ctx.fillStyle = ink;
 ctx.globalAlpha = 0.05;
@@ -1929,6 +1973,21 @@ ctx.beginPath();
 ctx.arc(plot.x + (i + 0.5) * bw, scaleY(avg), 1.6, 0, Math.PI * 2);
 ctx.fill();
 });
+// The same trend with the projected caps counted in: dashed, drawn only where it differs from the solid one (from
+// the last month before a projection to the end), so it reads as the solid line's forecast continuation.
+const avgWith = months.map((ym, i) => { const w = months.slice(Math.max(0, i - 2), i + 1).map((_, k) => { const j = Math.max(0, i - 2) + k; return monthTotals[j] + monthProjected[j]; }); return w.reduce((s, v) => s + v, 0) / w.length; });
+const avgPlain = months.map((ym, i) => { const w = monthTotals.slice(Math.max(0, i - 2), i + 1); return w.reduce((s, v) => s + v, 0) / w.length; });
+const firstDiff = avgWith.findIndex((v, i) => Math.abs(v - avgPlain[i]) > 0.5);
+if (firstDiff >= 0) {
+ctx.globalAlpha = 0.55;
+ctx.setLineDash([4, 3]);
+ctx.beginPath();
+for (let i = Math.max(0, firstDiff - 1); i < n; i++) {
+const x = plot.x + (i + 0.5) * bw; const y = scaleY(avgWith[i]);
+if (i === Math.max(0, firstDiff - 1)) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+}
+ctx.stroke();
+}
 ctx.restore();
 
 // Target lines drawn over the bars, dashed, each labelled at its own
@@ -1992,7 +2051,9 @@ const avg = avgWindow.reduce((s, v) => s + v, 0) / avgWindow.length;
 // Month, total and the 3-month average folded onto one line -- each
 // used to get its own row ("Total: X" / "3-month avg: Y"), 2 rows of
 // height for numbers that read fine packed beside the month itself.
-const lines = [`${monthLabel(ym)} — ${money0(total)} · 3m avg ${money0(avg)}`];
+const avgWithWindow = monthTotals.map((v, j) => v + monthProjected[j]).slice(Math.max(0, lettingChartHoverIndex - 2), lettingChartHoverIndex + 1);
+const avgWith = avgWithWindow.reduce((s, v) => s + v, 0) / avgWithWindow.length;
+const lines = [`${monthLabel(ym)} — ${money0(total)} · 3m avg ${money0(avg)}${Math.abs(avgWith - avg) > 0.5 ? ` (${money0(avgWith)} with projection)` : ''}`];
 rows.forEach((r) => {
 lines.push(`${r.g.label}: ${money0(r.raw)}`);
 // Only when a group actually mixes both this month -- a group that's
