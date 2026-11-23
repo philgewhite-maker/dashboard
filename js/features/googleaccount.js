@@ -6,7 +6,7 @@
 // panel's state, which keeps this module the only thing that needs to know
 // about sign-in/out UI at all.
 import { getLocalSettings } from '../state.js';
-import { NotConfiguredError, isSignedIn, wasConnectedBefore, tryReconnectSilently, signIn, signOut } from '../sync/googleauth.js';
+import { NotConfiguredError, OfflineError, isSignedIn, wasConnectedBefore, tryReconnectSilently, signIn, signOut } from '../sync/googleauth.js';
 
 function initGoogleAccount() {
 const signedOutBox = document.getElementById('google-signed-out');
@@ -40,7 +40,7 @@ await signIn();
 statusEl.textContent = 'Signed in.';
 await refresh();
 } catch (err) {
-statusEl.textContent = err instanceof NotConfiguredError
+statusEl.textContent = err instanceof NotConfiguredError || err instanceof OfflineError
 ? err.message
 : `Sign-in failed: ${err.message || err}`;
 console.error('Google sign-in failed:', err);
@@ -62,7 +62,10 @@ refresh();
 
 // Opportunistic, silent, entirely best-effort — see googleauth.js for why
 // this must never surface an error or block the UI on failure.
-tryReconnectSilently().then((reconnected) => { if (reconnected) refresh(); });
+const reconnect = () => tryReconnectSilently().then((reconnected) => { if (reconnected) refresh(); });
+reconnect();
+// Signal back after a spell offline: reconnect quietly rather than waiting for the next app open.
+window.addEventListener('online', () => { if (!isSignedIn()) reconnect(); });
 }
 
 export { initGoogleAccount };

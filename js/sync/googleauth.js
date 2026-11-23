@@ -142,10 +142,26 @@ function freshCached() {
 return cachedToken && cachedToken.expiresAt > Date.now() + 30000 ? cachedToken.accessToken : null;
 }
 
+// No signal: never open Google's sign-in window (offline it just shows an error page over the app). A silent
+// refresh is also skipped on a weak connection (bars showing, nothing getting through), which navigator.onLine
+// can't see: a tiny probe to Google with a 3s cap decides. tryReconnectSilently runs again when the signal returns.
+class OfflineError extends Error {
+constructor() { super("You're offline, so Google can't be reached. Everything stored in the app still works; Google syncs resume when you're back online."); this.name = 'OfflineError'; }
+}
+const isOffline = () => typeof navigator !== 'undefined' && navigator.onLine === false;
+async function googleReachable() {
+if (isOffline()) return false;
+const c = new AbortController();
+const timer = setTimeout(() => c.abort(), 3000);
+try { await fetch('https://www.gstatic.com/generate_204', { mode: 'no-cors', cache: 'no-store', signal: c.signal }); return true; } catch (e) { return false; } finally { clearTimeout(timer); }
+}
+
 async function getAccessToken(interactive) {
 const hit = freshCached();
 if (hit) return hit;
+if (isOffline()) throw new OfflineError();
 if (!interactive) {
+if (!pendingSilent && !(await googleReachable())) throw new OfflineError();
 if (pendingSilent) return pendingSilent;
 // If an interactive request overwrote the shared callback meanwhile, this one times out:
 // hand back the token the popup produced instead of failing.
@@ -333,7 +349,7 @@ return hasScope(GMAIL_SEND_SCOPE);
 }
 
 export {
-NotConfiguredError,
+NotConfiguredError, OfflineError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
 googleFetch, onSignOut, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite, hasGmailSend,
 };
