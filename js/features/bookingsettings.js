@@ -32,6 +32,8 @@ if (!s.elasticityPrior || typeof s.elasticityPrior !== 'object' || s.elasticityP
 if (!Array.isArray(s.elasticityPrior.season) || s.elasticityPrior.season.length !== 12) s.elasticityPrior.season = [...d.elasticityPrior.season];
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
+if (!Array.isArray(s.voidDiscounts) || s.voidDiscounts === d.voidDiscounts) s.voidDiscounts = (Array.isArray(s.voidDiscounts) ? s.voidDiscounts : d.voidDiscounts || []).map((x) => ({ ...x }));
+if (!s.channelFees || typeof s.channelFees !== 'object' || s.channelFees === d.channelFees) s.channelFees = { ...(d.channelFees || {}), ...(s.channelFees && typeof s.channelFees === 'object' ? s.channelFees : {}) };
 if (!Array.isArray(s.setRates) || s.setRates === d.setRates) s.setRates = Array.isArray(s.setRates) ? s.setRates.map((x) => ({ ...x })) : [];
 if (!Array.isArray(s.events) || s.events === d.events) s.events = Array.isArray(s.events) ? s.events.map((x) => ({ ...x })) : [];
 if (s.events.some((x) => !x || !Array.isArray(x.dates))) s.events = s.events.filter(Boolean).map(normaliseEvent); // once per event (pre-v913 ones have no dates)
@@ -370,6 +372,13 @@ const { buildContext, calibrate } = mod;
 const ctx = buildContext();
 const p = calibrate(ctx);
 try { fillEventChecks(ctx, p, mod); } catch (err) { console.error('Event check failed:', err); }
+try {
+const el = document.getElementById('be-void-check');
+if (el) {
+const parts = ctx.rooms.map((r, i) => { const c = (p.prices[i] || {}).voidCheck; if (!c) return ''; return c.observedPct == null ? `${r.label}: ${c.fills} void fill${c.fills === 1 ? '' : 's'} so far, too few to check` : `${r.label}: your ${c.fills} void fills paid ${c.observedPct}% less than your ${c.others} other stays (the tiers assume ${c.assumedPct}%)`; }).filter(Boolean);
+el.textContent = parts.join('; ');
+}
+} catch (err) { console.error('Void check failed:', err); }
 const money = (v) => `£${Math.round(v)}`;
 const rows = ctx.rooms.map((room, i) => {
 const pr = p.prices[i];
@@ -442,7 +451,10 @@ ${row('Typical stay', `${numBox('stayMedian', s.stayMedian, { width: 50, placeho
 ${row('Hidden 1-night demand', `${numBox('oneNightDemandPct', s.oneNightDemandPct ?? 10, { width: 50 })}% extra requests, as 1-night stays, if the minimum stay is lowered to 1`, 'A minimum of 2+ nights means Airbnb never shows you 1-night requests, so your own history cannot say how many there are. A guess until you try it. Used when the booking model tests allowing 1-night stays.')}
 <h4 class="be-set-h">Discounts and price</h4>
 ${discountsHtml(s)}
-${row('Gap discount', `${numBox('gapDiscountPct', s.gapDiscountPct, { width: 50 })}% on gaps of ${numBox('gapMaxNights', s.gapMaxNights, { width: 46 })} nights or fewer`)}
+${row('Channel fees', `Airbnb ${numBox('channelFees.airbnb', (s.channelFees || {}).airbnb, { step: 0.1, width: 56 })}% Direct ${numBox('channelFees.direct', (s.channelFees || {}).direct, { step: 0.1, width: 56 })}%`, 'What each channel keeps of what the guest pays for the stay. Airbnb\'s host fee is 15.5% + 20% VAT = 18.6%. Used for prices you\'ve set, the extra-guest charge and the listed cleaning fee; past stays use what each one actually kept.')}
+<div class="be-set-row"><span class="be-set-label">Void-filling cuts</span><span class="settings-note" style="margin:0;">The cut you make on a void (free nights with a booking either side) as it gets close: a void of up to N nights, booked within D days of its first night (blank = any time), takes X% off. The deepest tier that fits applies. Your past void fills have it taken back out before the model learns your price. Not applied on nights whose rate you've set as an infill or short-notice rate.</span></div>
+<div id="be-void-tiers">${(s.voidDiscounts || []).map((x, i) => `<div class="be-set-row"><span class="be-set-label"></span><span class="be-set-inputs">up to ${numBox(`voidDiscounts.${i}.maxNights`, x.maxNights, { width: 46, min: 1 })} nights, within ${numBox(`voidDiscounts.${i}.withinDays`, x.withinDays, { width: 52, min: 0, placeholder: 'any' })} days: ${numBox(`voidDiscounts.${i}.pct`, x.pct, { width: 50 })}% off</span><span class="del-x" data-be-void-del="${i}" title="Remove">&times;</span></div>`).join('') || '<div class="settings-note" style="margin:0;">No tiers: the older single gap discount applies.</div>'}</div>
+<div class="sync-row" style="align-items:center;"><button class="sync-btn sm inline" type="button" id="be-void-add">Add a tier</button><span class="settings-note" style="margin:0;" id="be-void-check"></span></div>
 ${row('Price sensitivity (v6 level)', numBox('elasticity', -Math.abs(Number(s.elasticity) || 0), { step: 0.1, width: 56, min: -10 }), 'The older model\'s single figure, negative like the ones below (-1.5: 10% dearer, about 15% fewer bookings). The live model (v8) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
 ${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
 ${guestPriceHtml(s)}
@@ -535,7 +547,7 @@ const path = input.dataset.be;
 let value;
 if (input.type === 'checkbox') value = input.checked;
 else if (input.type === 'date') value = input.value;
-else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian|extraGuestFee/i.test(path) ? null : undefined;
+else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian|extraGuestFee|withinDays/i.test(path) ? null : undefined;
 else value = Number(input.value);
 if (value === undefined || (typeof value === 'number' && !Number.isFinite(value))) { renderBookingEvaluatorSettings(); return; }
 if (path === 'airbnbCleaningCost') {
@@ -668,6 +680,16 @@ if (!ev) return;
 ev.dates = (ev.dates || []).filter((d) => d !== evDateDel.dataset.date);
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
+const voidDel = e.target.closest('[data-be-void-del]');
+if (voidDel) {
+const s = settings();
+s.voidDiscounts = s.voidDiscounts.filter((_, i) => i !== Number(voidDel.dataset.beVoidDel));
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+if (e.target.closest('#be-void-add')) {
+settings().voidDiscounts.push({ maxNights: 3, withinDays: 14, pct: 30 });
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
 const rateDel = e.target.closest('[data-be-rate-del]');
 if (rateDel) {
 const s = settings();
@@ -705,8 +727,8 @@ settings().events.push(normaliseEvent(ev));
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 if (!e.target.closest('#be-reset')) return;
-const { rooms, unavailable, calibration, voidPlans, events, setRates } = settings();
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events, setRates };
+const { rooms, unavailable, calibration, voidPlans, events, setRates, voidDiscounts, channelFees } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events, setRates, voidDiscounts, channelFees };
 queueSave();
 renderBookingEvaluatorSettings();
 });

@@ -305,14 +305,43 @@ const topRatedOf = (s, disc) => (Number(disc.topRatedPct) || 0) / 100 * pctOf(s.
 // Nightly payout with the cleaning fee taken out, and the discounts undone, for one stay. `newListing` and `topRated`
 // are fractions (0.15 = 15%): the new-listing discount where the booking was made before the listing's third review,
 // and the expected top-rated-guest discount. Every discount is taken to combine by multiplying.
-function rawNightlyRate({ amount, cleaning, nights, leadDays, newListing = 0, topRated = 0 }, disc) {
+// `voidCut`: your own void-filling cut (voidCutFor) when the stay filled a short void close in, as a fraction.
+function rawNightlyRate({ amount, cleaning, nights, leadDays, newListing = 0, topRated = 0, voidCut = 0 }, disc) {
 const nightly = (Number(amount) - (Number(cleaning) || 0)) / nights;
 if (!(nightly > 0)) return null;
 const sn = leadDays == null ? 0 : stepPct(disc.shortNotice, 'days', leadDays);
 const ln = stepPct(disc.length, 'nights', nights);
 const nl = Math.min(0.9, Math.max(0, Number(newListing) || 0));
 const tr = Math.min(0.9, Math.max(0, Number(topRated) || 0));
-return { raw: nightly / ((1 - sn) * (1 - ln) * (1 - nl) * (1 - tr)), nightly, sn, ln, nl, tr };
+const vc = Math.min(0.9, Math.max(0, Number(voidCut) || 0));
+return { raw: nightly / ((1 - sn) * (1 - ln) * (1 - nl) * (1 - tr) * (1 - vc)), nightly, sn, ln, nl, tr, vc };
+}
+
+// ---- Your own void-filling discount, and the channels' fees ----------------------------------------------------------
+// prefs.bookingEvaluator.voidDiscounts = [{maxNights, withinDays|null, pct}]: a void (free nights with a booking either
+// side) of at most maxNights, booked within withinDays of its first night (blank = any time), takes pct off; the deepest
+// tier that fits applies. It is a cut YOU make on the rate, not one of Airbnb's rules. With no tiers, the older single
+// setting (gapDiscountPct on gaps of gapMaxNights or fewer, at any lead) is the one tier.
+function voidTiers(s) {
+const t = Array.isArray(s.voidDiscounts) && s.voidDiscounts.length ? s.voidDiscounts : [{ maxNights: s.gapMaxNights, withinDays: null, pct: s.gapDiscountPct }];
+return t.filter((x) => x && Number(x.pct) > 0 && Number(x.maxNights) > 0);
+}
+function voidCutFor(s, voidNights, lead) {
+let best = 0;
+voidTiers(s).forEach((x) => {
+const within = x.withinDays == null || x.withinDays === '' ? Infinity : Number(x.withinDays);
+if (voidNights <= Number(x.maxNights) && (lead == null || lead <= within)) best = Math.max(best, Math.min(90, Number(x.pct)) / 100);
+});
+return best;
+}
+const voidCutMax = (s) => voidTiers(s).reduce((m, x) => Math.max(m, Math.min(90, Number(x.pct)) / 100), 0);
+// The fee a channel takes off what the guest pays for the stay (prefs.bookingEvaluator.channelFees, % : Airbnb's host fee
+// is 15.5% + 20% VAT = 18.6%). Used for everything priced forward from a rate as the guest sees it (a set rate, the
+// extra-guest charge, the listed cleaning fee). Past stays use what each actually kept (its earnings row's Amount / Gross).
+const DEFAULT_CHANNEL_FEES = { airbnb: 18.6, direct: 0 };
+function channelKeep(s, channel = 'airbnb') {
+const f = s && s.channelFees && s.channelFees[channel] != null && s.channelFees[channel] !== '' ? Number(s.channelFees[channel]) : DEFAULT_CHANNEL_FEES[channel] ?? 0;
+return 1 - Math.min(90, Math.max(0, Number.isFinite(f) ? f : 0)) / 100;
 }
 
 // ---- Rating stage per listing -------------------------------------------------------------------
@@ -611,6 +640,15 @@ const rows = (ctx.earnings || []).filter((e) => room.listingIds.includes(e.listi
 return rows.length && rows[0].share > 0 ? rows[0].share : 1;
 });
 const extraFee = ctx.rooms.map((room) => Math.max(0, Number(room.extraGuestFee) || 0));
+const keepAirbnb = channelKeep(s, 'airbnb');
+// What your void fills paid against your other stays, before the void cut is undone: the cut you actually took (median
+// nightly, discounts other than the void cut undone, on the same Fri/Sat footing). null under 3 fills or 5 others.
+const voidCheckOf = (sm) => {
+const pre = (x) => (x.wd ?? x.raw) * (1 - (x.vc || 0));
+const fills = sm.filter((x) => x.vc > 0); const others = sm.filter((x) => !(x.vc > 0));
+if (fills.length < 3 || others.length < 5) return { fills: fills.length, others: others.length, observedPct: null, assumedPct: fills.length ? Math.round(median(fills.map((x) => x.vc)) * 1000) / 10 : null };
+return { fills: fills.length, others: others.length, observedPct: Math.round((1 - median(fills.map(pre)) / median(others.map(pre))) * 1000) / 10, assumedPct: Math.round(median(fills.map((x) => x.vc)) * 1000) / 10 };
+};
 const meanExtra = ctx.rooms.map((room, i) => {
 const known = [];
 (ctx.earnings || []).forEach((e) => { if (room.listingIds.includes(e.listingId) && e.guests != null && e.nights > 0) known.push({ x: Math.max(0, e.guests - 1), n: e.nights }); });
@@ -621,12 +659,27 @@ return N > 0 ? known.reduce((a, k) => a + k.x * k.n, 0) / N : 0;
 });
 const extraIncomeOf = (r, guests, nights, share) => !(extraFee[r] > 0) ? 0 : extraFee[r] * (guests != null ? Math.max(0, guests - 1) : meanExtra[r]) * nights * (share > 0 ? share : 1);
 const weekendShare = (start, n) => { let k = 0; for (let i = 0; i < n; i++) if (weekendNight(start + i)) k++; return n > 0 ? k / n : 0; };
+// The void a stay filled, as the calendar stood the day it was booked: the free stretch round its nights between the
+// room's other stays already booked by then (a stay with no booking date counts as booked), or null when it wasn't
+// bounded on both sides (not a void). Its own stay is the one starting the same night.
+const roomStays = ctx.rooms.map((_, i) => live.filter((x) => ri.get(x.listingId) === i).map((x) => ({ ci: dayNum(x.checkin), co: dayNum(x.checkout), booked: x.bookedOn ? dayNum(x.bookedOn) : null })));
+const voidAtBooking = (r, start, nights, booked) => {
+let prev = null; let next = null;
+(roomStays[r] || []).forEach((x) => {
+if (x.ci === start || (x.booked != null && x.booked > booked)) return;
+if (x.co <= start && (prev == null || x.co > prev)) prev = x.co;
+if (x.ci >= start + nights && (next == null || x.ci < next)) next = x.ci;
+});
+return prev != null && next != null ? next - prev : null;
+};
 const addSample = (r, listingId, { amount, cleaning, nights, start, booked, via }) => {
 const disc = discountsOf(s, 'airbnb', listingId);
 const madeOn = booked == null ? start - UNDATED_BOOKING_LEAD : booked;
 const stage = stageAt(stages.get(listingId), madeOn);
-const out = rawNightlyRate({ amount, cleaning, nights, leadDays: booked == null ? null : start - booked, newListing: stage === 'new' ? newPct : 0, topRated: topRatedOf(s, disc) }, disc);
-if (out) samples[r].push({ raw: out.raw, nightly: out.nightly, ws: weekendShare(start, nights), month: monthOf(start), via, sn: out.sn, ln: out.ln, nl: out.nl, tr: out.tr, stage, listingId, start, booked: madeOn, nights }); // v9: nights, for the market history ratio
+const vn = booked == null ? null : voidAtBooking(r, start, nights, booked);
+const vc = vn == null ? 0 : voidCutFor(s, vn, start - booked);
+const out = rawNightlyRate({ amount, cleaning, nights, leadDays: booked == null ? null : start - booked, newListing: stage === 'new' ? newPct : 0, topRated: topRatedOf(s, disc), voidCut: vc }, disc);
+if (out) samples[r].push({ raw: out.raw, nightly: out.nightly, ws: weekendShare(start, nights), month: monthOf(start), via, sn: out.sn, ln: out.ln, nl: out.nl, tr: out.tr, vc: out.vc, voidNights: vn, lead: booked == null ? null : start - booked, stage, listingId, start, booked: madeOn, nights }); // v9: nights, for the market history ratio
 };
 (ctx.earnings || []).forEach((e) => {
 const r = ri.get(e.listingId);
@@ -722,7 +775,13 @@ const uplift = uplifts[i];
 const overall = weightedMedian(sm.map((x) => ({ v: neutral(x), w: x.w })));
 const base = overall ?? median(everyRaw) ?? DEFAULT_PRICE;
 const byMonth = monthIdx.map((ix) => (ix != null && overall != null ? base * ix : null));
-const clean = room.cleaningIncome != null && room.cleaningIncome !== '' ? Number(room.cleaningIncome) : (feeMedian(cleanFees[i]) ?? feeMedian(everyCleaning) ?? 0);
+// The cleaning fee a booking brings in: your setting; else the listing's cleaning fee as guests see it (Settings, guest
+// price) less the channel's fee; else what your past stays kept (median). The listed fee wins over the history because
+// the history mixes fee levels (and Airbnb's cut on it has moved from about 3.6% to 18.6%).
+const listedFee = guestPriceSettings(s).cleaningFees[roomListing[i]];
+const listedPer = listedFee && Number(listedFee.perStay) > 0 ? Number(listedFee.perStay) : null;
+const cleanSource = room.cleaningIncome != null && room.cleaningIncome !== '' ? 'your setting' : listedPer != null ? 'listed' : 'history';
+const clean = cleanSource === 'your setting' ? Number(room.cleaningIncome) : cleanSource === 'listed' ? listedPer * keepAirbnb : (feeMedian(cleanFees[i]) ?? feeMedian(everyCleaning) ?? 0);
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const nEarn = sm.filter((x) => x.via === 'earnings').length;
 const r1 = (v) => (v == null ? null : Math.round(v * 10) / 10);
@@ -745,7 +804,7 @@ weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
 byMonth, base, uplift, clean, n: sm.length, nEarn,
 // Extra-guest charge, after Airbnb's fee: per extra guest a night (extraGuestNet), and the average a night (extraGuest).
-rateShare: roomShare[i], extraGuestNet: extraFee[i] * roomShare[i], extraGuest: extraFee[i] * roomShare[i] * meanExtra[i], meanExtraGuests: meanExtra[i], avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
+rateShare: keepAirbnb, extraGuestNet: extraFee[i] * keepAirbnb, extraGuest: extraFee[i] * keepAirbnb * meanExtra[i], voidCheck: voidCheckOf(sm), cleanSource, meanExtraGuests: meanExtra[i], avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
 nNewListing: sm.filter((x) => x.nl > 0).length, avgTopRated: mean(sm.map((x) => x.tr)), stage: roomStage[i], trace,
 source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export), recent ones counting most (half as much every ${po.halfLife} days), each put on today's rating stage${po.deseason ? ' and taken out of its month’s season' : ''}` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
 };
@@ -1280,7 +1339,7 @@ return responseWith(ctx, params, ri, c, t0, marketFor(ctx, params, ri, c));
 }
 function responseWith(ctx, params, ri, c, t0, mk) {
 const cache = responseCache(ctx, params);
-const exMax = Math.max(Number(ctx.s.gapDiscountPct) || 0, Number(ctx.planMaxPct) || 0) / 100;
+const exMax = Math.max(voidCutMax(ctx.s), (Number(ctx.planMaxPct) || 0) / 100);
 // A reach the lead-time curve has all but finished by counts as uncut (shares the build across dates).
 let reach = t0 == null || c - t0 < 0 ? null : c - t0;
 if (reach != null && leadCdf(params, c, reach) >= 1 - 1e-6) reach = null;
@@ -1675,8 +1734,7 @@ const discs = ctx.rooms.map((_, i) => roomDiscount(ctx, params, i));
 const topRated = discs.map((d) => 1 - topRatedOf(s, d));
 const newPct = newListingPctOf(s);
 const newUntil = ctx.rooms.map((_, i) => { const st = params.stages && params.stages.get((params.roomListing || [])[i]); return newPct > 0 && (params.roomStage || [])[i] === 'new' && st ? st.newUntil : -Infinity; });
-const gapPct = (Number(s.gapDiscountPct) || 0) / 100;
-const gapMax = Number(s.gapMaxNights) || 0;
+const tiersOn = voidTiers(s).length > 0;
 // v9 (audit finding 6): a simulated booking is cancelled with probability params.cancelRate (the rate learnt from your
 // cancelled stays, as the evaluator already applies to the request it judges), at a moment drawn uniformly between its
 // booking and its check-in; its nights are held until then and free again after (so a later request can re-book them),
@@ -1719,11 +1777,14 @@ const before = i0 - gs;
 const after = ge - i1;
 const orphan = (boundedL && before > 0 && before < min) || (boundedR && after > 0 && after < min);
 if (orphan && a.lead > 7) continue;
-const inGap = boundedL && boundedR && ge - gs <= gapMax;
-// Your own cut on top of the price: a void plan's, else the gap discount. None on a night whose rate you've set (the
-// rate already holds whatever cut you chose; setRateAt): only Airbnb's rule discounts apply there.
+const voidCut = tiersOn && boundedL && boundedR ? voidCutFor(s, ge - gs, a.lead) : 0;
+// Your own cut on top of the price: a void plan's, else your void-filling cut (voidCutFor: the void's length and how close
+// in the booking comes). On a night whose rate you've set as an infill or short-notice rate, none: the rate already holds
+// the cut. On one set for any other reason (an event, the season), the void cut still applies: it is the cut you'd make
+// later if the night were still free in a short void close in.
 const fixedRate = setRateAt(ctx, a.room, a.c);
-const ex = fixedRate ? 0 : plan && plan.pct > 0 ? plan.pct / 100 : inGap ? gapPct : 0;
+const cutIn = fixedRate && (fixedRate.reason === 'infill' || fixedRate.reason === 'short-notice');
+const ex = cutIn ? 0 : !fixedRate && plan && plan.pct > 0 ? plan.pct / 100 : voidCut;
 const factor = (1 - stepPct(discs[a.room].shortNotice, 'days', a.lead)) * (1 - stepPct(discs[a.room].length, 'nights', a.los)) * (1 - ex);
 // v7: the guest responds to the all-in price (see guestResponse); the extra cut is the same one `factor` takes.
 const gr = guestResponse(ctx, params, a.room, a.c, a.t0); // the same response the arrival was drawn under
@@ -2429,7 +2490,7 @@ const demandSource = `London's season for ${mon} ×${MARKET_SEASON[m].toFixed(2)
 return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s, (params.roomListing || [])[ri]), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
-{ id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
+{ id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: price.cleanSource === 'your setting' ? 'your setting' : price.cleanSource === 'listed' ? "the listing's cleaning fee as guests see it, less the channel fee" : price.n ? 'median of what your past stays kept' : 'none known' },
 { id: 'extraguest', label: 'Extra-guest charge (income a night, on top of the rate)', value: price.extraGuestNet > 0 ? `${fmtMoney(price.extraGuest)} a night on average (${fmtMoney(price.extraGuestNet)} per extra guest x ${(price.meanExtraGuests || 0).toFixed(2)} extra guests a night)` : 'none set', source: price.extraGuestNet > 0 ? "your charge in Settings, after Airbnb's fee at your latest stay's rate; the average party from your stays with a guest count. It is taken out of past payouts before the raw nightly rate is worked back" : 'set Extra guest £/night in Settings, Booking evaluator, Rooms' },
 { id: 'demand', label: `Requests expected per check-in date in ${mon} (any stay length, before availability)`, value: lambdaFor(ctx, params, ri, m).toFixed(2), source: demandSource, editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: `your guide (Settings)${Math.abs(params.leadShift || 0) > 0.05 && ci != null && !isChristmas(ci) ? `, scaled x${Math.exp(params.leadShift).toFixed(2)} to match how far ahead your ${params.leadN} requests arrived, allowing for the dates that were already taken when each one came` : ''}`, editable: 'lead' },
@@ -2714,14 +2775,13 @@ const room = ctx.rooms.find((r) => r.key === v.roomKey);
 if (!room) return { error: 'That room is no longer set up.' };
 const calib = params || calibrate(ctx);
 const curMin = Number(room.minNights) || 1;
-const curPct = Number(ctx.s.gapDiscountPct) || 0;
 const curMax = Number(ctx.s.gapMaxNights) || 0;
 const clean = ctx.firstClean;
-const simulate = (minNights, pct) => {
+const simulate = (minNights, pct, asIs = false) => {
 const reach = Math.max(curMax, v.nights);
 // Without any plan already set on this void, so the options are compared with each other and with doing nothing.
 const bare = { ...ctx, s: { ...ctx.s, voidPlans: (ctx.s.voidPlans || []).filter((q) => !(q.roomKey === v.roomKey && q.from < v.to && q.to > v.from)) } };
-const p = makeProjection(bare, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], boostPct: 40, play: { minNights: { [room.key]: minNights }, s: { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax } } });
+const p = makeProjection(bare, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], boostPct: 40, play: { minNights: { [room.key]: minNights }, s: asIs ? {} : { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax, voidDiscounts: [] } } });
 if (p.error) return null;
 while (!p.step(100)) { /* run to the end */ }
 const r = p.finish();
@@ -2730,8 +2790,10 @@ if (!vo) return null;
 const bookings = r.total.bookings || 0;
 return { minNights, pct, income: vo.expected, nights: vo.expectedNights, bookings, net: Math.round((vo.expected - bookings * clean) * 100) / 100 };
 };
-// As it is now: the room's own minimum and whatever gap discount applies to a gap this long.
-const base = simulate(curMin, v.nights <= curMax ? curPct : 0);
+// As it is now: the room's own minimum and your void-filling cuts as they stand (voidCutFor: this void's length, and how
+// close in each booking comes). Each option below is one cut on the whole void, taken now, at any lead.
+const asIsPct = Math.round(voidCutFor(ctx.s, v.nights, 0) * 100);
+const base = simulate(curMin, asIsPct, true);
 if (!base) return { error: 'Could not simulate this void.' };
 const options = [];
 const mins = curMin > 1 ? [curMin, 1] : [1];
@@ -2965,7 +3027,7 @@ return { fits, tau: Math.sqrt(tau2) };
 
 // v7: `more` adds settings and `cal` picks the calibrate (v6's, for the equivalence case).
 function testContext({ occupancy, today = '2026-11-01', minNights = 1, more = {}, cal = calibrate }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, newListingDiscountPct: 0, ...more };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidDiscounts: [], newListingDiscountPct: 0, ...more };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
@@ -3161,7 +3223,7 @@ check('Discount steps and undoing them', steps.join() === '0.1,0.05,0' && Math.a
 // 11b. Extra-guest charge: £10 a night per guest beyond the first, Airbnb keeping 12% (Amount 220 of Gross 250). Four
 // 2-night stays for 2 guests: each carried 10 x 1 x 2 x 0.88 = 17.6, so the one-guest nightly is (220 - 17.6) / 2 = 101.2,
 // and simulated nights add back 8.8 (every stay had 1 extra guest).
-const ctx11b = testContext({ occupancy: 0.5, cal: (c) => {
+const ctx11b = testContext({ occupancy: 0.5, more: { channelFees: { airbnb: 12 } }, cal: (c) => {
 c.rooms[0].extraGuestFee = 10;
 c.earnings = [0, 1, 2, 3].map((k) => ({ listingId: 'LA', guest: `g${k}`, code: `HMX${k}`, start: dayStr(dayNum('2026-08-03') + 7 * k), nights: 2, amount: 220, cleaningFee: 0, bookingDate: '2026-07-01', share: 0.88, guests: 2 }));
 return calibrate(c);
@@ -3170,13 +3232,16 @@ const p11b = ctx11b.params.prices[0];
 check('Extra-guest charge out of past payouts, average added back per night', Math.abs(p11b.trace.medianPaidPerNight - 101.2) < 0.05 && Math.abs(p11b.extraGuest - 8.8) < 1e-9 && Math.abs(p11b.extraGuestNet - 8.8) < 1e-9 && p11b.meanExtraGuests === 1, `${p11b.trace.medianPaidPerNight} ${p11b.extraGuest} ${p11b.meanExtraGuests}`);
 // 11c. A set rate replaces the model's price (x Airbnb's fee share, 1 here with no earnings rows), on its nights only, Fri/Sat
 // at its weekend figure, and from its setOn only.
-const ctx11c = testContext({ occupancy: 0.5, today: '2026-11-01', more: { setRates: [
+const ctx11c = testContext({ occupancy: 0.5, today: '2026-11-01', more: { channelFees: { airbnb: 0 }, setRates: [
 { id: 'r1', roomKey: 'A', from: '2026-12-10', last: '2026-12-12', weekday: 150, weekend: 190, setOn: '2026-10-20' },
 { id: 'r2', roomKey: 'A', from: '2026-12-20', last: '2026-12-20', weekday: 999, setOn: '2026-11-05' }] } });
 const bp = (d) => basePrice(ctx11c, ctx11c.params, 0, dayNum(d));
 const nb11c = nightBreakdown(ctx11c, ctx11c.params, 0, dayNum('2026-12-10'));
 check('Set rate replaces the price on its nights only (Thu 150, Fri 190), not before its setOn', bp('2026-12-10') === 150 && bp('2026-12-11') === 190 && bp('2026-12-13') === 100 && bp('2026-12-20') === 100 && nb11c.listPrice === 150 && nb11c.steps[0].source === 'your set rate', `${bp('2026-12-10')} ${bp('2026-12-11')} ${bp('2026-12-13')} ${bp('2026-12-20')} ${nb11c.listPrice}`);
-// 11d. The gap discount isn't taken on a set-rate night (the rate holds your cut); it still is elsewhere.
+const ctx11f = testContext({ occupancy: 0.5, today: '2026-11-01', more: { setRates: [{ id: 'r1', roomKey: 'A', from: '2026-12-10', last: '2026-12-10', weekday: 150, setOn: '2026-10-20' }] } });
+check('Set rate less the Airbnb fee setting (default 18.6%)', Math.abs(basePrice(ctx11f, ctx11f.params, 0, dayNum('2026-12-10')) - 150 * 0.814) < 1e-9, `${basePrice(ctx11f, ctx11f.params, 0, dayNum('2026-12-10'))}`);
+// 11d. The void cut isn't taken on a night set as an infill rate (the rate holds your cut); it is on one set for an event
+// (the cut you'd make later) and with no set rate.
 const gapRun = (rates) => {
 const c = testContext({ occupancy: 0.5, today: '2026-11-01', more: { gapDiscountPct: 20, gapMaxNights: 5, setRates: rates } });
 const base = dayNum('2026-12-01'); const len = 40;
@@ -3185,8 +3250,13 @@ for (let i = 0; i < 10; i++) occ[0][i] = 1; for (let i = 12; i < len; i++) occ[0
 const b = playArrivals(c, c.params, [{ room: 0, c: base + 10, los: 2, at: base - 5, lead: 15, u: 0, tie: 0, t0: null }], occ, base, { minNights: { 0: 1 }, len });
 return b.length ? b[0].factor : null;
 };
-const fGap = gapRun([]); const fSet = gapRun([{ id: 'r', roomKey: 'A', from: '2026-12-11', last: '2026-12-12', weekday: 120, setOn: '2026-10-01' }]);
-check('Gap discount applies without a set rate, not with one', Math.abs(fGap - 0.8) < 1e-9 && Math.abs(fSet - 1) < 1e-9, `${fGap} ${fSet}`);
+const fGap = gapRun([]); const fSet = gapRun([{ id: 'r', roomKey: 'A', from: '2026-12-11', last: '2026-12-12', weekday: 120, reason: 'infill', setOn: '2026-10-01' }]);
+const fEv = gapRun([{ id: 'r', roomKey: 'A', from: '2026-12-11', last: '2026-12-12', weekday: 120, reason: 'event', setOn: '2026-10-01' }]);
+check('Void cut: applies with no set rate and on an event rate, not on an infill rate', Math.abs(fGap - 0.8) < 1e-9 && Math.abs(fSet - 1) < 1e-9 && Math.abs(fEv - 0.8) < 1e-9, `${fGap} ${fSet} ${fEv}`);
+// 11g. Void tiers: deepest that fits; outside the lead window none; no tiers = the single gap setting at any lead.
+const tiers11g = { voidDiscounts: [{ maxNights: 6, withinDays: 30, pct: 20 }, { maxNights: 3, withinDays: 14, pct: 30 }] };
+const vt = [voidCutFor(tiers11g, 5, 20), voidCutFor(tiers11g, 3, 10), voidCutFor(tiers11g, 3, 20), voidCutFor(tiers11g, 5, 40), voidCutFor(tiers11g, 8, 5), voidCutFor({ voidDiscounts: [], gapDiscountPct: 15, gapMaxNights: 4 }, 4, 300)];
+check('Void tiers pick the deepest that fits, by void length and lead', vt.join() === '0.2,0.3,0.2,0,0,0.15', vt.join());
 // 11e. Demand lift: a one-off event's own nights x1.5, nothing either side; a yearly one balanced so its window's total holds;
 // a set rate's own demand wins over the event's on its nights.
 const evOnce = { id: 'e1', name: 'One-off', rule: 'once', date: '2026-12-10', nights: 2, upliftPct: 0, demandPct: 50, dates: [] };
@@ -3210,14 +3280,17 @@ check('Cleaning fee income is added per booking', p12.total.expected > p7.total.
 const feeCtx = (short) => { const c = testContext({ occupancy: 0.97, today: '2026-10-01', more: { stayMedian: 1, guestPrice: { cleaningFees: { LA: short ? { perStay: 60, shortStay: 40, shortStayMaxNights: 2 } : { perStay: 60 } } } } }); c.params.prices[0].clean = 60; c.params.lambda = new Map(Array.from({ length: 12 }, (_, m) => [`0|${m}`, 40])); return c; };
 const pFull = projectVoids(feeCtx(false), { from: '2026-11-01', to: '2026-12-01', runs: 40 }); const pShort = projectVoids(feeCtx(true), { from: '2026-11-01', to: '2026-12-01', runs: 40 });
 check('Short-stay cleaning fee: a short booking is credited the short-stay fee', pShort.total.expected < pFull.total.expected - 20 && Math.abs(pShort.total.bookings / pFull.total.bookings - 1) < 0.05, `£${pShort.total.expected} with a £40 short-stay fee vs £${pFull.total.expected} without, ${pShort.total.bookings} / ${pFull.total.bookings} bookings`);
-// The received per-stay fee is the median of the fees of stays longer than the short-stay limit: four 1-night rows at
-// £40 and three 3-night rows at £60 give £60 (v8's median of all seven rows was £40).
-const cFee = testContext({ occupancy: 0.5, more: { guestPrice: { cleaningFees: { LA: { perStay: 60, shortStay: 40, shortStayMaxNights: 2 } } } } });
-cFee.earnings = [...Array.from({ length: 4 }, (_, k) => ({ listingId: 'LA', guest: `s${k}`, code: `S${k}`, start: dayStr(dayNum('2026-08-01') + k * 7), nights: 1, amount: 140, cleaningFee: 40, bookingDate: '2026-07-20' })), ...Array.from({ length: 3 }, (_, k) => ({ listingId: 'LA', guest: `l${k}`, code: `L${k}`, start: dayStr(dayNum('2026-09-01') + k * 7), nights: 3, amount: 360, cleaningFee: 60, bookingDate: '2026-08-20' }))];
-delete cFee.params; delete cFee.gridCache; delete cFee.demandCache;
+// With no listed fee there is no short-stay limit to sort the rows by, so the received per-stay fee is the median of all
+// of them: four 1-night rows at £40 and three 3-night rows at £60 give £40. With a listed fee, it is that fee less the
+// channel's (18.6%): £48.84 a stay, the short-stay fee scaled the same (£32.56). (v9's median of the stays over the
+// short-stay limit, £60 here, is what the history gives only when no listed fee exists to use instead.)
+const feeRows = (c) => { c.earnings = [...Array.from({ length: 4 }, (_, k) => ({ listingId: 'LA', guest: `s${k}`, code: `S${k}`, start: dayStr(dayNum('2026-08-01') + k * 7), nights: 1, amount: 140, cleaningFee: 40, bookingDate: '2026-07-20' })), ...Array.from({ length: 3 }, (_, k) => ({ listingId: 'LA', guest: `l${k}`, code: `L${k}`, start: dayStr(dayNum('2026-09-01') + k * 7), nights: 3, amount: 360, cleaningFee: 60, bookingDate: '2026-08-20' }))]; delete c.params; delete c.gridCache; delete c.demandCache; return c; };
+const cHist = feeRows(testContext({ occupancy: 0.5 }));
+const pHist = calibrate(cHist);
+const cFee = feeRows(testContext({ occupancy: 0.5, more: { guestPrice: { cleaningFees: { LA: { perStay: 60, shortStay: 40, shortStayMaxNights: 2 } } } } }));
 const pFee = calibrate(cFee);
 const feesFee = receivedCleaningFees(cFee.s, cFee.s, 'LA', pFee.prices[0].clean);
-check('Calibrated cleaning income is the per-stay fee (stays over the short-stay limit), so the scale factor is 1', pFee.prices[0].clean === 60 && close(feesFee.perStay, 60, 1e-9) && close(feesFee.shortStay, 40, 1e-9), `clean £${pFee.prices[0].clean}; received per stay £${feesFee.perStay}, short stay £${feesFee.shortStay}`);
+check('Cleaning income: history median with no listed fee; the listed fee less 18.6% when there is one', pHist.prices[0].clean === 40 && close(pFee.prices[0].clean, 48.84, 1e-9) && close(feesFee.perStay, 48.84, 1e-9) && close(feesFee.shortStay, 32.56, 1e-9), `history £${pHist.prices[0].clean}; listed £${pFee.prices[0].clean}; per stay £${feesFee.perStay}, short stay £${feesFee.shortStay}`);
 
 // 9. A window that crosses the year end splits into months correctly.
 const q3 = projectVoids(testContext({ occupancy: 0.5, today: '2026-12-10' }), { runs: 20 });
@@ -3748,7 +3821,7 @@ check('v9 shrinkage: leave-one-out towards the other room, one room alone unchan
 const poolWorld = ({ rates, launch, seed, today = '2026-11-01' }) => {
 const keys = ['A', 'B', 'C'];
 const rooms = rates.map((_, i) => ({ key: keys[i], label: `Room ${keys[i]}`, listingIds: [`L${keys[i]}`], include: true, weight: 1, minNights: 1, priceWeekday: 100, priceWeekend: 100 }));
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidDiscounts: [], newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
 const c = { today, s, firstClean: 50, rooms, stays: [], requests: [], proposals: [], listingLabels: Object.fromEntries(rooms.map((r) => [r.listingIds[0], r.label])), scale: {}, calRuns: 40 };
 calibrate(c);
 const p = c.params; p.cancelRate = 0;
@@ -3950,8 +4023,8 @@ cut('topRated', 'Top-rated guests', topRatedOf(s, disc), `${disc.topRatedPct}% f
 const st = params.stages && params.stages.get((params.roomListing || [])[ri]);
 const newPct = newListingPctOf(s);
 if (stage === 'new' && st && bookedOn < st.newUntil) cut('newListing', 'New-listing promotion', newPct, `until the listing leaves the new stage, about ${dayStr(st.newUntil)}`);
-if (!sr) cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100), `${Number(extraPct) || 0}% off this night`);
+if (!(sr && (sr.reason === 'infill' || sr.reason === 'short-notice'))) cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100), `${Number(extraPct) || 0}% off this night`);
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { setRateAt, demandAt, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { setRateAt, demandAt, voidCutFor, voidTiers, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };

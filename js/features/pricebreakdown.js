@@ -152,13 +152,14 @@ const cur = ctxCur === ctx ? first : await projectSliced(model, ctxCur, popts, o
 const prop = ctxProp === ctxCur ? cur : await projectSliced(model, ctxProp, popts, onBusy, 'Projecting with the proposed changes…');
 if (cur.error || prop.error) return { error: cur.error || prop.error };
 const voidOf = (res, v) => res.voids.find((x) => x.id === v.id) || v;
-const gapPct = Number(ctx.s.gapDiscountPct) || 0;
-const gapMax = Number(ctx.s.gapMaxNights) || 0;
-// The extra cut on a night, as playArrivals applies it: a plan's cut, else the standing gap discount on a short gap.
+// The extra cut on a night, as playArrivals applies it to a booking made today: a plan's cut, else your void-filling cut
+// for a void this long with the night this close (voidCutFor). nightBreakdown leaves it off a night whose rate you've set.
 const extraFor = (c, v, date) => {
 const p = (c.s.voidPlans || []).find((x) => x.roomKey === room.key && x.from <= date && x.to > date && Number(x.discountPct) > 0);
 if (p) return { extraPct: Number(p.discountPct), extraLabel: p.pbCut ? 'Gap cut (model’s pick)' : 'Void plan you set' };
-if (!v.open && v.nights <= gapMax && gapPct > 0) return { extraPct: gapPct, extraLabel: 'Gap discount (your setting)' };
+const lead = Math.round((new Date(date + 'T00:00:00Z') - new Date(todayStr() + 'T00:00:00Z')) / 86400000);
+const vc = v.open ? 0 : model.voidCutFor(c.s, v.nights, lead);
+if (vc > 0) return { extraPct: Math.round(vc * 1000) / 10, extraLabel: 'Void-filling cut (your setting)' };
 return { extraPct: 0, extraLabel: '' };
 };
 const T = ctx.today;
