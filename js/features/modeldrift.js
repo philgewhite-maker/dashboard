@@ -142,7 +142,10 @@ function computeRoom(ctx, params, ri) {
       let model = 0;
       for (let i = 0; i < a.nights; i++) model += basePrice(ctx, params, ri, a.checkin + i);
       model /= a.nights;
-      const raw = rawNightlyRate({ amount: a.payout, cleaning: clean, nights: a.nights, leadDays: lead >= 0 ? lead : null }, disc);
+      // The request's own extra-guest charge comes out first: the model's rate is a one-guest one (calibrate).
+      const pr = params.prices[ri];
+      const extra = (pr.extraGuestNet || 0) * (a.guests != null ? Math.max(0, a.guests - 1) : (pr.meanExtraGuests || 0)) * a.nights;
+      const raw = rawNightlyRate({ amount: a.payout - extra, cleaning: clean, nights: a.nights, leadDays: lead >= 0 ? lead : null }, disc);
       if (raw && model > 0) pts.price.push({ t: a.t, r: raw.raw / model, actual: raw.raw, model });
       pts.length.push({ t: a.t, r: a.nights / losMed, actual: a.nights, model: losMed });
     } else if (a.nights >= 1) pts.length.push({ t: a.t, r: a.nights / losMed, actual: a.nights, model: losMed });

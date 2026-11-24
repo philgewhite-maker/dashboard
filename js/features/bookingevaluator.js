@@ -53,9 +53,8 @@ if (cur) sel.value = cur;
 // with the short-notice cut for when it was asked, the length-of-stay cut for this stay's own
 // length, the top-rated-guest cut when the guest's rating and reviews are known (Airbnb: 4.8+ with
 // at least 3 reviews; unknown = the expected share, as everywhere else in the model), plus the
-// cleaning fee and the room's extra-guest charge. The extra-guest charge is set as Airbnb shows it,
-// isn't discounted by Airbnb, and has Airbnb's fee taken off in the proportion your latest earnings
-// row on that listing shows (Amount / Gross earnings).
+// cleaning fee and the room's extra-guest charge for this party (calibrate works the charge out, after
+// Airbnb's fee; Airbnb doesn't discount it).
 async function estimatePayout({ listingId, checkin, checkout, askedOn = null, guests = null, guestRating = null, guestReviews = null }) {
 const model = await import('./bookingmodel.js');
 const ctx = model.buildContext();
@@ -81,16 +80,10 @@ let v = (nb.price / (1 - pctOf('length'))) * (1 - lengthPct);
 if (topPct != null) v = (v / (1 - pctOf('topRated'))) * (1 - topPct);
 sum += v;
 }
-const room = ctx.rooms[ri];
-const extraFee = Number(room.extraGuestFee) || 0;
-const extraGuests = Math.max(0, (Number(guests) || 1) - 1);
-let extra = 0;
-if (extraFee > 0 && extraGuests > 0) {
-const latest = (data.airbnbEarnings || []).filter((e) => room.listingIds.includes(e.listingId) && String(e.type).toLowerCase() === 'reservation' && Number(e.amount) > 0 && Number(e.grossEarnings) > 0)
-.sort((x, y) => String(y.start).localeCompare(String(x.start)))[0];
-const k = latest ? Number(latest.amount) / Number(latest.grossEarnings) : 1;
-extra = extraFee * extraGuests * nights * (k > 0.5 && k <= 1 ? k : 1);
-}
+// The extra-guest charge, after Airbnb's fee, for this party (the room's average party when the size isn't known):
+// the model's nightly prices are one-guest ones.
+const pr = params.prices[ri];
+const extra = guests != null && guests !== '' ? (pr.extraGuestNet || 0) * Math.max(0, Number(guests) - 1) * nights : (pr.extraGuest || 0) * nights;
 return Math.round(sum + (params.prices[ri].clean || 0) + extra);
 }
 

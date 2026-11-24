@@ -456,7 +456,7 @@ const longLet = !!x.longLet || rec.letType === 'long' || (x.platform === 'other'
 const noDemand = longLet || (channel ? demandChannel.get(channel) === false : false);
 // A booking date after check-in cannot be when it was agreed (it is when the record was typed in): treated as unknown.
 const sane = (d) => (d && x.checkin && String(d).slice(0, 10) > x.checkin ? '' : d || '');
-return { id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: sane(longLet ? (rec.confirmedOn || rec.bookedOn || '') : x.bookedOn), cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '', channel, longLet, noDemand, reviewed: Number(rec.reviewRating) > 0 || !!rec.reviewSeen };
+return { id: x.id, listingId: x.listingId, checkin: x.checkin, checkout: x.checkout, income: x.income, bookedOn: sane(longLet ? (rec.confirmedOn || rec.bookedOn || '') : x.bookedOn), cancelledOn: x.cancelledOn, status: x.status, unconfirmed: !!x.unconfirmed, guest: x.guest || '', platform: x.platform, code: stayCode.get(x.id) || '', channel, longLet, noDemand, reviewed: Number(rec.reviewRating) > 0 || !!rec.reviewSeen, guests: Number(rec.guests) > 0 ? Number(rec.guests) : null };
 });
 // Listings that are yours: the ones Settings' superhost date applies to. Settings' ownListingIds decides when it is a
 // list; otherwise the same rule the Letting ledger uses (letting.js isMyOwnKey): no owner on the listing, or an owner,
@@ -482,7 +482,10 @@ const earningRows = (data.airbnbEarnings || []).filter((e) => String(e.type).toL
 // Amount / Gross earnings: the clean then counts as what it actually brought in, and the nights keep their own share.
 // A row without a usable gross figure keeps the fee as charged.
 const netShareOf = (e) => { const g = Number(e.grossEarnings); const a = Number(e.amount); const k = g > 0 ? a / g : NaN; return k > 0.5 && k <= 1 ? k : 1; };
-const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate }));
+// The party size comes from the stay the row belongs to (by confirmation code), for Airbnb's extra-guest charge.
+const guestsByCode = new Map();
+(data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && Number(r.guests) > 0) guestsByCode.set(r.confirmationCode, Number(r.guests)); });
+const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: guestsByCode.get(e.confirmationCode) ?? null }));
 const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
@@ -595,6 +598,27 @@ const roomStage = ctx.rooms.map((_, i) => stageAt(stages.get(roomListing[i]), T)
 const samples = ctx.rooms.map(() => []); // {raw, nightly, ws (share of nights Fri/Sat), month, via, sn, ln, nl, tr, stage, listingId, start, booked}
 const cleanFees = ctx.rooms.map(() => []);
 const skipped = ctx.rooms.map(() => []); // nightly income of the stays left out as not short-let demand
+// Airbnb's extra-guest charge (Settings -> Booking evaluator -> Rooms, "Extra guest £/night": a set £ a night for each
+// guest beyond the first, which Airbnb doesn't discount, and takes its fee off like everything else). Past payouts carry
+// it for every party of 2+, so it is taken out of each stay before the nightly rate is worked back (an earnings row at
+// its own Amount / Gross share; a stay without a row at the room's latest share), leaving a one-guest rate. A stay
+// whose party size isn't on record is taken to have the room's average. Simulated bookings then add the average back,
+// per night and undiscounted (extraGuestOf), so totals are unchanged on average while a request or enquiry with a
+// known party (bookingevaluator.js estimatePayout) can add its own.
+const roomShare = ctx.rooms.map((room) => {
+const rows = (ctx.earnings || []).filter((e) => room.listingIds.includes(e.listingId) && e.start).sort((a, b) => String(b.start).localeCompare(String(a.start)));
+return rows.length && rows[0].share > 0 ? rows[0].share : 1;
+});
+const extraFee = ctx.rooms.map((room) => Math.max(0, Number(room.extraGuestFee) || 0));
+const meanExtra = ctx.rooms.map((room, i) => {
+const known = [];
+(ctx.earnings || []).forEach((e) => { if (room.listingIds.includes(e.listingId) && e.guests != null && e.nights > 0) known.push({ x: Math.max(0, e.guests - 1), n: e.nights }); });
+const coded = new Set((ctx.earnings || []).map((e) => e.code).filter(Boolean));
+live.forEach((x) => { if (room.listingIds.includes(x.listingId) && x.guests != null && !(x.code && coded.has(x.code))) { const n = dayNum(x.checkout) - dayNum(x.checkin); if (n > 0) known.push({ x: Math.max(0, x.guests - 1), n }); } });
+const N = known.reduce((a, k) => a + k.n, 0);
+return N > 0 ? known.reduce((a, k) => a + k.x * k.n, 0) / N : 0;
+});
+const extraIncomeOf = (r, guests, nights, share) => !(extraFee[r] > 0) ? 0 : extraFee[r] * (guests != null ? Math.max(0, guests - 1) : meanExtra[r]) * nights * (share > 0 ? share : 1);
 const weekendShare = (start, n) => { let k = 0; for (let i = 0; i < n; i++) if (weekendNight(start + i)) k++; return n > 0 ? k / n : 0; };
 const addSample = (r, listingId, { amount, cleaning, nights, start, booked, via }) => {
 const disc = discountsOf(s, 'airbnb', listingId);
@@ -607,7 +631,7 @@ if (out) samples[r].push({ raw: out.raw, nightly: out.nightly, ws: weekendShare(
 const r = ri.get(e.listingId);
 const start = e.start ? dayNum(e.start) : null;
 if (r == null || start == null || start < since || !(e.nights > 0)) return;
-addSample(r, e.listingId, { amount: e.amount, cleaning: e.cleaningFee, nights: e.nights, start, booked: e.bookingDate ? dayNum(e.bookingDate) : null, via: 'earnings' });
+addSample(r, e.listingId, { amount: e.amount - extraIncomeOf(r, e.guests, e.nights, e.share), cleaning: e.cleaningFee, nights: e.nights, start, booked: e.bookingDate ? dayNum(e.bookingDate) : null, via: 'earnings' });
 // v9 (audit finding 3): the fee is kept with whether the stay was longer than the listing's short-stay limit, so the
 // received PER-STAY fee (the scale factor k in receivedCleaningFees compares it with the listed per-stay fee) is the
 // median of the fees paid by stays that were not short stays, once 3 or more are on record; else the median of all.
@@ -627,7 +651,7 @@ const r = ri.get(x.listingId);
 if (x.noDemand) { skipped[r].push(Number(x.income) / n); return; }
 if (start < since) return;
 const usual = feeMedian(cleanFees[r]) ?? feeMedian(everyCleaning) ?? 0;
-addSample(r, x.listingId, { amount: x.income, cleaning: usual, nights: n, start, booked: x.bookedOn ? dayNum(x.bookedOn) : null, via: 'stay' });
+addSample(r, x.listingId, { amount: Number(x.income) - extraIncomeOf(r, x.guests, n, roomShare[r]), cleaning: usual, nights: n, start, booked: x.bookedOn ? dayNum(x.bookedOn) : null, via: 'stay' });
 });
 const everyRaw = samples.flat().map((x) => x.raw);
 // Friday/Saturday premium, per room: weekend-heavy stays against weekday-heavy ones, when there are enough of each.
@@ -718,7 +742,9 @@ setting: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 return {
 weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
-byMonth, base, uplift, clean, n: sm.length, nEarn, avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
+byMonth, base, uplift, clean, n: sm.length, nEarn,
+// Extra-guest charge, after Airbnb's fee: per extra guest a night (extraGuestNet), and the average a night (extraGuest).
+extraGuestNet: extraFee[i] * roomShare[i], extraGuest: extraFee[i] * roomShare[i] * meanExtra[i], meanExtraGuests: meanExtra[i], avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
 nNewListing: sm.filter((x) => x.nl > 0).length, avgTopRated: mean(sm.map((x) => x.tr)), stage: roomStage[i], trace,
 source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export), recent ones counting most (half as much every ${po.halfLife} days), each put on today's rating stage${po.deseason ? ' and taken out of its month’s season' : ''}` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
 };
@@ -1078,6 +1104,8 @@ else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v 
 });
 return v;
 }
+// The average extra-guest income a simulated night earns (not discounted; see calibrate).
+const extraGuestOf = (params, roomIdx) => (params.prices[roomIdx] && params.prices[roomIdx].extraGuest) || 0;
 // What your own stays say about each recurring event in the history (<= EVENT_MAX_NIGHTS nights), for Settings to set
 // beside the uplift typed in. Event stays: calibration samples (params.priceSamples) with at least half their nights inside
 // a past occurrence; neighbours: samples starting inside the +/- EVENT_OFFSET_DAYS window without touching the event.
@@ -1654,7 +1682,7 @@ const reqs = ctx.requests.filter((q) => ids.has(q.listingId) && q.receivedAt && 
 const codes = new Set(reqs.map((q) => q.confirmationCode).filter(Boolean));
 const keys = new Set(reqs.map((q) => `${q.listingId}|${q.checkin}`));
 const reserved = new Set(reqs.map((q) => q.reservationId).filter(Boolean));
-const asks = reqs.map((q) => ({ t: dayNum(q.receivedAt), listingId: q.listingId, kind: q.kind === 'enquiry' ? 'enquiry' : 'request', checkin: dayNum(q.checkin), nights: q.checkout ? dayNum(q.checkout) - dayNum(q.checkin) : null, payout: q.kind === 'enquiry' ? null : Number(q.payout) || null }));
+const asks = reqs.map((q) => ({ t: dayNum(q.receivedAt), listingId: q.listingId, kind: q.kind === 'enquiry' ? 'enquiry' : 'request', checkin: dayNum(q.checkin), nights: q.checkout ? dayNum(q.checkout) - dayNum(q.checkin) : null, payout: q.kind === 'enquiry' ? null : Number(q.payout) || null, guests: Number(q.guests) > 0 ? Number(q.guests) : null }));
 // Bookings the earnings rows account for (as an ask of their own, or as the request they matched), by code and by listing and check-in.
 const earnedCodes = new Set();
 const earnedKeys = new Set();
@@ -2099,7 +2127,7 @@ const n = dayNum(x.checkout) - dayNum(x.checkin);
 const r = ri2.get(x.listingId);
 let inWin = 0;
 for (let d = Math.max(dayNum(x.checkin), wS); d < Math.min(dayNum(x.checkout), wE); d++) {
-inWin += Number(x.income) > 0 ? Number(x.income) / n : basePrice(ctx, params, r, d);
+inWin += Number(x.income) > 0 ? Number(x.income) / n : basePrice(ctx, params, r, d) + extraGuestOf(params, r);
 }
 existingIncome += inWin;
 if (inWin > 0) existingList.push({ id: x.id, room: ctx.listingLabels[x.listingId] || ctx.rooms[r].label, guest: x.guest, checkin: x.checkin, checkout: x.checkout, income: Number(x.income) > 0 ? Number(x.income) : null, inWindow: inWin });
@@ -2118,7 +2146,7 @@ DETAIL_KEYS.forEach((k) => { t[k] = 0; });
 booked.forEach((b) => {
 let first = true;
 for (let d = Math.max(b.ci, wS); d < Math.min(b.co, wE); d++) {
-const v = basePrice(ctx, params, b.room, d) * b.factor;
+const v = basePrice(ctx, params, b.room, d) * b.factor + extraGuestOf(params, b.room);
 const cat = b.room !== ri ? 'other' : d < ci ? 'before' : d >= co ? 'after' : 'inside';
 t[cat] += v;
 t[`d_${cat}`] += 1;
@@ -2185,7 +2213,7 @@ nightR[i] += tR.nightsTaken[i];
 if (examples.length < 3) {
 const describe = (booked) => booked.filter((b) => b.room === ri && b.co > wS && b.ci < wE).map((b) => {
 let amount = 0;
-for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor;
+for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor + extraGuestOf(params, ri);
 const nightsAmount = amount;
 const cleaningIncome = b.ci >= wS ? (b.clean ?? params.prices[ri].clean) : 0;
 amount += cleaningIncome;
@@ -2222,7 +2250,7 @@ const bgArr = drawArrivals(ctx, params, { from: base, to: dispE + AFTER, todayN:
 const bgBooked = playArrivals(ctx, params, bgArr, bgOcc, base, { minNights, len }).filter((b) => b.room === ri && (b.co <= wS || b.ci >= wE) && b.co > dispS && b.ci < dispE);
 const projected = bgBooked.map((b) => {
 let amount = 0;
-for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor;
+for (let d = b.ci; d < b.co; d++) amount += basePrice(ctx, params, ri, d) * b.factor + extraGuestOf(params, ri);
 const nightsAmount = amount;
 const cleaningIncome = b.ci >= dispS ? params.prices[ri].clean : 0;
 amount += cleaningIncome;
@@ -2317,6 +2345,7 @@ return [
 { id: 'price', label: 'Raw nightly rate (before discounts and the cleaning fee)', value: `${fmtMoney(basePrice(ctx, params, ri, ci))}${price.uplift > 1.005 ? ` (Fri/Sat ×${price.uplift.toFixed(2)})` : ''}`, source: price.source },
 { id: 'discounts', label: 'Discounts the rate is worked back through', value: discountText(ctx.s, (params.roomListing || [])[ri]), source: price.n ? `undone on ${price.n} stays: on average ${(price.avgShortNotice * 100).toFixed(1)}% short notice, ${(price.avgLength * 100).toFixed(1)}% length` : 'your setting' },
 { id: 'cleanfee', label: 'Cleaning fee guests pay (income per booking)', value: fmtMoney(price.clean), source: ctx.rooms[ri].cleaningIncome != null && ctx.rooms[ri].cleaningIncome !== '' ? 'your setting' : price.n ? 'median of your earnings export' : 'none known' },
+{ id: 'extraguest', label: 'Extra-guest charge (income a night, on top of the rate)', value: price.extraGuestNet > 0 ? `${fmtMoney(price.extraGuest)} a night on average (${fmtMoney(price.extraGuestNet)} per extra guest x ${(price.meanExtraGuests || 0).toFixed(2)} extra guests a night)` : 'none set', source: price.extraGuestNet > 0 ? "your charge in Settings, after Airbnb's fee at your latest stay's rate; the average party from your stays with a guest count. It is taken out of past payouts before the raw nightly rate is worked back" : 'set Extra guest £/night in Settings, Booking evaluator, Rooms' },
 { id: 'demand', label: `Requests expected per check-in date in ${mon} (any stay length, before availability)`, value: lambdaFor(ctx, params, ri, m).toFixed(2), source: demandSource, editable: 'demand' },
 { id: 'lead', label: 'Median days ahead bookings arrive', value: `${Math.round(lead.median)} days`, source: `your guide (Settings)${Math.abs(params.leadShift || 0) > 0.05 && ci != null && !isChristmas(ci) ? `, scaled x${Math.exp(params.leadShift).toFixed(2)} to match how far ahead your ${params.leadN} requests arrived, allowing for the dates that were already taken when each one came` : ''}`, editable: 'lead' },
 { id: 'leadspread', label: 'Share of bookings made in the last 3 / 7 days', value: `${Math.round(normCdf((Math.log(3.5) - lead.mu) / params.leadSigma) * 100)}% / ${Math.round(normCdf((Math.log(7.5) - lead.mu) / params.leadSigma) * 100)}%`, source: params.leadN ? `a lead-time spread of ${params.leadSigma.toFixed(2)}, fitted to your ${params.leadN} requests (declined ones included) and blended with the Airbnb-wide shape` : `a lead-time spread of ${params.leadSigma.toFixed(2)}, the Airbnb-wide shape (no requests of your own yet)` },
@@ -2491,7 +2520,7 @@ if (z <= a) return;
 let amount = 0;
 const off = Math.min(nArr - 1, Math.max(0, Math.floor(b.at) - T));
 for (let d = a; d < z; d++) {
-const v = basePrice(ctx, params, b.room, d) * b.factor;
+const v = basePrice(ctx, params, b.room, d) * b.factor + extraGuestOf(params, b.room);
 const i = d - wS;
 amount += v;
 nightIncome[b.room][i] += v; nightBooked[b.room][i] += 1;
@@ -3044,6 +3073,16 @@ check('Raw rate: payout less cleaning fee over nights', Math.abs(stacey.raw - 11
 const steps = [stepPct(disc10.shortNotice, 'days', 4), stepPct(disc10.shortNotice, 'days', 8), stepPct(disc10.shortNotice, 'days', 12)];
 const short4 = rawNightlyRate({ amount: 90, cleaning: 0, nights: 2, leadDays: 4 }, disc10);
 check('Discount steps and undoing them', steps.join() === '0.1,0.05,0' && Math.abs(short4.raw - 50) < 1e-9, `${steps.join()} ${short4.raw}`);
+// 11b. Extra-guest charge: £10 a night per guest beyond the first, Airbnb keeping 12% (Amount 220 of Gross 250). Four
+// 2-night stays for 2 guests: each carried 10 x 1 x 2 x 0.88 = 17.6, so the one-guest nightly is (220 - 17.6) / 2 = 101.2,
+// and simulated nights add back 8.8 (every stay had 1 extra guest).
+const ctx11b = testContext({ occupancy: 0.5, cal: (c) => {
+c.rooms[0].extraGuestFee = 10;
+c.earnings = [0, 1, 2, 3].map((k) => ({ listingId: 'LA', guest: `g${k}`, code: `HMX${k}`, start: dayStr(dayNum('2026-08-03') + 7 * k), nights: 2, amount: 220, cleaningFee: 0, bookingDate: '2026-07-01', share: 0.88, guests: 2 }));
+return calibrate(c);
+} });
+const p11b = ctx11b.params.prices[0];
+check('Extra-guest charge out of past payouts, average added back per night', Math.abs(p11b.trace.medianPaidPerNight - 101.2) < 0.05 && Math.abs(p11b.extraGuest - 8.8) < 1e-9 && Math.abs(p11b.extraGuestNet - 8.8) < 1e-9 && p11b.meanExtraGuests === 1, `${p11b.trace.medianPaidPerNight} ${p11b.extraGuest} ${p11b.meanExtraGuests}`);
 // 12. The cleaning fee guests pay is income on every simulated booking.
 const ctx12 = testContext({ occupancy: 0.97, today: '2026-10-01' });
 ctx12.stays = ctx5.stays;
