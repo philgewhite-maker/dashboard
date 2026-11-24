@@ -2223,6 +2223,8 @@ id: uid(), ownerKey: '', listingId: '', type: '', date: '', arrivingBy: '', conf
 start: '', end: '', nights: null, guest: '', listingTitle: '', details: '', referenceCode: '', currency: 'GBP',
 amount: null, paidOut: null, serviceFee: null, fastPayFee: null, cleaningFee: null, grossEarnings: null, tax: null,
 earningsYear: '', importedAt: '', source: '',
+// Party size from the stay's confirmation email (airbnb.js backfillEarningGuests); guestsCheckedOn: searched, none found.
+guests: null, guestDetail: null, guestsCheckedOn: '',
 ...fields,
 };
 }

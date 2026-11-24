@@ -2345,6 +2345,47 @@ if (filled) queueSave();
 return { filled, read, missing: need().length };
 }
 
+// Party sizes for the earnings-export rows (data.airbnbEarnings), which the booking evaluator needs to take Airbnb's
+// extra-guest charge out of each past payout. Most rows belong to stays that exist only as Letting income entries, so
+// neither backfill above ever reads their emails. Each row carries its booking code, and the "Reservation confirmed"
+// email carries it too: Gmail is searched for up to 20 codes at a time, each email found is read once, and the count
+// is put on the row whose code it carries (`guests`, `guestDetail`). A row whose stay already has a count, or that was
+// searched before and found nothing (`guestsCheckedOn`; an email may be in another owner's inbox), isn't searched
+// again. Never overwrites.
+async function backfillEarningGuests({ maxRows = 60 } = {}) {
+const known = new Set((data.airbnbReservations || []).filter((r) => r.confirmationCode && r.guests != null).map((r) => r.confirmationCode));
+const need = (data.airbnbEarnings || []).filter((e) => String(e.type).toLowerCase() === 'reservation' && /^HM[A-Z0-9]+$/.test(e.confirmationCode || '') && e.guests == null && !e.guestsCheckedOn && !known.has(e.confirmationCode)).slice(0, maxRows);
+if (!need.length || !(await canAttemptGoogleAction())) return { filled: 0, searched: 0 };
+const { fetchMailSearches, getMessageDetail } = await import('../googlemail.js');
+const byCode = new Map(need.map((e) => [e.confirmationCode, e]));
+let filled = 0;
+const today = todayStr();
+for (let i = 0; i < need.length; i += 20) {
+const batch = need.slice(i, i + 20);
+let sections;
+try {
+sections = await fetchMailSearches([{ kind: 'query', value: `from:airbnb subject:"Reservation confirmed" {${batch.map((e) => `"${e.confirmationCode}"`).join(' ')}}`, maxDays: 0, maxEvents: 40 }], 40);
+} catch (err) {
+console.error('Party-size email search failed:', err);
+return { filled, searched: i };
+}
+for (const m of sections[0]?.messages || []) {
+try {
+const detail = await getMessageDetail(m.id);
+const body = detail.bodyText || '';
+const row = byCode.get(confirmationCodeFrom(`${body} ${detail.bodyHtml || ''}`));
+const g = row && row.guests == null ? guestCountFrom(body) : null;
+if (g) { row.guests = g.guests; if (g.guestDetail) row.guestDetail = g.guestDetail; filled++; }
+} catch (err) {
+console.error('Reading a confirmation email for its party size failed:', err);
+}
+}
+batch.forEach((e) => { if (e.guests == null) e.guestsCheckedOn = today; });
+}
+queueSave();
+return { filled, searched: need.length };
+}
+
 // Booking dates for stays that have none. Every "Reservation confirmed - Name arrives 27 Nov"
 // email is dated the day the booking was made, and its subject names the arrival day and month,
 // so an old stay can be dated from the inbox without opening a single message: the arrival
@@ -2805,6 +2846,8 @@ t.step(6, STEPS, 'Reading booking confirmation emails for guest names…');
 const guestResult = await syncGuestNamesFromEmail();
 await backfillConfirmationCodes();
 const dateResult = await backfillBookingDates();
+// Party sizes for the earnings-export rows (the booking evaluator's extra-guest charge).
+await backfillEarningGuests().catch((err) => console.error('Party-size backfill failed:', err));
 // Booking requests and enquiries (the booking evaluator's demand data), after the stays
 // above, so a request whose stay was just confirmed is matched to it.
 const requestsMod = await import('./bookingrequests.js');
@@ -2920,4 +2963,4 @@ queueSave();
 // stores, and each was wrong in a way that stayed invisible until a
 // round-trip through Google -- an end date a day out, a name silently
 // dropped, a title separator nobody types. Nothing else imports them.
-export { guestCountFrom, backfillGuestCounts, backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName, findCleanerMatch };
+export { guestCountFrom, backfillGuestCounts, backfillEarningGuests, backfillBookingDates, stayChipHtml, bindStayChips, isLiveStay, notCancelled, renderAirbnb, renderAirbnbListings, initAirbnbListingsForm, initAirbnbSync, airbnbSegmentsForDay, renderAirbnbKeys, initAirbnbKeys, initKeysSettingsForm, initAirbnbAddBooking, eventDayRange, externalNameFromSummary, parseCleanerEventName, findCleanerMatch };

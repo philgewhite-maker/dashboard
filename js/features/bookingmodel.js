@@ -482,10 +482,11 @@ const earningRows = (data.airbnbEarnings || []).filter((e) => String(e.type).toL
 // Amount / Gross earnings: the clean then counts as what it actually brought in, and the nights keep their own share.
 // A row without a usable gross figure keeps the fee as charged.
 const netShareOf = (e) => { const g = Number(e.grossEarnings); const a = Number(e.amount); const k = g > 0 ? a / g : NaN; return k > 0.5 && k <= 1 ? k : 1; };
-// The party size comes from the stay the row belongs to (by confirmation code), for Airbnb's extra-guest charge.
+// The party size: the row's own (filled from its confirmation email, airbnb.js backfillEarningGuests), else the stay it
+// belongs to (by confirmation code), for Airbnb's extra-guest charge.
 const guestsByCode = new Map();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && Number(r.guests) > 0) guestsByCode.set(r.confirmationCode, Number(r.guests)); });
-const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: guestsByCode.get(e.confirmationCode) ?? null }));
+const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: Number(e.guests) > 0 ? Number(e.guests) : (guestsByCode.get(e.confirmationCode) ?? null) }));
 const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
