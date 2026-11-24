@@ -745,7 +745,7 @@ weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
 byMonth, base, uplift, clean, n: sm.length, nEarn,
 // Extra-guest charge, after Airbnb's fee: per extra guest a night (extraGuestNet), and the average a night (extraGuest).
-extraGuestNet: extraFee[i] * roomShare[i], extraGuest: extraFee[i] * roomShare[i] * meanExtra[i], meanExtraGuests: meanExtra[i], avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
+rateShare: roomShare[i], extraGuestNet: extraFee[i] * roomShare[i], extraGuest: extraFee[i] * roomShare[i] * meanExtra[i], meanExtraGuests: meanExtra[i], avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
 nNewListing: sm.filter((x) => x.nl > 0).length, avgTopRated: mean(sm.map((x) => x.tr)), stage: roomStage[i], trace,
 source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' : overall != null ? `${sm.length} of your stays (${nEarn} from the earnings export), recent ones counting most (half as much every ${po.halfLife} days), each put on today's rating stage${po.deseason ? ' and taken out of its month’s season' : ''}` : everyRaw.length ? `other rooms' stays (${everyRaw.length})` : 'assumption',
 };
@@ -1091,8 +1091,88 @@ return hit;
 
 // The payout a night would earn, before discounts: your setting, else what the room has
 // earned in that month of the year, else overall; plus any event uplift on the date.
+// ---- Rates you've set (prefs.bookingEvaluator.setRates) ----------------------------------------------------------
+// [{id, roomKey, from, last (YYYY-MM-DD, nights inclusive), weekday £, weekend £|null (Fri/Sat; blank = weekday), setOn,
+// reason, demandPct|null, channel 'airbnb'}]: the nightly price you actually set on Airbnb for a stretch, as Airbnb shows
+// it before its fee and before its rule discounts. On those nights the rate REPLACES the model's whole price chain (learnt
+// base, season, Fri/Sat uplift, rating stage, event uplift, actioned proposals): all of that is what you priced in when you
+// set it. What is still applied on top, once, exactly as on any other night:
+//   - Airbnb's fee: x the room's latest Amount / Gross earnings share (rateShare), the model working in received money;
+//   - Airbnb's rule discounts at booking (short notice, length of stay, top-rated, new-listing): in playArrivals' factor;
+//   - the cleaning fee and the extra-guest charge (per booking / per night, as elsewhere).
+// What is NOT applied on those nights: the gap discount and a void plan's price cut (your own cuts: the rate already holds
+// whatever cut you set; a void plan's minimum stay still applies). A rate only counts from its setOn (none = always); the
+// newest covering a night wins. Not modelled yet: a further cut you'd probably make later if the night doesn't sell (the
+// learnt infill/short-notice price path), so a set rate is held to check-in.
+// The guest's response to price is unchanged: against the hotel basket where it covers the night, else against the
+// room's own baseline, which (as for any stored setting) includes the rate, so a set rate moves demand only where the
+// basket gives a market reference. That is why an event's demand lift is a separate input (demandAt).
+const rateCacheMap = new WeakMap();
+function setRatesOf(ctx) {
+const r = rateCacheMap.get(ctx);
+if (r && r.src === (ctx.s && ctx.s.setRates)) return r.byRoom;
+const today = ctx.today;
+const list = (Array.isArray(ctx.s && ctx.s.setRates) ? ctx.s.setRates : []).filter((x) => x && x.roomKey && x.from && x.last && x.last >= x.from && Number(x.weekday) > 0 && (!x.setOn || x.setOn <= today) && (x.channel || 'airbnb') === 'airbnb');
+const byRoom = (ctx.rooms || []).map((room) => list.filter((x) => x.roomKey === room.key).map((x) => ({
+from: dayNum(x.from), to: dayNum(x.last) + 1, wd: Number(x.weekday), we: Number(x.weekend) > 0 ? Number(x.weekend) : Number(x.weekday),
+setOn: x.setOn || '', demand: x.demandPct == null || x.demandPct === '' || !Number.isFinite(Number(x.demandPct)) ? null : Number(x.demandPct) / 100, reason: x.reason || '', rec: x,
+})).sort((a, b) => b.setOn.localeCompare(a.setOn)));
+rateCacheMap.set(ctx, { src: ctx.s && ctx.s.setRates, byRoom });
+return byRoom;
+}
+// The set rate covering night n of room ri, or null: {rate (Airbnb's shown price for that night), setOn, demand, reason, rec}.
+function setRateAt(ctx, ri, n) {
+const l = setRatesOf(ctx)[ri];
+if (!l || !l.length) return null;
+for (const x of l) if (n >= x.from && n < x.to) return { ...x, rate: weekendNight(n) ? x.we : x.wd };
+return null;
+}
+// Demand on check-in night c, as a multiplier on the arrival rate: a set rate's own demandPct when it has one, else the
+// calendar events' (eventDemandAt). The arrival rate is learnt per month from your history, which already holds the past
+// occurrences of a recurring event, so a recurring one's lift is balanced by a cut on the nights either side, as its price
+// uplift is (the month's total demand is unchanged); a one-off isn't in the history and isn't offset. Only used on real
+// simulations (todayN set), never on the synthetic month that sets the starting level.
+function demandAt(ctx, ri, c) {
+const sr = setRateAt(ctx, ri, c);
+if (sr && sr.demand != null) return Math.max(0, 1 + sr.demand);
+let f = 1;
+eventDemandAt(ctx, ri, c).forEach((x) => { f *= x; });
+return f;
+}
+const demandCacheMap = new WeakMap();
+function eventDemandAt(ctx, ri, n) {
+const all = eventsOf(ctx);
+if (!all.some((ev) => ev && Number(ev.demandPct))) return NO_FACTORS;
+let cache = demandCacheMap.get(ctx);
+if (!cache || cache.evs !== all) { cache = { evs: all, years: new Map() }; demandCacheMap.set(ctx, cache); }
+const y = new Date(n * DAY_MS).getUTCFullYear();
+const ck = `${ri}|${y}`;
+let map = cache.years.get(ck);
+if (!map) {
+map = new Map();
+const add = (d, f) => { const l = map.get(d); if (l) l.push(f); else map.set(d, [f]); };
+const from = Date.UTC(y, 0, 1) / DAY_MS - EVENT_OFFSET_DAYS;
+const to = Date.UTC(y, 11, 31) / DAY_MS + EVENT_OFFSET_DAYS;
+roomEvents(ctx, ri).filter((ev) => Number(ev.demandPct)).forEach((ev) => {
+const u = Number(ev.demandPct) / 100;
+eventOccurrences(ev, from, to).forEach((oc) => {
+for (let d = oc.start; d < oc.end; d++) add(d, Math.max(0, 1 + u));
+if (ev.rule === 'once') return;
+const k = oc.end - oc.start;
+const N = k + 2 * EVENT_OFFSET_DAYS;
+const f = Math.max(0.1, 1 - u * k / (N - k));
+for (let d = oc.start - EVENT_OFFSET_DAYS; d < oc.end + EVENT_OFFSET_DAYS; d++) if (d < oc.start || d >= oc.end) add(d, f);
+});
+});
+cache.years.set(ck, map);
+}
+return map.get(n) || NO_FACTORS;
+}
+
 function basePrice(ctx, params, roomIdx, n) {
 const p = params.prices[roomIdx];
+const sr = setRateAt(ctx, roomIdx, n);
+if (sr) return sr.rate * (p.rateShare || 1);
 const monthly = p.weekday ?? seasonPrice(p, n, params.priceInterp);
 let v = weekendNight(n) ? (p.weekend ?? monthly * p.uplift) : monthly;
 const room = ctx.rooms[roomIdx];
@@ -1559,7 +1639,8 @@ for (let c = Math.max(from, todayN); c < to; c++) {
 const boost = guestResponse(ctx, params, ri, c, todayN).B; // v7: per check-in date and reach (v6: maxBoost per room)
 const daysLeft = todayN == null ? null : c - todayN;
 const share = daysLeft == null ? 1 : leadCdf(params, c, daysLeft);
-const k = poisson(rng, lam(ri, c) * params.dowW[dowOf(c)] * boost * share);
+const dm = todayN == null ? 1 : demandAt(ctx, ri, c); // an event's or set rate's demand lift (see demandAt)
+const k = poisson(rng, lam(ri, c) * dm * params.dowW[dowOf(c)] * boost * share);
 for (let j = 0; j < k; j++) {
 const L = sampleLead(params, c, daysLeft, rng);
 out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng(), cu: cancels ? rng() : undefined, t0: todayN }); // v7: t0, the reach guestResponse was cut to; v9: cu, the cancellation draw (playArrivals)
@@ -1570,7 +1651,7 @@ if (exFrac) {
 // The 1-night extras come from their own random stream when one is given, so lowering a minimum stay leaves the
 // ordinary arrivals exactly as they were (what lets a what-if be compared with the same draws).
 const rx = rngX || rng;
-const k1 = poisson(rx, lam(ri, c) * params.dowW[dowOf(c)] * boost * share * exFrac);
+const k1 = poisson(rx, lam(ri, c) * dm * params.dowW[dowOf(c)] * boost * share * exFrac);
 for (let j = 0; j < k1; j++) {
 const L = sampleLead(params, c, daysLeft, rx);
 out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx(), cu: cancels ? rx() : undefined, t0: todayN });
@@ -1639,10 +1720,13 @@ const after = ge - i1;
 const orphan = (boundedL && before > 0 && before < min) || (boundedR && after > 0 && after < min);
 if (orphan && a.lead > 7) continue;
 const inGap = boundedL && boundedR && ge - gs <= gapMax;
-const factor = (1 - stepPct(discs[a.room].shortNotice, 'days', a.lead)) * (1 - stepPct(discs[a.room].length, 'nights', a.los)) * (plan && plan.pct > 0 ? 1 - plan.pct / 100 : inGap ? 1 - gapPct : 1);
+// Your own cut on top of the price: a void plan's, else the gap discount. None on a night whose rate you've set (the
+// rate already holds whatever cut you chose; setRateAt): only Airbnb's rule discounts apply there.
+const fixedRate = setRateAt(ctx, a.room, a.c);
+const ex = fixedRate ? 0 : plan && plan.pct > 0 ? plan.pct / 100 : inGap ? gapPct : 0;
+const factor = (1 - stepPct(discs[a.room].shortNotice, 'days', a.lead)) * (1 - stepPct(discs[a.room].length, 'nights', a.los)) * (1 - ex);
 // v7: the guest responds to the all-in price (see guestResponse); the extra cut is the same one `factor` takes.
 const gr = guestResponse(ctx, params, a.room, a.c, a.t0); // the same response the arrival was drawn under
-const ex = plan && plan.pct > 0 ? plan.pct / 100 : inGap ? gapPct : 0;
 if (a.u > gr.mult(a.los, a.lead, ex) / gr.B) continue; // the guest doesn't take it at this price
 for (let i = i0; i < i1 && i < len; i++) o[i] = 1;
 // clean (v9, audit finding 3): the received cleaning fee this booking pays, the one its guest was priced at (gr.fees,
@@ -3084,6 +3168,35 @@ return calibrate(c);
 } });
 const p11b = ctx11b.params.prices[0];
 check('Extra-guest charge out of past payouts, average added back per night', Math.abs(p11b.trace.medianPaidPerNight - 101.2) < 0.05 && Math.abs(p11b.extraGuest - 8.8) < 1e-9 && Math.abs(p11b.extraGuestNet - 8.8) < 1e-9 && p11b.meanExtraGuests === 1, `${p11b.trace.medianPaidPerNight} ${p11b.extraGuest} ${p11b.meanExtraGuests}`);
+// 11c. A set rate replaces the model's price (x Airbnb's fee share, 1 here with no earnings rows), on its nights only, Fri/Sat
+// at its weekend figure, and from its setOn only.
+const ctx11c = testContext({ occupancy: 0.5, today: '2026-11-01', more: { setRates: [
+{ id: 'r1', roomKey: 'A', from: '2026-12-10', last: '2026-12-12', weekday: 150, weekend: 190, setOn: '2026-10-20' },
+{ id: 'r2', roomKey: 'A', from: '2026-12-20', last: '2026-12-20', weekday: 999, setOn: '2026-11-05' }] } });
+const bp = (d) => basePrice(ctx11c, ctx11c.params, 0, dayNum(d));
+const nb11c = nightBreakdown(ctx11c, ctx11c.params, 0, dayNum('2026-12-10'));
+check('Set rate replaces the price on its nights only (Thu 150, Fri 190), not before its setOn', bp('2026-12-10') === 150 && bp('2026-12-11') === 190 && bp('2026-12-13') === 100 && bp('2026-12-20') === 100 && nb11c.listPrice === 150 && nb11c.steps[0].source === 'your set rate', `${bp('2026-12-10')} ${bp('2026-12-11')} ${bp('2026-12-13')} ${bp('2026-12-20')} ${nb11c.listPrice}`);
+// 11d. The gap discount isn't taken on a set-rate night (the rate holds your cut); it still is elsewhere.
+const gapRun = (rates) => {
+const c = testContext({ occupancy: 0.5, today: '2026-11-01', more: { gapDiscountPct: 20, gapMaxNights: 5, setRates: rates } });
+const base = dayNum('2026-12-01'); const len = 40;
+const occ = [new Uint8Array(len)];
+for (let i = 0; i < 10; i++) occ[0][i] = 1; for (let i = 12; i < len; i++) occ[0][i] = 1; // a 2-night gap: 11-12 Dec
+const b = playArrivals(c, c.params, [{ room: 0, c: base + 10, los: 2, at: base - 5, lead: 15, u: 0, tie: 0, t0: null }], occ, base, { minNights: { 0: 1 }, len });
+return b.length ? b[0].factor : null;
+};
+const fGap = gapRun([]); const fSet = gapRun([{ id: 'r', roomKey: 'A', from: '2026-12-11', last: '2026-12-12', weekday: 120, setOn: '2026-10-01' }]);
+check('Gap discount applies without a set rate, not with one', Math.abs(fGap - 0.8) < 1e-9 && Math.abs(fSet - 1) < 1e-9, `${fGap} ${fSet}`);
+// 11e. Demand lift: a one-off event's own nights x1.5, nothing either side; a yearly one balanced so its window's total holds;
+// a set rate's own demand wins over the event's on its nights.
+const evOnce = { id: 'e1', name: 'One-off', rule: 'once', date: '2026-12-10', nights: 2, upliftPct: 0, demandPct: 50, dates: [] };
+const evYear = { id: 'e2', name: 'Yearly', rule: 'fixed', month: 12, day: 10, nights: 2, upliftPct: 0, demandPct: 50, dates: [] };
+const dctx = (ev, rates = []) => testContext({ occupancy: 0.5, today: '2026-11-01', more: { events: [ev], setRates: rates } });
+const c1 = dctx(evOnce); const c2 = dctx(evYear); const c3 = dctx(evOnce, [{ id: 'r', roomKey: 'A', from: '2026-12-10', last: '2026-12-10', weekday: 200, demandPct: 10, setOn: '2026-10-01' }]);
+const dm = (c, d) => demandAt(c, 0, dayNum(d));
+let winSum = 0; const s0 = dayNum('2026-12-10');
+for (let n = s0 - EVENT_OFFSET_DAYS; n < s0 + 2 + EVENT_OFFSET_DAYS; n++) winSum += demandAt(c2, 0, n);
+check('Event demand: one-off x1.5 on its nights only; yearly balanced over its window; set rate demand wins', dm(c1, '2026-12-10') === 1.5 && dm(c1, '2026-12-11') === 1.5 && dm(c1, '2026-12-12') === 1 && dm(c1, '2026-12-09') === 1 && dm(c2, '2026-12-10') === 1.5 && dm(c2, '2026-12-12') < 1 && Math.abs(winSum - (2 + 2 * EVENT_OFFSET_DAYS)) < 1e-9 && Math.abs(dm(c3, '2026-12-10') - 1.1) < 1e-9 && dm(c3, '2026-12-11') === 1.5, `${dm(c1, '2026-12-10')} ${dm(c2, '2026-12-12').toFixed(3)} ${winSum.toFixed(4)} ${dm(c3, '2026-12-10')}`);
 // 12. The cleaning fee guests pay is income on every simulated booking.
 const ctx12 = testContext({ occupancy: 0.97, today: '2026-10-01' });
 ctx12.stays = ctx5.stays;
@@ -3798,8 +3911,12 @@ const stage = (params.roomStage || [])[ri] || 'rated';
 const stageMult = (params.stagePrice || {})[stage] || 1;
 const m = monthOf(n);
 const we = weekendNight(n);
+const sr = setRateAt(ctx, ri, n);
 let v;
-if (p.weekday != null) {
+if (sr) {
+v = add('base', 'Base', 0, sr.rate, `your set rate${sr.reason ? ` (${sr.reason})` : ''}${sr.setOn ? `, set ${sr.setOn}` : ''}: the ${we ? 'Fri/Sat' : 'Sun–Thu'} price as Airbnb shows it`, { samples: 0, source: 'your set rate', setRate: sr.rec });
+v = add('fee', "Airbnb's fee", v, v * (p.rateShare || 1), `x${(p.rateShare || 1).toFixed(3)}: what your latest stay kept (Amount / Gross earnings)`);
+} else if (p.weekday != null) {
 v = add('base', 'Base', 0, p.weekday, 'your weekday price (Settings, Booking evaluator, Rooms)', { samples: 0, source: 'your setting' });
 v = add('season', 'Season', v, v, 'none: a set price is used as it is');
 v = add('weekday', 'Weekday', v, we ? (p.weekend ?? v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
@@ -3814,8 +3931,8 @@ const fit = (params.stageFit || {})[stage];
 v = add('stage', 'Rating stage', v, v * stageMult, stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${stageMult.toFixed(2)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`, { stage, mult: stageMult });
 }
 const day = dayStr(n);
-eventFactorsAt(ctx, ri, n).forEach((f) => { v = add(f.key, f.label, v, v * f.factor, f.reason, { event: f.event, factor: f.factor }); });
-ctx.proposals.forEach((pr) => {
+if (!sr) eventFactorsAt(ctx, ri, n).forEach((f) => { v = add(f.key, f.label, v, v * f.factor, f.reason, { event: f.event, factor: f.factor }); });
+if (!sr) ctx.proposals.forEach((pr) => {
 if (!room.listingIds.includes(pr.listingId) || !pr.startDate || day < pr.startDate || day > (pr.endDate || pr.startDate) || proposalOverridden(ctx, ri, pr)) return;
 if (Number.isFinite(Number(pr.upliftPct)) && pr.upliftPct != null) v = add('event', 'Event', v, v * (1 + Number(pr.upliftPct) / 100), `${pr.reason || 'event'}: +${Number(pr.upliftPct)}%`, { proposal: pr });
 else if (Number.isFinite(Number(pr.upliftAmount)) && pr.upliftAmount != null) v = add('event', 'Event', v, v + Number(pr.upliftAmount), `${pr.reason || 'event'}: +£${Number(pr.upliftAmount)}`, { proposal: pr });
@@ -3833,8 +3950,8 @@ cut('topRated', 'Top-rated guests', topRatedOf(s, disc), `${disc.topRatedPct}% f
 const st = params.stages && params.stages.get((params.roomListing || [])[ri]);
 const newPct = newListingPctOf(s);
 if (stage === 'new' && st && bookedOn < st.newUntil) cut('newListing', 'New-listing promotion', newPct, `until the listing leaves the new stage, about ${dayStr(st.newUntil)}`);
-cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100), `${Number(extraPct) || 0}% off this night`);
+if (!sr) cut('void', extraLabel, Math.min(0.9, Math.max(0, Number(extraPct) || 0) / 100), `${Number(extraPct) || 0}% off this night`);
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { setRateAt, demandAt, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };

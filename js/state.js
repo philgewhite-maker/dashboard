@@ -306,8 +306,13 @@ unavailable: [],
 voidPlans: [],
 // [{id, name, roomKey ('' = every room), rule 'fixed'|'nth'|'easter'|'once', month 1-12, day 1-31, weekday 0 (Sun)-6, nth 1-4 or -1 (last), offset (easter),
 // announced bool, dates ['YYYY-MM-DD'] (announced real first nights, replacing the rule in their year),
-// date 'YYYY-MM-DD' (once), nights 1-60, upliftPct}]: the yearly events calendar that lifts a night's price (bookingmodel.js eventFactorsAt).
+// date 'YYYY-MM-DD' (once), nights 1-60, upliftPct, demandPct|null}]: the yearly events calendar that lifts a night's price
+// (bookingmodel.js eventFactorsAt) and, with demandPct, the demand for check-ins on it (eventDemandAt).
 events: [],
+// [{id, roomKey, from, last (YYYY-MM-DD, inclusive), weekday £, weekend £|null, reason, demandPct|null, setOn, channel}]:
+// nightly prices you set on Airbnb, as Airbnb shows them; on those nights they replace the model's own price
+// (bookingmodel.js setRateAt).
+setRates: [],
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):
 // {demand, lead, cancel, appliedOn, note, history:[{on, demand, from, n}]}. 1 = no correction.
 calibration: { demand: 1, lead: 1, cancel: 1, appliedOn: '', note: '', history: [] },

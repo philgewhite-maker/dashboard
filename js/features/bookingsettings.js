@@ -32,6 +32,7 @@ if (!s.elasticityPrior || typeof s.elasticityPrior !== 'object' || s.elasticityP
 if (!Array.isArray(s.elasticityPrior.season) || s.elasticityPrior.season.length !== 12) s.elasticityPrior.season = [...d.elasticityPrior.season];
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
+if (!Array.isArray(s.setRates) || s.setRates === d.setRates) s.setRates = Array.isArray(s.setRates) ? s.setRates.map((x) => ({ ...x })) : [];
 if (!Array.isArray(s.events) || s.events === d.events) s.events = Array.isArray(s.events) ? s.events.map((x) => ({ ...x })) : [];
 if (s.events.some((x) => !x || !Array.isArray(x.dates))) s.events = s.events.filter(Boolean).map(normaliseEvent); // once per event (pre-v913 ones have no dates)
 data.prefs.bookingEvaluator = s;
@@ -262,6 +263,32 @@ const id = escapeHtml(ev.id);
 return `${nextHtml}<span class="be-ev-dates">${(ev.dates || []).map((d) => `<span class="heat-flag">${escapeHtml(evDate(d))} <span class="del-x" data-be-ev-date-del="${id}" data-date="${escapeHtml(d)}" title="Remove this date">&times;</span></span>`).join(' ')}
 <input type="date" class="settings-input" data-be-ev-date-in="${id}" title="An announced first night" style="width:140px;"><button class="sync-btn sm inline" type="button" data-be-ev-date-add="${id}">Add date</button></span>`;
 }
+// Rates you've set on Airbnb (prefs.bookingEvaluator.setRates; see setRateAt in bookingmodel.js): on these nights the model
+// prices from your rate, not from its own learnt price, and adds no gap or void cut of its own.
+const SET_RATE_REASONS = [['event', 'Event'], ['season', 'Season'], ['infill', 'Infill / gap'], ['short-notice', 'Short notice'], ['other', 'Other']];
+function setRatesHtml(s, rooms) {
+const list = (s.setRates || []).slice().sort((a, b) => String(a.from).localeCompare(String(b.from)));
+const roomName = (k) => (rooms.find((r) => r.key === k) || {}).label || 'Room';
+const short = (d) => new Date(`${d}T00:00:00Z`).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const reason = (k) => (SET_RATE_REASONS.find((x) => x[0] === k) || [k, k || ''])[1];
+const opts = (xs, sel) => xs.map(([v, l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(sel) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
+return `<h4 class="be-set-h" id="be-setrates-h">Rates you've set</h4>
+<div class="settings-note" style="margin:0 0 4px;">The nightly price you set on Airbnb for a stretch, as Airbnb shows it (before its fee and before its last-minute, length-of-stay and top-rated discounts). On these nights the model prices from your rate instead of its own, takes Airbnb's fee off at your latest stay's rate, applies Airbnb's discounts once at booking, and adds no gap discount or void cut of its own: whatever cut you chose is in the rate. Demand: how much busier check-ins on these nights are than the month's usual (blank = the event's demand, if any). A rate counts from the day you set it; the newest covering a night wins.</div>
+<div id="be-setrates">
+${list.map((x) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml(roomName(x.roomKey))}</span><span>${escapeHtml(short(x.from))}${x.last !== x.from ? ` – ${escapeHtml(short(x.last))}` : ''}: £${escapeHtml(String(x.weekday))}${Number(x.weekend) > 0 ? ` Sun–Thu, £${escapeHtml(String(x.weekend))} Fri/Sat` : ' a night'}${x.reason ? `, ${escapeHtml(reason(x.reason))}` : ''}${x.demandPct != null && x.demandPct !== '' ? `, demand ${Number(x.demandPct) >= 0 ? '+' : '−'}${Math.abs(Number(x.demandPct))}%` : ''}</span><span class="settings-note" style="margin:0;">set ${escapeHtml(x.setOn ? short(x.setOn) : '?')}${x.setOn && x.setOn > todayStr() ? ' (not yet counted)' : ''}</span><span class="del-x" data-be-rate-del="${escapeHtml(x.id)}" title="Remove">&times;</span></div>`).join('') || '<div class="settings-note" style="margin:0;">None yet: the model prices every night itself.</div>'}
+</div>
+<div class="sync-row" style="align-items:center;flex-wrap:wrap;">
+<select id="be-rate-room" class="settings-input">${rooms.map((r) => `<option value="${escapeHtml(r.key)}">${escapeHtml(r.label)}</option>`).join('')}</select>
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;">First night <input type="date" id="be-rate-from" class="settings-input" style="width:140px;"></label>
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;">Last night <input type="date" id="be-rate-last" class="settings-input" style="width:140px;"></label>
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;">Sun–Thu £<input type="number" id="be-rate-wd" class="settings-input" min="1" step="1" style="width:70px;"></label>
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;">Fri/Sat £<input type="number" id="be-rate-we" class="settings-input" min="1" step="1" placeholder="same" style="width:70px;"></label>
+<select id="be-rate-reason" class="settings-input">${opts(SET_RATE_REASONS, 'event')}</select>
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;">Demand <input type="number" id="be-rate-demand" class="settings-input" step="5" min="-90" max="500" placeholder="event's" style="width:70px;">%</label>
+<label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;">Set on <input type="date" id="be-rate-seton" class="settings-input" value="${todayStr()}" style="width:140px;"></label>
+<button class="sync-btn sm inline" type="button" id="be-rate-add">Add</button>
+</div>`;
+}
 function eventsHtml(s, rooms) {
 const evs = s.events || [];
 const opts = (xs, sel) => xs.map(([v, l]) => `<option value="${escapeHtml(String(v))}"${String(v) === String(sel) ? ' selected' : ''}>${escapeHtml(l)}</option>`).join('');
@@ -269,7 +296,7 @@ const pct = (v) => `${Number(v) >= 0 ? '+' : '−'}${Math.abs(Number(v) || 0)}%`
 return `<h4 class="be-set-h" id="be-events-h">Yearly events</h4>
 <div class="settings-note" style="margin:0 0 4px;">Dates that lift the price, every year or once. The same dates feed the direct booking site's event pages. For a date announced each year (a fixture list, a festival), set the rough rule and tick "announced": the rule is the guess until you add that year's real date, which then replaces it. A yearly event of 10 nights or fewer is already in your past prices, so its uplift is balanced by a small cut on the nights either side, keeping the period's average where your history has it. A longer yearly one is season, left to the season curve. A one-off is a plain uplift. A rate-review proposal that overlaps one of these is ignored: the calendar wins.</div>
 <div id="be-events">
-${evs.map((ev) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml(ev.name || 'Event')}</span><span>${escapeHtml(eventRuleWords(ev))}, ${escapeHtml(String(ev.nights))} night${Number(ev.nights) === 1 ? '' : 's'}, ${escapeHtml(pct(ev.upliftPct))}, ${escapeHtml(ev.roomKey ? ((rooms.find((r) => r.key === ev.roomKey) || {}).label || 'Room') : 'every room')}</span><span class="settings-note" style="margin:0;" data-be-ev-check="${escapeHtml(ev.id)}"></span>${eventDatesHtml(ev)}<span class="del-x" data-be-ev-del="${escapeHtml(ev.id)}" title="Remove">&times;</span></div>`).join('')}
+${evs.map((ev) => `<div class="be-set-row"><span class="be-set-label">${escapeHtml(ev.name || 'Event')}</span><span>${escapeHtml(eventRuleWords(ev))}, ${escapeHtml(String(ev.nights))} night${Number(ev.nights) === 1 ? '' : 's'}, ${escapeHtml(pct(ev.upliftPct))} price, ${escapeHtml(ev.roomKey ? ((rooms.find((r) => r.key === ev.roomKey) || {}).label || 'Room') : 'every room')}</span><label class="settings-note" style="margin:0;display:inline-flex;align-items:center;gap:4px;" title="How much more demand there is for check-ins on the event's nights, on top of the month's usual. A yearly event in your history is balanced by a cut on the nights either side, as its price is">demand <input type="number" class="settings-input" data-be-ev-demand="${escapeHtml(ev.id)}" value="${ev.demandPct == null ? '' : escapeHtml(String(ev.demandPct))}" placeholder="0" step="5" min="-90" max="500" style="width:60px;">%</label><span class="settings-note" style="margin:0;" data-be-ev-check="${escapeHtml(ev.id)}"></span>${eventDatesHtml(ev)}<span class="del-x" data-be-ev-del="${escapeHtml(ev.id)}" title="Remove">&times;</span></div>`).join('')}
 </div>
 <div class="sync-row" style="align-items:center;">
 <input type="text" id="be-ev-name" class="settings-input" placeholder="Name" style="width:130px;">
@@ -282,7 +309,8 @@ ${evs.map((ev) => `<div class="be-set-row"><span class="be-set-label">${escapeHt
 <span data-be-ev-for="once" style="display:none;align-items:center;gap:4px;"><input type="date" id="be-ev-date" class="settings-input" title="First night"></span>
 <label data-be-ev-for="fixed nth" style="display:inline-flex;align-items:center;gap:4px;" title="The real date is announced each year: the rule is only a rough guess until you add it"><input type="checkbox" id="be-ev-announced"> announced</label>
 <input type="number" id="be-ev-nights" class="settings-input" value="1" min="1" max="60" step="1" style="width:56px;" title="Nights it lifts the price">nights
-<input type="number" id="be-ev-uplift" class="settings-input" value="20" min="-90" max="500" step="1" style="width:60px;" title="Uplift on those nights">%
+<input type="number" id="be-ev-uplift" class="settings-input" value="20" min="-90" max="500" step="1" style="width:60px;" title="Price uplift on those nights">% price
+<input type="number" id="be-ev-demand" class="settings-input" value="" placeholder="0" min="-90" max="500" step="5" style="width:60px;" title="Extra demand for check-ins on those nights">% demand
 <button class="sync-btn sm inline" type="button" id="be-ev-add">Add</button>
 </div>`;
 }
@@ -401,6 +429,7 @@ ${(s.unavailable || []).map((u) => `<div class="be-set-row"><span class="be-set-
 <button class="sync-btn sm inline" type="button" id="be-unavail-add">Add</button>
 </div>
 ${eventsHtml(s, rooms)}
+${setRatesHtml(s, rooms)}
 <h4 class="be-set-h">The request itself</h4>
 ${row('Direct booking income counts', `×${numBox('directWeight', s.directWeight, { step: 0.05, width: 56 })}`)}
 ${row('Guest with no reviews', `×${numBox('guestNoReviews', s.guestNoReviews, { step: 0.05, width: 56 })}`)}
@@ -444,6 +473,14 @@ const el = document.getElementById('booking-evaluator-settings');
 if (!el) return;
 renderBookingEvaluatorSettings();
 el.addEventListener('change', (e) => {
+const evDemand = e.target.closest('[data-be-ev-demand]');
+if (evDemand) {
+const ev = settings().events.find((x) => x.id === evDemand.dataset.beEvDemand);
+if (!ev) return;
+const v = evDemand.value.trim();
+ev.demandPct = v === '' || !Number.isFinite(Number(v)) ? null : Number(v);
+queueSave(); return;
+}
 const chIn = e.target.closest('[data-ch]');
 if (chIn) {
 const c = channels().find((x) => x.id === chIn.dataset.ch);
@@ -631,6 +668,20 @@ if (!ev) return;
 ev.dates = (ev.dates || []).filter((d) => d !== evDateDel.dataset.date);
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
+const rateDel = e.target.closest('[data-be-rate-del]');
+if (rateDel) {
+const s = settings();
+s.setRates = s.setRates.filter((x) => x.id !== rateDel.dataset.beRateDel);
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
+if (e.target.closest('#be-rate-add')) {
+const val = (id) => document.getElementById(id).value;
+const from = val('be-rate-from'); const last = val('be-rate-last') || from;
+const wd = Number(val('be-rate-wd')); const we = val('be-rate-we') === '' ? null : Number(val('be-rate-we'));
+if (!from || last < from || !(wd > 0) || (we != null && !(we > 0))) return;
+settings().setRates.push({ id: uid(), roomKey: val('be-rate-room'), from, last, weekday: wd, weekend: we, reason: val('be-rate-reason'), demandPct: val('be-rate-demand') === '' ? null : Number(val('be-rate-demand')), setOn: val('be-rate-seton') || todayStr(), channel: 'airbnb' });
+queueSave(); renderBookingEvaluatorSettings(); return;
+}
 const evDel = e.target.closest('[data-be-ev-del]');
 if (evDel) {
 const s = settings();
@@ -640,7 +691,7 @@ queueSave(); renderBookingEvaluatorSettings(); return;
 if (e.target.closest('#be-ev-add')) {
 const val = (id) => document.getElementById(id).value;
 const rule = val('be-ev-rule');
-const ev = { id: uid(), name: val('be-ev-name').trim() || 'Event', roomKey: val('be-ev-room'), rule, nights: Math.min(60, Math.max(1, Math.round(Number(val('be-ev-nights'))) || 1)), upliftPct: Number(val('be-ev-uplift')) };
+const ev = { id: uid(), name: val('be-ev-name').trim() || 'Event', roomKey: val('be-ev-room'), rule, nights: Math.min(60, Math.max(1, Math.round(Number(val('be-ev-nights'))) || 1)), upliftPct: Number(val('be-ev-uplift')), demandPct: val('be-ev-demand') === '' ? null : Number(val('be-ev-demand')) };
 if (!Number.isFinite(ev.upliftPct)) return;
 if (rule === 'once') { ev.date = val('be-ev-date'); if (!ev.date) return; }
 else {
@@ -654,8 +705,8 @@ settings().events.push(normaliseEvent(ev));
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 if (!e.target.closest('#be-reset')) return;
-const { rooms, unavailable, calibration, voidPlans, events } = settings();
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events };
+const { rooms, unavailable, calibration, voidPlans, events, setRates } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events, setRates };
 queueSave();
 renderBookingEvaluatorSettings();
 });
