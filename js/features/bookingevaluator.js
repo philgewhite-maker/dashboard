@@ -48,15 +48,30 @@ sel.innerHTML = listingOptions().map((l) => `<option value="${escapeHtml(l.id)}"
 if (cur) sel.value = cur;
 }
 
-// An enquiry has no payout in its email: estimate one from the latest request on the same
-// listing (its payout against its nightly rate × nights covers Airbnb's fee and any cleaning fee).
-function estimatePayout(listingId, checkin, checkout, nightlyRate) {
-const nights = Math.round((new Date(`${checkout}T00:00:00`) - new Date(`${checkin}T00:00:00`)) / 86400000);
-const latest = (data.bookingRequests || []).filter((q) => q.listingId === listingId && q.payout > 0 && q.nightlyRate > 0).sort((a, b) => String(b.receivedAt).localeCompare(String(a.receivedAt)))[0];
-const rate = nightlyRate || (latest && latest.nightlyRate);
-if (!rate || nights <= 0) return null;
-const ratio = latest ? latest.payout / (latest.nightlyRate * Math.max(1, Math.round((new Date(`${latest.checkout}T00:00:00`) - new Date(`${latest.checkin}T00:00:00`)) / 86400000))) : 0.97;
-return Math.round(rate * nights * ratio);
+// An enquiry's email carries no price, so estimate what it would pay you from the booking model's
+// own prices for those dates: each night's price (already what reaches you, net of Airbnb's fee),
+// with the short-notice cut for when it was asked, the length-of-stay cut for this stay's own
+// length, plus the cleaning fee guests pay. No fee is taken off: the model's prices are worked back
+// from your earnings' Amount column, which is after every fee.
+async function estimatePayout(listingId, checkin, checkout, askedOn) {
+const model = await import('./bookingmodel.js');
+const ctx = model.buildContext();
+const { roomIndexOf, dayNum } = model.driftKit;
+const ri = roomIndexOf(ctx).get(listingId);
+if (ri == null) return null;
+const params = model.calibrate(ctx);
+const ci = dayNum(checkin);
+const nights = dayNum(checkout) - ci;
+if (!(nights > 0)) return null;
+const bookedOn = Math.min(ci, dayNum(String(askedOn || todayStr()).slice(0, 10)));
+const lengthPct = model.stepPct(model.discountsOf(ctx.s, 'airbnb', (params.roomListing || [])[ri] || null).length, 'nights', nights);
+let sum = 0;
+for (let n = ci; n < ci + nights; n++) {
+const nb = model.nightBreakdown(ctx, params, ri, n, { bookedOn });
+const expected = nb.steps.find((st) => st.key === 'length');
+sum += (nb.price / (1 - (expected ? expected.pct / 100 : 0))) * (1 - lengthPct);
+}
+return Math.round(sum + (params.prices[ri].clean || 0));
 }
 
 // Opens the workbench on a logged request/enquiry (`requestId`) or a stay (`reservationId`).
@@ -74,7 +89,7 @@ fillListingSelect();
 requestAnimationFrame(() => { scrollAndFlash('#booking-evaluator'); const f = document.getElementById('be-checkin'); if (f) f.focus({ preventScroll: true }); });
 return;
 }
-const payout = q ? (q.payout ?? estimatePayout(q.listingId, q.checkin, q.checkout, q.nightlyRate)) : (r.income ?? estimatePayout(r.listingId, r.checkin, r.checkout, null));
+const payout = q ? (q.payout ?? await estimatePayout(q.listingId, q.checkin, q.checkout, q.receivedAt)) : (r.income ?? await estimatePayout(r.listingId, r.checkin, r.checkout, null));
 state.prefill = { requestId: q ? q.id : '', reservationId: q ? (q.reservationId || '') : r.id, estimated: q ? q.payout == null : r.income == null };
 state.overrides = {};
 const { switchTab } = await import('../tabs.js');
@@ -162,7 +177,7 @@ if (r.breakEven != null) lines.push(r.breakEven > r.request.payout ? `Break-even
 const targets = Object.values(data.prefs.lettingChartTargets || {}).reduce((a, t) => a + (Number(t && t.normal) || 0), 0);
 const income = (side) => side.parts.request + side.parts.before + side.parts.inside + side.parts.after + side.parts.other + r.existingIncome;
 lines.push(`Expected income in that stretch: ${money(income(r.accept))} if accepted, ${money(income(r.reject))} if not${targets ? ` (your monthly targets add up to ${money(targets)})` : ''}.`);
-if (state.prefill && state.prefill.estimated) lines.push('<span class="settings-note" style="margin:0;">The payout is an estimate from your nightly rate: this enquiry\'s email has none. Change it above and Evaluate again.</span>');
+if (state.prefill && state.prefill.estimated) lines.push('<span class="settings-note" style="margin:0;">The payout is an estimate from the model\'s nightly prices for these dates (after Airbnb\'s fee, plus the cleaning fee): this enquiry\'s email has no price. Type the figure from the Airbnb thread above and Evaluate again.</span>');
 return `<div class="be-verdict">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`;
 }
 
