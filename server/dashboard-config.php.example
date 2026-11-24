@@ -36,6 +36,12 @@ return [
     // notion.php. Was $NOTION_TOKEN.
     'notion_token' => 'PUT-YOUR-NOTION-INTEGRATION-TOKEN-HERE',
 
+    // google-token.php: the OAuth client the app already signs in with (Google
+    // Cloud console -> APIs & Services -> Credentials -> the Web client). The ID
+    // is the one in js/sync/config.js; the secret is shown on that same page.
+    'google_client_id' => 'PUT-YOUR-GOOGLE-OAUTH-CLIENT-ID-HERE',
+    'google_client_secret' => 'PUT-YOUR-GOOGLE-OAUTH-CLIENT-SECRET-HERE',
+
     // telegram-bot.php. Were $BOT_TOKEN and $WEBHOOK_SECRET.
     'telegram_bot_token' => 'PUT-YOUR-BOTFATHER-TOKEN-HERE',
     'telegram_webhook_secret' => 'PUT-A-DIFFERENT-LONG-RANDOM-STRING-HERE',

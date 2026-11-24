@@ -14,7 +14,9 @@
 // that need no Google sign-in. The split isn't arbitrary: Google's token
 // client (js/sync/googleauth.js) issues a ~1 hour access token with no
 // refresh token, so Calendar, Mail, Contacts and Google Tasks physically
-// cannot run without a signed-in page.
+// cannot run without a signed-in page -- unless Google is linked to the web
+// host (server/google-token.php), which is also what lets the NAS runner
+// below run them with every device closed.
 import { data, queueSave, flushSave } from '../state.js';
 import { escapeHtml } from '../utils.js';
 import { canAttemptGoogleAction } from '../sync/googleauth.js';
@@ -342,7 +344,7 @@ else setTimeout(resolve, 0);
 }
 
 async function runDueTasks(trigger = 'open') {
-if (running) return;
+if (running) return null;
 running = true;
 let t = null;
 try {
@@ -409,6 +411,7 @@ if (failures.length) t.fail(parts.join(' '));
 else if (!ran.length) t.zero(parts.join(' ') || 'Nothing ran.');
 else t.done(parts.join(' '));
 }
+return { ran, failures, notSignedIn };
 } catch (err) {
 if (t) t.fail(err);
 throw err;
@@ -456,13 +459,13 @@ return `${Math.round(hours / 24)}d ago`;
 function renderScheduled() {
 const el = document.getElementById('scheduled-tasks');
 if (!el) return;
-el.innerHTML = `<table class="limits-table">
-<thead><tr><th>Task</th><th>Last run</th><th title="Google-backed syncs can't run in the background at all — the sign-in issues a one-hour token with no way to renew it unattended." style="cursor:help;text-decoration:underline dotted;">Needs sign-in</th><th>On</th></tr></thead>
+el.innerHTML = `${nasRunnerHtml()}<table class="limits-table">
+<thead><tr><th>Task</th><th>Last run</th><th title="Google-backed syncs need a Google sign-in: either this device's own, or Google linked to your web host (Settings → Google account → Stay signed in), which is what the NAS uses." style="cursor:help;text-decoration:underline dotted;">Needs sign-in</th><th>On</th></tr></thead>
 <tbody>${SCHEDULED_TASKS.map((t) => {
 const r = runs()[t.id];
 return `<tr>
 <td>${escapeHtml(t.label)}<div class="settings-note" style="margin:0;">${t.noteHtml || escapeHtml(t.note)}</div></td>
-<td>${escapeHtml(agoLabel(r?.at))}${claimedElsewhere(t) ? ' <span class="settings-note" style="display:inline;margin:0;">(running on another device)</span>' : ''}${r?.skipped ? ` <span class="settings-note" style="display:inline;margin:0;">(${escapeHtml(r.skipped)})</span>` : ''}</td>
+<td>${escapeHtml(agoLabel(r?.at))}${claimedElsewhere(t) ? ` <span class="settings-note" style="display:inline;margin:0;">(running on ${runs()[t.id].claimBy === 'nas' ? 'the NAS' : 'another device'})</span>` : ''}${r?.skipped ? ` <span class="settings-note" style="display:inline;margin:0;">(${escapeHtml(r.skipped)})</span>` : ''}</td>
 <td>${t.needsGoogle ? 'Yes' : 'No'}</td>
 <td><input type="checkbox" data-scheduled-toggle="${t.id}" ${isEnabled(t) ? 'checked' : ''}></td>
 </tr>`;
@@ -484,6 +487,12 @@ data.prefs.scheduledOff = [...off];
 queueSave();
 });
 });
+const nasToggle = el.querySelector('#nas-runner-toggle');
+if (nasToggle) nasToggle.addEventListener('change', () => {
+data.prefs.nasRunner = { ...(data.prefs.nasRunner || {}), enabled: nasToggle.checked };
+queueSave();
+renderScheduled();
+});
 const interval = el.querySelector('#scheduled-interval');
 if (interval) interval.addEventListener('change', () => {
 data.prefs.scheduledIntervalHours = Math.max(1, Number(interval.value) || DEFAULT_INTERVAL_HOURS);
@@ -503,7 +512,70 @@ if (after) after.textContent = 'Done — see each panel for what it found.';
 });
 }
 
+// ---- The NAS runner -------------------------------------------------------
+// The home agent (home-agent/apprunner.py) opens this app every half hour in the NAS's own headless browser, as a
+// device of its own (device tag 'nas'), and runs whatever is due, exactly as opening the app on a phone would. With
+// Google linked to the web host it can run the Google syncs too, so they happen whether or not any device is open.
+//
+// Switchable both ways: the Settings checkbox (prefs.nasRunner.enabled, synced) is read by the runner page itself,
+// so turning it off stops the NAS on its next visit; and devices never wait for the NAS. They keep running whatever
+// is due when opened, as before, so a NAS that is off, unreachable or switched off here costs nothing but the gap:
+// tasks simply become due on the next device open. Each NAS visit leaves a beat in scheduledRuns.nasRunner
+// ({at, canGoogle, ran, failures}) for the status line.
+const RUNNER_KEY = 'dash-runner';
+const NAS_STALE_MS = 2 * 3600000;
+function isRunnerPage() { try { return localStorage.getItem(RUNNER_KEY) === 'nas'; } catch (e) { return false; } }
+const nasEnabled = () => !!(data.prefs.nasRunner && data.prefs.nasRunner.enabled);
+
+async function runAsRunner() {
+const finish = (result) => { window.__dashRunnerResult = { ...result, finishedAt: new Date().toISOString() }; return result; };
+try {
+const sync = await import('../sync/autosync.js');
+const { getKnownRev } = await import('../sync/selfhost.js');
+await sync.pull();
+// Never act on a blank copy: a runner that failed to fetch the server's document must not push anything.
+if (!(await getKnownRev())) return finish({ ok: false, error: "couldn't load the server's copy" });
+if (!nasEnabled()) return finish({ ok: true, skipped: 'switched off in Settings → Scheduled syncs' });
+const canGoogle = await canAttemptGoogleAction().catch(() => false);
+const summary = (await runDueTasks('nas')) || { ran: [], failures: [], notSignedIn: [] };
+const build = (document.getElementById('build-stamp') || {}).textContent || '';
+runs().nasRunner = { at: new Date().toISOString(), build, canGoogle, ran: summary.ran, failures: summary.failures.slice(0, 10) };
+queueSave();
+await flushSave();
+await sync.push({ force: true });
+return finish({ ok: true, canGoogle, ...summary });
+} catch (err) {
+return finish({ ok: false, error: (err && err.message) || String(err) });
+}
+}
+
+function nasRunnerHtml() {
+const beat = runs().nasRunner;
+let line;
+if (!beat || !beat.at) line = 'The NAS hasn’t visited yet. It needs the app runner set up in the home agent (APP_RUNNER_URL in its .env).';
+else {
+const stale = Date.now() - new Date(beat.at).getTime() > NAS_STALE_MS;
+line = `NAS last ran ${agoLabel(beat.at)}${beat.ran && beat.ran.length ? `: ${escapeHtml(beat.ran.join(', '))}` : ', nothing was due'}.`
++ (beat.canGoogle ? '' : ' It can’t reach Google, so the Google syncs stay with your devices: link Google under <span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#google-host-link">Settings → Google account → Stay signed in</span>.')
++ (beat.failures && beat.failures.length ? ` Failed: ${escapeHtml(beat.failures.join('; '))}.` : '')
++ (stale && nasEnabled() ? ' <strong>That’s over 2 hours ago</strong>, so your devices are running scheduled syncs by themselves meanwhile.' : '');
+}
+return `<div class="settings-block" style="margin:0 0 10px;padding:0;">
+<label class="settings-note" style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0 0 4px;">
+<input type="checkbox" id="nas-runner-toggle" ${nasEnabled() ? 'checked' : ''}>
+Let the NAS run these every half hour, even with every device closed
+</label>
+<div class="settings-note" style="margin:0;">${beat ? line : escapeHtml(line)} Devices still run anything due when you open them, so if the NAS is off or out of reach nothing stops; untick this to stop the NAS entirely.</div>
+</div>`;
+}
+
 function initScheduled() {
+if (isRunnerPage()) {
+renderScheduled();
+// The first paint, the document pull and the Google sign-in restore land first, as on a phone.
+setTimeout(runAsRunner, 4000);
+return;
+}
 renderScheduled();
 // Deferred so the first paint, the initial document pull and the Google
 // sign-in restore all land first -- a sync fired into a half-loaded app

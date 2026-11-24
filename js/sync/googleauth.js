@@ -8,6 +8,7 @@
 // without tripping browsers' popup blockers.
 import { GOOGLE_CLIENT_ID } from './config.js';
 import { getLocalSettings, setLocalSetting } from '../state.js';
+import { getConfig as getSyncConfig } from './selfhost.js';
 
 const BASE_SCOPES = [
 'https://www.googleapis.com/auth/drive.appdata',
@@ -156,10 +157,151 @@ const timer = setTimeout(() => c.abort(), 3000);
 try { await fetch('https://www.gstatic.com/generate_204', { mode: 'no-cors', cache: 'no-store', signal: c.signal }); return true; } catch (e) { return false; } finally { clearTimeout(timer); }
 }
 
+// ---- Host-held sign-in (server/google-token.php) ----------------------------
+// Once Google is linked to your web host, the host keeps the renewable sign-in and this asks it for each hourly
+// token: no Google window, on any device, the NAS runner included. Anything that stops it working (the file not
+// uploaded, nothing linked, a permission the link doesn't cover, this device opted out with Sign out) falls back to
+// the browser sign-in below, exactly as before.
+const STATUS_TTL_MS = 10 * 60000;
+let hostedStatusCache = null; // {at, available, configured, linked, scopes, ...}
+let pendingHosted = null;
+let forceHostedNext = false;
+
+async function hostedEndpoint() {
+const { url, secret, configured } = await getSyncConfig();
+if (!configured) return null;
+const endpoint = url.replace(/sync\.php(?=$|\?)/, 'google-token.php');
+return endpoint === url ? null : { endpoint, secret };
+}
+
+async function hostedCall(action, body) {
+const ep = await hostedEndpoint();
+if (!ep) return { status: 0, json: null };
+const c = new AbortController();
+const timer = setTimeout(() => c.abort(), 15000);
+try {
+const resp = await fetch(`${ep.endpoint}${ep.endpoint.includes('?') ? '&' : '?'}action=${action}`, {
+method: body === undefined ? 'GET' : 'POST',
+headers: { 'X-Sync-Secret': ep.secret, ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+body: body === undefined ? undefined : JSON.stringify(body),
+cache: 'no-store',
+signal: c.signal,
+});
+let json = null;
+try { json = await resp.json(); } catch (e) { json = null; }
+return { status: resp.status, json };
+} catch (err) {
+if (err.name === 'AbortError') throw new Error("Your web host didn't answer the Google sign-in request within 15s.");
+throw err;
+} finally { clearTimeout(timer); }
+}
+
+// {available: google-token.php answered, configured, linked, scopes, linkedAt, lastRefreshAt, lastError, redirectUri}
+async function hostedGoogleStatus(force) {
+if (!force && hostedStatusCache && Date.now() - hostedStatusCache.at < STATUS_TTL_MS) return hostedStatusCache;
+let st = { available: false, configured: false, linked: false, scopes: '' };
+let answered = false;
+try {
+const { status, json } = await hostedCall('status');
+answered = status !== 0;
+if (status === 200 && json) st = { ...json, available: true };
+} catch (e) { /* offline or unreachable: report unavailable, the browser sign-in still works */ }
+// A host that answered is remembered for 10 minutes; a network blip only for 30 seconds, so one dropped request
+// doesn't push every Google call back onto the browser sign-in for the next 10.
+hostedStatusCache = { ...st, at: answered ? Date.now() : Date.now() - STATUS_TTL_MS + 30000 };
+return hostedStatusCache;
+}
+
+const grantedCovers = (granted) => { const g = new Set(String(granted || '').split(/\s+/)); return scopesForSession.split(' ').every((s) => g.has(s)); };
+
+async function hostedUsable() {
+const settings = await getLocalSettings();
+if (settings.googleHostedOff) return false;
+await refreshScopes();
+const st = await hostedGoogleStatus(false);
+return !!(st.available && st.linked && grantedCovers(st.scopes));
+}
+
+// A token from the host, or null when the host has nothing to give (not linked / needs re-linking).
+async function hostedToken() {
+if (pendingHosted) return pendingHosted;
+const force = forceHostedNext;
+forceHostedNext = false;
+pendingHosted = (async () => {
+const { status, json } = await hostedCall('token', { force });
+if (status === 200 && json && json.accessToken) {
+if (hostedStatusCache && json.scopes) hostedStatusCache.scopes = json.scopes;
+cachedToken = { accessToken: json.accessToken, expiresAt: Date.now() + (Number(json.expiresIn) || 3600) * 1000 };
+await setLocalSetting('googleConnected', true);
+return cachedToken.accessToken;
+}
+if (status === 404 || status === 409) { if (hostedStatusCache) hostedStatusCache.linked = false; return null; }
+throw new Error((json && json.message) || `Your web host couldn't renew the Google sign-in (HTTP ${status}).`);
+})().finally(() => { pendingHosted = null; });
+return pendingHosted;
+}
+
+// Link once: asks the host for Google's consent address and opens it. Must be called straight from a click (the
+// window is opened before anything is awaited, or the popup blocker stops it). Resolves when the host reports the
+// link, by polling its status for up to 5 minutes.
+async function linkGoogleToHost(onProgress = () => {}) {
+const win = window.open('', 'dash-google-link', 'width=520,height=680');
+try {
+await refreshScopes();
+const st = await hostedGoogleStatus(true);
+if (!st.available) throw new Error("google-token.php isn't answering on your web host yet: upload it next to sync.php.");
+if (!st.configured) throw new Error('Add google_client_id and google_client_secret to dashboard-config.php on your web host first.');
+const { status, json } = await hostedCall('start', { scopes: scopesForSession });
+if (status !== 200 || !json || !json.url) throw new Error((json && json.message) || `The host refused to start the link (HTTP ${status}).`);
+if (win && !win.closed) win.location.href = json.url;
+else window.location.assign(json.url); // popup blocked: same page, Google brings you back to the host's confirmation
+onProgress('Waiting for you to finish in the Google window…');
+const linkedBefore = st.linkedAt;
+const until = Date.now() + 5 * 60000;
+while (Date.now() < until) {
+await new Promise((r) => setTimeout(r, 2500));
+const now = await hostedGoogleStatus(true);
+if (now.linked && now.linkedAt !== linkedBefore) {
+await setLocalSetting('googleHostedOff', false);
+cachedToken = null;
+await getAccessToken(false);
+return now;
+}
+if (win && win.closed && Date.now() > until - 4.5 * 60000) {
+// Window closed without the link landing: one last look, then give up.
+const last = await hostedGoogleStatus(true);
+if (last.linked && last.linkedAt !== linkedBefore) { await setLocalSetting('googleHostedOff', false); cachedToken = null; await getAccessToken(false); return last; }
+throw new Error('The Google window was closed before the link finished.');
+}
+}
+throw new Error('Gave up waiting after 5 minutes. Press Link again to retry.');
+} catch (err) {
+if (win && !win.closed) win.close();
+throw err;
+}
+}
+
+// The permissions this device's settings currently ask for (Settings' write toggles widen them).
+async function neededScopes() { await refreshScopes(); return scopesForSession.split(' '); }
+
+async function unlinkGoogleFromHost() {
+const { status, json } = await hostedCall('unlink', {});
+if (status !== 200) throw new Error((json && json.message) || `HTTP ${status}`);
+hostedStatusCache = null;
+cachedToken = null;
+}
+
 async function getAccessToken(interactive) {
 const hit = freshCached();
 if (hit) return hit;
 if (isOffline()) throw new OfflineError();
+if (await hostedUsable()) {
+// The host failing outright (Google down, a server error) falls back to the browser sign-in only for a click,
+// where a window is expected; a background call reports the failure instead of opening one.
+let tok = null;
+try { tok = await hostedToken(); } catch (err) { if (!interactive) throw err; console.warn('Host-held Google sign-in failed, using the browser sign-in:', err); }
+if (tok) return tok;
+}
 if (!interactive) {
 if (!pendingSilent && !(await googleReachable())) throw new OfflineError();
 if (pendingSilent) return pendingSilent;
@@ -233,7 +375,7 @@ return !!settings.googleConnected;
 // of isSignedIn() means: only show "sign in first" when there's truly
 // nothing to attempt a silent refresh from.
 async function canAttemptGoogleAction() {
-return isSignedIn() || (await wasConnectedBefore());
+return isSignedIn() || (await wasConnectedBefore()) || (await hostedUsable().catch(() => false));
 }
 
 // Best-effort silent reconnect, meant to be called on page load. Must
@@ -247,6 +389,7 @@ return isSignedIn() || (await wasConnectedBefore());
 // let through.
 async function tryReconnectSilently() {
 try {
+if (await hostedUsable()) { await getAccessToken(false); return true; } // no Google script or window needed
 ensureConfigured();
 if (!(await wasConnectedBefore())) return false;
 await getAccessToken(false);
@@ -257,10 +400,22 @@ return false;
 }
 
 async function signIn() {
+await setLocalSetting('googleHostedOff', false);
 await getAccessToken(true);
 }
 
+// With the host-held sign-in, Sign out stops THIS device using it (it would otherwise just sign straight back in);
+// the link itself stays for your other devices. Unlinking is in Settings → Google account.
 async function signOut() {
+if (await hostedUsable().catch(() => false)) {
+await setLocalSetting('googleHostedOff', true);
+cachedToken = null;
+pendingSilent = null;
+pendingInteractive = null;
+for (const fn of signOutHooks) { try { fn(); } catch (e) { /* a hook must not block sign-out */ } }
+await setLocalSetting('googleConnected', false);
+return;
+}
 if (cachedToken && window.google?.accounts?.oauth2?.revoke) {
 await new Promise((resolve) => window.google.accounts.oauth2.revoke(cachedToken.accessToken, resolve));
 }
@@ -302,7 +457,7 @@ const resp = await doFetch(token);
 if (resp.status === 401) {
 // Drop the rejected token only if it is still the cached one; if another caller already replaced
 // or cleared it, getAccessToken() returns the newer token / joins the one refresh in flight.
-if (cachedToken && cachedToken.accessToken === token) cachedToken = null;
+if (cachedToken && cachedToken.accessToken === token) { cachedToken = null; forceHostedNext = true; }
 let fresh = null;
 try { fresh = await getAccessToken(interactive); } catch (e) { fresh = null; }
 if (fresh && fresh !== token) return await doFetch(fresh);
@@ -351,5 +506,5 @@ return hasScope(GMAIL_SEND_SCOPE);
 export {
 NotConfiguredError, OfflineError,
 isSignedIn, wasConnectedBefore, canAttemptGoogleAction, tryReconnectSilently, signIn, signOut,
-googleFetch, onSignOut, refreshScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite, hasGmailSend,
+googleFetch, onSignOut, refreshScopes, hostedGoogleStatus, linkGoogleToHost, unlinkGoogleFromHost, neededScopes, hasContactsWrite, hasCalendarWrite, hasTasksWrite, hasGmailSend,
 };

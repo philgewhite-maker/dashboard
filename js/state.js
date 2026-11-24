@@ -148,7 +148,7 @@ cashbackTracked: {},
 // estimate, checkedAt}. See js/features/shopping.js's resaleKey/
 // checkEbayResaleValue.
 ebayResaleEstimates: {},
-scheduledRuns: {}, // {taskId: {at, trigger, skipped}} -- when each scheduled sync last ran, see js/features/scheduled.js. Synced deliberately: a sync run on the laptop doesn't need repeating on the phone.
+scheduledRuns: {}, // {taskId: {at, trigger, skipped, claimBy, claimAt}}, plus nasRunner: {at, build, canGoogle, ran, failures} (the NAS runner's last visit) -- when each scheduled sync last ran, see js/features/scheduled.js. Synced deliberately: a sync run on the laptop doesn't need repeating on the phone.
 mailDismissed: [], // {url, subject, from, dismissedAt} -- messages explicitly binned from Mail without becoming a task/trip leg/date event, see js/features/mail.js
 tasks: [],
 taskContexts: [...DEFAULT_TASK_CONTEXTS],
@@ -367,6 +367,7 @@ setCompletionSizeBounds: { braBandMin: 32, braBandMax: 36, braCupMin: 'B', braCu
 // quietly undo every time a new sync appeared.
 scheduledOff: [],
 scheduledIntervalHours: 6,
+nasRunner: { enabled: false }, // the NAS runs the scheduled syncs too (home-agent/apprunner.py); see js/features/scheduled.js
 // Which diet-analysis sections actually matter to this household --
 // purely a UI declutter (see recipes.js's dietInterestOn): every
 // ingredient still gets fully assessed and cached regardless, so

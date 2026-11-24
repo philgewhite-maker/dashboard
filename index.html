@@ -17,7 +17,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v916</span></h1>
+<h1>Dashboard <span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v917</span></h1>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -3232,6 +3232,16 @@ Needs the WHOLE exported folder tree (hundreds of files, not a single JSON) &mda
 <button class="log-btn" id="sync-pull-btn" type="button">Pull from Google Drive</button>
 </div>
 <div class="settings-note" id="drive-sync-status"></div>
+<div id="google-host-link" style="margin-top:12px;">
+<h4 style="margin:0 0 4px;">Stay signed in</h4>
+<div class="settings-note" style="margin:0 0 6px;">Link Google to your web host once, and every paired device (and the NAS) gets its hourly Google access from there. No more Google sign-in windows, including when you have no signal. The long-lived sign-in never leaves your host.</div>
+<div class="settings-note" id="google-host-status">Checking…</div>
+<div class="sync-row" style="align-items:flex-start;">
+<button class="sync-btn sm inline" type="button" id="google-host-link-btn">Link Google to your host</button>
+<button class="sync-btn sm inline" type="button" id="google-host-unlink-btn" style="display:none;">Unlink</button>
+</div>
+<div class="settings-note" id="google-host-msg"></div>
+</div>
 </div>
 </details>
 
@@ -3402,7 +3412,7 @@ Photos added before task attachments existed live only on the device that added 
 <details class="settings-item" id="scheduled-syncs-settings">
 <summary><h3>Scheduled syncs</h3></summary>
 <div class="settings-block">
-<div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need you signed in to Google: that sign-in issues a one-hour token with no way to renew it unattended, so nothing can refresh Calendar, Mail, Contacts or Google Tasks without a page open.</div>
+<div class="settings-note" style="margin:0 0 10px;">Presses the Sync buttons for you when you open the app, for anything that hasn't run recently. Health data and the Airbnb ICS feeds also refresh while the app is closed, if your browser allows it &mdash; Chrome grants that only to an installed app and picks the timing itself, roughly daily at best. The rest need Google: with Google linked to your host (<span class="inline-goto-link" data-goto-tab="settings" data-goto-target="#google-host-link">Stay signed in</span>) they need no sign-in window, and the NAS can run them all with every device closed.</div>
 <div id="scheduled-tasks"></div>
 </div>
 </details>
