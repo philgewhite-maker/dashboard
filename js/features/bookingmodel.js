@@ -477,7 +477,12 @@ const proposals = (data.airbnbRateProposals || []).filter((p) => { const sub = (
 const listingLabels = Object.fromEntries((data.airbnbListings || []).map((l) => [l.id, l.label || 'Listing']));
 // The stored earnings-export rows for stays (data.airbnbEarnings), and which stays they cover, so a stay isn't counted twice.
 const earningRows = (data.airbnbEarnings || []).filter((e) => String(e.type).toLowerCase() === 'reservation' && Number(e.amount) > 0 && Number(e.nights) > 0 && e.start);
-const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee), bookingDate: e.bookingDate }));
+// The Cleaning fee column is what the guest was charged, before Airbnb's host fee; Amount is after it, on the nights and
+// the clean alike (Gross earnings x (1 - fee) = Amount). So the fee is taken off the clean in the row's own proportion,
+// Amount / Gross earnings: the clean then counts as what it actually brought in, and the nights keep their own share.
+// A row without a usable gross figure keeps the fee as charged.
+const netShareOf = (e) => { const g = Number(e.grossEarnings); const a = Number(e.amount); const k = g > 0 ? a / g : NaN; return k > 0.5 && k <= 1 ? k : 1; };
+const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate }));
 const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
