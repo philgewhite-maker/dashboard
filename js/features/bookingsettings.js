@@ -379,7 +379,7 @@ ${row('Sun–Thu nights', `£${numBox('ownUseWeekday', s.ownUseWeekday)}`)}
 ${row('Fri and Sat nights', `£${numBox('ownUseWeekend', s.ownUseWeekend)}`)}
 ${row('A second room empty the same night', `${numBox('ownUseSecondPct', s.ownUseSecondPct, { width: 56 })}% of its value`)}
 <h4 class="be-set-h">Rooms</h4>
-${rooms.length ? `<table class="limits-table be-rooms"><thead><tr><th>Room</th><th title="Include this room in the evaluator">Use</th><th title="How much you value having this room empty, relative to the others (1 = the figures above; 1.5 = your preferred room)">Own-use weight</th><th>Min nights</th><th title="Blank = worked out from what this room has actually earned">Raw price Sun–Thu £</th><th title="Blank = worked out from what this room has actually earned">Price Fri–Sat £</th><th title="The cleaning fee guests pay on a booking, counted as income. Blank = the median of your earnings export. Your own clean cost is the figure under Cleaning and changeovers">Cleaning fee guests pay £</th></tr></thead><tbody>${rooms.map((room) => {
+${rooms.length ? `<table class="limits-table be-rooms"><thead><tr><th>Room</th><th title="Include this room in the evaluator">Use</th><th title="How much you value having this room empty, relative to the others (1 = the figures above; 1.5 = your preferred room)">Own-use weight</th><th>Min nights</th><th title="Blank = worked out from what this room has actually earned">Raw price Sun–Thu £</th><th title="Blank = worked out from what this room has actually earned">Price Fri–Sat £</th><th title="What the cleaning fee guests pay brings you on a booking, after Airbnb's fee, counted as income. Blank = the median of your earnings export. Your own clean cost is the figure under Cleaning and changeovers">Cleaning fee guests pay £</th><th title="Airbnb's extra-guest charge: £ a night for each guest beyond the first, as set in Airbnb (before its fee; Airbnb doesn't discount it). Used to estimate an enquiry's payout">Extra guest £/night</th></tr></thead><tbody>${rooms.map((room) => {
 const r = roomSettings(room.key);
 const p = `rooms.${room.key}`;
 return `<tr><td>${escapeHtml(room.label)}</td>
@@ -388,7 +388,8 @@ return `<tr><td>${escapeHtml(room.label)}</td>
 <td>${numBox(`${p}.minNights`, r.minNights, { min: 1, width: 56 })}</td>
 <td>${numBox(`${p}.priceWeekday`, r.priceWeekday, { placeholder: 'from data' })}</td>
 <td>${numBox(`${p}.priceWeekend`, r.priceWeekend, { placeholder: 'from data' })}</td>
-<td>${numBox(`${p}.cleaningIncome`, r.cleaningIncome, { placeholder: 'from data' })}</td></tr>`;
+<td>${numBox(`${p}.cleaningIncome`, r.cleaningIncome, { placeholder: 'from data' })}</td>
+<td>${numBox(`${p}.extraGuestFee`, r.extraGuestFee, { placeholder: 'none', width: 56 })}</td></tr>`;
 }).join('')}</tbody></table>` : '<div class="settings-note" style="margin:0;">No guest rooms set up yet.</div>'}
 <h4 class="be-set-h">Times a room wasn't offered</h4>
 <div class="settings-note" style="margin:0 0 4px;">In use yourself, or off Airbnb. These nights are left out of the occupancy demand is calibrated to, so an empty spell isn't read as nobody wanting the room. A month with no stay and no request or enquiry at all is left out on its own. A direct booking belongs in Letting income instead (it counts as occupied).</div>
@@ -497,7 +498,7 @@ const path = input.dataset.be;
 let value;
 if (input.type === 'checkbox') value = input.checked;
 else if (input.type === 'date') value = input.value;
-else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian/i.test(path) ? null : undefined;
+else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian|extraGuestFee/i.test(path) ? null : undefined;
 else value = Number(input.value);
 if (value === undefined || (typeof value === 'number' && !Number.isFinite(value))) { renderBookingEvaluatorSettings(); return; }
 if (path === 'airbnbCleaningCost') {

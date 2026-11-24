@@ -51,9 +51,12 @@ if (cur) sel.value = cur;
 // An enquiry's email carries no price, so estimate what it would pay you from the booking model's
 // own prices for those dates: each night's price (already what reaches you, net of Airbnb's fee),
 // with the short-notice cut for when it was asked, the length-of-stay cut for this stay's own
-// length, plus the cleaning fee guests pay. No fee is taken off: the model's prices are worked back
-// from your earnings' Amount column, which is after every fee.
-async function estimatePayout(listingId, checkin, checkout, askedOn) {
+// length, the top-rated-guest cut when the guest's rating and reviews are known (Airbnb: 4.8+ with
+// at least 3 reviews; unknown = the expected share, as everywhere else in the model), plus the
+// cleaning fee and the room's extra-guest charge. The extra-guest charge is set as Airbnb shows it,
+// isn't discounted by Airbnb, and has Airbnb's fee taken off in the proportion your latest earnings
+// row on that listing shows (Amount / Gross earnings).
+async function estimatePayout({ listingId, checkin, checkout, askedOn = null, guests = null, guestRating = null, guestReviews = null }) {
 const model = await import('./bookingmodel.js');
 const ctx = model.buildContext();
 const { roomIndexOf, dayNum } = model.driftKit;
@@ -64,14 +67,31 @@ const ci = dayNum(checkin);
 const nights = dayNum(checkout) - ci;
 if (!(nights > 0)) return null;
 const bookedOn = Math.min(ci, dayNum(String(askedOn || todayStr()).slice(0, 10)));
-const lengthPct = model.stepPct(model.discountsOf(ctx.s, 'airbnb', (params.roomListing || [])[ri] || null).length, 'nights', nights);
+const disc = model.discountsOf(ctx.s, 'airbnb', (params.roomListing || [])[ri] || null);
+const lengthPct = model.stepPct(disc.length, 'nights', nights);
+const rating = guestRating == null || guestRating === '' ? null : Number(guestRating);
+const reviews = guestReviews == null || guestReviews === '' ? null : Number(guestReviews);
+const known = (rating != null && rating < 4.8) || (reviews != null && reviews < 3) ? 0 : (rating != null && reviews != null ? 1 : null);
+const topPct = known == null ? null : known * (Number(disc.topRatedPct) || 0) / 100;
 let sum = 0;
 for (let n = ci; n < ci + nights; n++) {
 const nb = model.nightBreakdown(ctx, params, ri, n, { bookedOn });
-const expected = nb.steps.find((st) => st.key === 'length');
-sum += (nb.price / (1 - (expected ? expected.pct / 100 : 0))) * (1 - lengthPct);
+const pctOf = (key) => { const st = nb.steps.find((x) => x.key === key); return st ? st.pct / 100 : 0; };
+let v = (nb.price / (1 - pctOf('length'))) * (1 - lengthPct);
+if (topPct != null) v = (v / (1 - pctOf('topRated'))) * (1 - topPct);
+sum += v;
 }
-return Math.round(sum + (params.prices[ri].clean || 0));
+const room = ctx.rooms[ri];
+const extraFee = Number(room.extraGuestFee) || 0;
+const extraGuests = Math.max(0, (Number(guests) || 1) - 1);
+let extra = 0;
+if (extraFee > 0 && extraGuests > 0) {
+const latest = (data.airbnbEarnings || []).filter((e) => room.listingIds.includes(e.listingId) && String(e.type).toLowerCase() === 'reservation' && Number(e.amount) > 0 && Number(e.grossEarnings) > 0)
+.sort((x, y) => String(y.start).localeCompare(String(x.start)))[0];
+const k = latest ? Number(latest.amount) / Number(latest.grossEarnings) : 1;
+extra = extraFee * extraGuests * nights * (k > 0.5 && k <= 1 ? k : 1);
+}
+return Math.round(sum + (params.prices[ri].clean || 0) + extra);
 }
 
 // Opens the workbench on a logged request/enquiry (`requestId`) or a stay (`reservationId`).
@@ -89,8 +109,8 @@ fillListingSelect();
 requestAnimationFrame(() => { scrollAndFlash('#booking-evaluator'); const f = document.getElementById('be-checkin'); if (f) f.focus({ preventScroll: true }); });
 return;
 }
-const payout = q ? (q.payout ?? await estimatePayout(q.listingId, q.checkin, q.checkout, q.receivedAt)) : (r.income ?? await estimatePayout(r.listingId, r.checkin, r.checkout, null));
-state.prefill = { requestId: q ? q.id : '', reservationId: q ? (q.reservationId || '') : r.id, estimated: q ? q.payout == null : r.income == null };
+const payout = q ? (q.payout ?? await estimatePayout({ listingId: q.listingId, checkin: q.checkin, checkout: q.checkout, askedOn: q.receivedAt, guests: q.guests, guestRating: q.guestRating, guestReviews: q.guestReviews })) : (r.income ?? await estimatePayout({ listingId: r.listingId, checkin: r.checkin, checkout: r.checkout, guests: r.guests }));
+state.prefill = { requestId: q ? q.id : '', reservationId: q ? (q.reservationId || '') : r.id, estimated: q ? q.payout == null : r.income == null, estimate: payout, guests: q ? q.guests : r.guests, askedOn: q ? q.receivedAt : null };
 state.overrides = {};
 const { switchTab } = await import('../tabs.js');
 switchTab('finances');
@@ -177,7 +197,7 @@ if (r.breakEven != null) lines.push(r.breakEven > r.request.payout ? `Break-even
 const targets = Object.values(data.prefs.lettingChartTargets || {}).reduce((a, t) => a + (Number(t && t.normal) || 0), 0);
 const income = (side) => side.parts.request + side.parts.before + side.parts.inside + side.parts.after + side.parts.other + r.existingIncome;
 lines.push(`Expected income in that stretch: ${money(income(r.accept))} if accepted, ${money(income(r.reject))} if not${targets ? ` (your monthly targets add up to ${money(targets)})` : ''}.`);
-if (state.prefill && state.prefill.estimated) lines.push('<span class="settings-note" style="margin:0;">The payout is an estimate from the model\'s nightly prices for these dates (after Airbnb\'s fee, plus the cleaning fee): this enquiry\'s email has no price. Type the figure from the Airbnb thread above and Evaluate again.</span>');
+if (state.prefill && state.prefill.estimated) lines.push('<span class="settings-note" style="margin:0;">The payout is an estimate: the model\'s nightly prices for these dates after Airbnb\'s fee and discounts, plus the cleaning fee and <span class="inline-goto-link" data-goto-tab="settings" data-goto-target=".be-rooms">the room\'s extra-guest charge</span>. Enter the guest\'s rating and reviews to settle the top-rated discount, or type the figure from the Airbnb thread and Evaluate again.</span>');
 return `<div class="be-verdict">${lines.map((l) => `<div>${l}</div>`).join('')}</div>`;
 }
 
@@ -454,6 +474,20 @@ const flips = rows.filter((x) => x.flips);
 out.innerHTML = `<div class="settings-note" style="margin:6px 0 2px;">${flips.length ? `${flips.length} change${flips.length === 1 ? '' : 's'} would flip the recommendation.` : 'None of these changes flips the recommendation.'}</div>
 <table class="limits-table be-table"><thead><tr><th>If…</th><th class="num">Accept beats reject by</th><th>Recommendation</th></tr></thead><tbody>${rows.map((x) => `<tr${x.flips ? ' class="be-flip"' : ''}><td>${escapeHtml(x.label)}</td><td class="num">${x.error ? '' : signed(x.diff)}</td><td>${escapeHtml(x.error || x.recommendation)}${x.flips ? ' ⚠' : ''}</td></tr>`).join('')}</tbody></table>`;
 }
+});
+// A rating or review count typed in after an estimated payout was filled: estimate again with it (the top-rated-guest
+// discount depends on both), unless you've already typed your own payout over the estimate.
+root.addEventListener('change', async (e) => {
+if (!['be-rating', 'be-reviews'].includes(e.target.id)) return;
+const pf = state.prefill;
+const box = document.getElementById('be-payout');
+if (!pf || !pf.estimated || !box || String(box.value) !== String(pf.estimate ?? '')) return;
+const f = readForm();
+const est = await estimatePayout({ listingId: f.listingId, checkin: f.checkin, checkout: f.checkout, askedOn: pf.askedOn, guests: pf.guests, guestRating: f.guestRating, guestReviews: f.guestReviews });
+if (est == null) return;
+pf.estimate = est;
+box.value = est;
+run();
 });
 root.addEventListener('change', (e) => {
 const w = e.target.closest('[data-be-whatif]');
