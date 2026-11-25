@@ -84,7 +84,10 @@ sum += v;
 // the model's nightly prices are one-guest ones.
 const pr = params.prices[ri];
 const extra = guests != null && guests !== '' ? (pr.extraGuestNet || 0) * Math.max(0, Number(guests) - 1) * nights : (pr.extraGuest || 0) * nights;
-return Math.round(sum + (params.prices[ri].clean || 0) + extra);
+// The cleaning fee this stay's length pays (the short-stay fee on a short stay), after the channel fee.
+const { cleaningFeeFor } = await import('./guestprice.js');
+const fees = model.receivedCleaningFees(ctx.s, ctx.priceRefSettings || ctx.s, (params.roomListing || [])[ri] || listingId, pr.clean);
+return Math.round(sum + cleaningFeeFor(fees, nights) + extra);
 }
 
 // Opens the workbench on a logged request/enquiry (`requestId`) or a stay (`reservationId`).

@@ -797,12 +797,14 @@ const uplift = uplifts[i];
 const overall = weightedMedian(sm.map((x) => ({ v: neutral(x), w: x.w })));
 const base = overall ?? median(everyRaw) ?? DEFAULT_PRICE;
 const byMonth = monthIdx.map((ix) => (ix != null && overall != null ? base * ix : null));
-// The cleaning fee a booking brings in: your setting; else the listing's cleaning fee as guests see it (Settings, guest
-// price) less the channel's fee; else what your past stays kept (median). The listed fee wins over the history because
-// the history mixes fee levels (and Airbnb's cut on it has moved from about 3.6% to 18.6%).
+// The cleaning fee a normal booking brings in: the listing's cleaning fee as guests see it (Settings, Guest price: the one
+// place it is set, with the short-stay fee beside it) less the channel's fee; else the room's older "cleaning income"
+// setting (received money), if one was ever typed; else what your past stays kept (median). The listed fee wins because
+// the history mixes fee levels (and Airbnb's cut on it has moved from about 3.6% to 18.6%). A short stay's fee is scaled
+// from this by receivedCleaningFees.
 const listedFee = guestPriceSettings(s).cleaningFees[roomListing[i]];
 const listedPer = listedFee && Number(listedFee.perStay) > 0 ? Number(listedFee.perStay) : null;
-const cleanSource = room.cleaningIncome != null && room.cleaningIncome !== '' ? 'your setting' : listedPer != null ? 'listed' : 'history';
+const cleanSource = listedPer != null ? 'listed' : room.cleaningIncome != null && room.cleaningIncome !== '' ? 'your setting' : 'history';
 const clean = cleanSource === 'your setting' ? Number(room.cleaningIncome) : cleanSource === 'listed' ? listedPer * keepAirbnb : (feeMedian(cleanFees[i]) ?? feeMedian(everyCleaning) ?? 0);
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
 const nEarn = sm.filter((x) => x.via === 'earnings').length;
@@ -4068,4 +4070,4 @@ if (!(sr && (sr.reason === 'infill' || sr.reason === 'short-notice'))) cut('void
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { receivedCleaningFees, setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
