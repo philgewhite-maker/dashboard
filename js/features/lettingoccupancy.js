@@ -1188,7 +1188,7 @@ const link = entryOnly
 : '<span class="inline-goto-link" data-goto-tab="overview" data-goto-target="#airbnb-panel">Airbnb</span>';
 return `<div class="occ-undated-row">
 <span class="occ-undated-who">${escapeHtml(s.guest || 'No name')}</span>
-<span class="settings-note" style="margin:0;">${escapeHtml(room ? (room.label || room.prefix || 'Room') : 'Room?')} &middot; ${escapeHtml(shortDate(s.checkin))} &rarr; ${escapeHtml(shortDate(s.checkout))} &middot; ${where} &middot; ${escapeHtml(kind)}${s.approx ? ' (length unknown, one night drawn)' : ''} &middot; ${link}</span>
+<span class="settings-note" style="margin:0;">${escapeHtml(room ? (room.label || room.prefix || 'Room') : 'Room?')} &middot; ${escapeHtml(shortDate(s.checkin))} &rarr; ${escapeHtml(shortDate(s.checkout))} ${where ? `&middot; ${where} ` : ''}&middot; ${escapeHtml(kind)}${s.approx ? ' (length unknown, one night drawn)' : ''} &middot; ${link}</span>
 ${gaps.includes('date') ? `<label class="occ-undated-set">Booked on <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(todayStr())}"></label>` : ''}
 ${gaps.includes('baddate') ? `<label class="occ-undated-set" title="The booking date on record, ${escapeHtml(shortDate(String(s.bookedOn).slice(0, 10)))}, is after check-in">Booked on <span class="letting-nobook">${escapeHtml(shortDate(String(s.bookedOn).slice(0, 10)))}, after check-in</span> <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(s.checkin)}"></label>` : ''}
 ${gaps.includes('party') ? `<label class="occ-undated-set">Guests <input type="number" class="settings-input" data-occ-guests="${escapeHtml(s.id)}" min="1" max="30" step="1" style="width:56px;"></label>` : ''}
