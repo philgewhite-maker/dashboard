@@ -324,6 +324,8 @@ min1: [[true, true, true, true, true], [true, true, true, true, false], [true, f
 },
 // What each channel keeps of what the guest pays, % (Airbnb host fee 15.5% + 20% VAT): bookingmodel.js channelKeep.
 channelFees: { airbnb: 18.6, direct: 0 },
+// Fri/Sat price over Sun-Thu, %: the starting point your stays then move (bookingmodel.js calibrate, upliftFit).
+weekendUpliftPct: 20,
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):
 // {demand, lead, cancel, appliedOn, note, history:[{on, demand, from, n}]}. 1 = no correction.
 calibration: { demand: 1, lead: 1, cancel: 1, appliedOn: '', note: '', history: [] },

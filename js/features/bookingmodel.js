@@ -731,12 +731,24 @@ const usual = feeMedian(cleanFees[r]) ?? feeMedian(everyCleaning) ?? 0;
 addSample(r, x.listingId, { amount: Number(x.income) - extraIncomeOf(r, x.guests, n, roomShare[r]), cleaning: usual, nights: n, start, booked: x.bookedOn ? dayNum(x.bookedOn) : null, via: 'stay' });
 });
 const everyRaw = samples.flat().map((x) => x.raw);
-// Friday/Saturday premium, per room: weekend-heavy stays against weekday-heavy ones, when there are enough of each.
-const uplifts = samples.map((sm) => {
-const low = sm.filter((x) => x.ws <= 0.2).map((x) => x.raw);
-const high = sm.filter((x) => x.ws >= 0.5).map((x) => x.raw);
-return low.length >= 3 && high.length >= 3 ? Math.min(1.6, Math.max(0.9, median(high) / median(low))) : 1;
+// Friday/Saturday premium, per room. The starting point is your setting (weekendUpliftPct: what your Fri/Sat price is
+// over your Sun-Thu one, +20% by default: £186 against £155). Your stays move it as their numbers grow: weekend-heavy
+// stays (at least 2/3 of their nights Fri/Sat) against weekday-only ones, the two medians' ratio pulled towards the
+// starting point with weight n / (n + 10), n the smaller group (so 3 of each counts for under a quarter, 30 for three
+// quarters). Taken on its own from a handful of stays, the ratio swung below 1 (Double: 3 against 4 stays), and a stay
+// half weekend half weekday says little about either.
+const UPLIFT_SHRINK = 10;
+const upliftPrior = Math.min(1.6, Math.max(0.9, 1 + (Number(s.weekendUpliftPct ?? 20) || 0) / 100));
+const upliftFit = samples.map((sm) => {
+const low = sm.filter((x) => x.ws === 0).map((x) => x.raw);
+const high = sm.filter((x) => x.ws >= 2 / 3).map((x) => x.raw);
+const n = Math.min(low.length, high.length);
+const data = n >= 3 ? median(high) / median(low) : null;
+const w = data ? n / (n + UPLIFT_SHRINK) : 0;
+const u = data ? Math.exp(w * Math.log(data) + (1 - w) * Math.log(upliftPrior)) : upliftPrior;
+return { u: Math.min(1.6, Math.max(0.9, u)), data, nWeekend: high.length, nWeekday: low.length, w };
 });
+const uplifts = upliftFit.map((f) => f.u);
 samples.forEach((sm, i) => sm.forEach((x) => { x.wd = x.raw / (1 + x.ws * (uplifts[i] - 1)); }));
 // What a stage does to the rate, shared by every room: the prior, corrected by each listing's own stays either side
 // of the change (within STAGE_FIT_WINDOW days of it, STAGE_FIT_MIN or more each side), as
@@ -827,7 +839,7 @@ setting: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 return {
 weekday: room.priceWeekday != null ? Number(room.priceWeekday) : null,
 weekend: room.priceWeekend != null ? Number(room.priceWeekend) : null,
-byMonth, base, uplift, clean, n: sm.length, nEarn,
+byMonth, base, uplift, upliftFit: upliftFit[i], clean, n: sm.length, nEarn,
 // Extra-guest charge, after Airbnb's fee: per extra guest a night (extraGuestNet), and the average a night (extraGuest).
 rateShare: keepAirbnb, extraGuestNet: extraFee[i] * keepAirbnb, extraGuest: extraFee[i] * keepAirbnb * meanExtra[i], voidCheck: voidCheckOf(sm), cleanSource, meanExtraGuests: meanExtra[i], avgShortNotice: mean(sm.map((x) => x.sn)), avgLength: mean(sm.map((x) => x.ln)),
 nNewListing: sm.filter((x) => x.nl > 0).length, avgTopRated: mean(sm.map((x) => x.tr)), stage: roomStage[i], trace,
@@ -3059,7 +3071,7 @@ return { fits, tau: Math.sqrt(tau2) };
 
 // v7: `more` adds settings and `cal` picks the calibrate (v6's, for the equivalence case).
 function testContext({ occupancy, today = '2026-11-01', minNights = 1, more = {}, cal = calibrate }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, newListingDiscountPct: 0, ...more };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, weekendUpliftPct: 0, newListingDiscountPct: 0, ...more };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
@@ -3865,7 +3877,7 @@ check('v9 shrinkage: leave-one-out towards the other room, one room alone unchan
 const poolWorld = ({ rates, launch, seed, today = '2026-11-01' }) => {
 const keys = ['A', 'B', 'C'];
 const rooms = rates.map((_, i) => ({ key: keys[i], label: `Room ${keys[i]}`, listingIds: [`L${keys[i]}`], include: true, weight: 1, minNights: 1, priceWeekday: 100, priceWeekend: 100 }));
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, weekendUpliftPct: 0, newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
 const c = { today, s, firstClean: 50, rooms, stays: [], requests: [], proposals: [], listingLabels: Object.fromEntries(rooms.map((r) => [r.listingIds[0], r.label])), scale: {}, calRuns: 40 };
 calibrate(c);
 const p = c.params; p.cancelRate = 0;
