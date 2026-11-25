@@ -320,10 +320,11 @@ return { raw: nightly / ((1 - sn) * (1 - ln) * (1 - nl) * (1 - tr) * (1 - vc)), 
 // ---- Your own void-filling discount, and the channels' fees ----------------------------------------------------------
 // prefs.bookingEvaluator.voidGrid = {lengths: [2..7], leads: [5, 10, 20, 30, 40], pct: [[...] per length]}: the cut YOU make
 // on a void (free nights with a booking either side), by its length and how many days before its first night the booking
-// comes: pct[i][j] for a void of at most lengths[i] nights (and more than lengths[i-1]; a 1-night void reads the first row)
-// booked at most leads[j] days ahead (and more than leads[j-1]). A longer void, or a booking further ahead than the last
-// column, takes none. Each cell is the deepest cut you'd have reached by then. It is not one of Airbnb's rules. With no grid
-// (null), the older single setting (gapDiscountPct on gaps of gapMaxNights or fewer, at any lead) applies.
+// comes: pct[i][j] for a void of at most lengths[i] nights (and more than lengths[i-1]) booked at most leads[j] days ahead
+// (and more than leads[j-1]). A 1-night void gets nothing (two changeovers on one day aren't worth it), nor does a longer
+// void or a booking further ahead than the last column. Each cell is the deepest cut you'd have reached by then. It is not
+// one of Airbnb's rules. min1[i][j] (true): in that cell you also drop the minimum stay to 1 night (voidMin1). With no
+// grid (null), the older single setting (gapDiscountPct on gaps of gapMaxNights or fewer, at any lead) applies.
 function voidGridOf(s) {
 const g = s && s.voidGrid;
 if (!g || !Array.isArray(g.lengths) || !Array.isArray(g.leads) || !Array.isArray(g.pct) || !g.lengths.length || !g.leads.length) return null;
@@ -335,13 +336,22 @@ if (!g) {
 const pct = Number(s.gapDiscountPct) || 0; const max = Number(s.gapMaxNights) || 0;
 return pct > 0 && voidNights <= max ? Math.min(90, pct) / 100 : 0;
 }
-if (lead == null) return 0;
+if (lead == null || voidNights <= 1) return 0;
 const i = g.lengths.findIndex((L) => voidNights <= Number(L));
 const j = g.leads.findIndex((D) => lead <= Number(D));
 if (i < 0 || j < 0) return 0;
 const v = Number((g.pct[i] || [])[j]);
 return Number.isFinite(v) && v > 0 ? Math.min(90, v) / 100 : 0;
 }
+// Whether the grid drops the minimum stay to 1 night for a void this long, booked this many days ahead.
+function voidMin1(s, voidNights, lead) {
+const g = voidGridOf(s);
+if (!g || !Array.isArray(g.min1) || lead == null || voidNights <= 1) return false;
+const i = g.lengths.findIndex((L) => voidNights <= Number(L));
+const j = g.leads.findIndex((D) => lead <= Number(D));
+return i >= 0 && j >= 0 && (g.min1[i] || [])[j] === true;
+}
+const voidMin1Any = (s) => { const g = voidGridOf(s); return !!(g && Array.isArray(g.min1) && g.min1.some((row) => Array.isArray(row) && row.some((v) => v === true))); };
 const voidCutMax = (s) => {
 const g = voidGridOf(s);
 if (!g) return Math.min(90, Number(s.gapDiscountPct) || 0) / 100;
@@ -1717,7 +1727,11 @@ const L = sampleLead(params, c, daysLeft, rng);
 out.push({ room: ri, c, los: sampleLos(params, rng), at: c - L, lead: L, u: rng(), tie: rng(), cu: cancels ? rng() : undefined, t0: todayN }); // v7: t0, the reach guestResponse was cut to; v9: cu, the cancellation draw (playArrivals)
 }
 const planLow = ctx.plans && ctx.plans.length ? planAt(ctx.plans, ri, c) : null;
-const exFrac = (extra && extra[ri]) || (planLow && planLow.minNights != null && planLow.minNights < (Number(ctx.rooms[ri].minNights) || 1) ? oneNight : 0);
+const planOpens = planLow && planLow.minNights != null && planLow.minNights < (Number(ctx.rooms[ri].minNights) || 1);
+// x1: drawn only because the void grid might drop the minimum to 1 night here; playArrivals keeps one only if, when it
+// arrives, it lands in a void (and at a lead) where the grid does (voidMin1).
+const gridX1 = !(extra && extra[ri]) && !planOpens && (Number(ctx.rooms[ri].minNights) || 1) > 1 && voidMin1Any(ctx.s);
+const exFrac = (extra && extra[ri]) || (planOpens || gridX1 ? oneNight : 0);
 if (exFrac) {
 // The 1-night extras come from their own random stream when one is given, so lowering a minimum stay leaves the
 // ordinary arrivals exactly as they were (what lets a what-if be compared with the same draws).
@@ -1725,7 +1739,7 @@ const rx = rngX || rng;
 const k1 = poisson(rx, lam(ri, c) * dm * params.dowW[dowOf(c)] * boost * share * exFrac);
 for (let j = 0; j < k1; j++) {
 const L = sampleLead(params, c, daysLeft, rx);
-out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx(), cu: cancels ? rx() : undefined, t0: todayN });
+out.push({ room: ri, c, los: 1, at: c - L, lead: L, u: rx(), tie: rx(), cu: cancels ? rx() : undefined, t0: todayN, x1: gridX1 || undefined });
 }
 }
 }
@@ -1783,7 +1797,10 @@ const boundedL = gs > 0;
 const boundedR = ge < len;
 const exactFill = i0 === gs && i1 === ge && boundedL && boundedR;
 const plan = ctx.plans && ctx.plans.length ? planAt(ctx.plans, a.room, a.c) : null;
-const min = plan && plan.minNights != null ? plan.minNights : (minNights[a.room] || 1);
+// The grid drops the minimum to 1 night in a short void close in (voidMin1), as you do by hand; a plan's own minimum wins.
+const gridOpen = boundedL && boundedR && voidMin1(s, ge - gs, a.lead);
+const min = plan && plan.minNights != null ? plan.minNights : gridOpen ? 1 : (minNights[a.room] || 1);
+if (a.x1 && !gridOpen) continue; // a hidden 1-night request that didn't land where the grid opens the room to it
 if (a.los < min && !exactFill) continue;
 const before = i0 - gs;
 const after = ge - i1;
@@ -3268,6 +3285,18 @@ check('Void cut: applies with no set rate and on an event rate, not on an infill
 // 11g. Void tiers: deepest that fits; outside the lead window none; no tiers = the single gap setting at any lead.
 const tiers11g = { voidGrid: { lengths: [3, 6], leads: [14, 30], pct: [[30, 20], [20, 20]] } };
 const vt = [voidCutFor(tiers11g, 5, 20), voidCutFor(tiers11g, 3, 10), voidCutFor(tiers11g, 3, 20), voidCutFor(tiers11g, 5, 40), voidCutFor(tiers11g, 8, 5), voidCutFor({ voidGrid: null, gapDiscountPct: 15, gapMaxNights: 4 }, 4, 300)];
+const g11h = { voidGrid: { lengths: [2, 3, 4], leads: [5, 30, 40], pct: [[25, 20, 20], [20, 20, 20], [20, 20, 10]], min1: [[true, true, true], [true, true, false], [true, false, false]] } };
+const m11h = [voidCutFor(g11h, 1, 3), voidMin1(g11h, 1, 3), voidMin1(g11h, 2, 40), voidMin1(g11h, 3, 30), voidMin1(g11h, 3, 35), voidMin1(g11h, 4, 5), voidMin1(g11h, 4, 6), voidMin1(g11h, 5, 2)];
+check('Void grid: a 1-night void gets nothing; 1-night minimum only in its ticked cells', m11h.join() === '0,false,true,true,false,true,false,false', m11h.join());
+// A 2-night void in a room with a 2-night minimum: a 1-night request 3 days ahead is let in where the grid opens it, not otherwise.
+const min1Run = (grid) => {
+const c = testContext({ occupancy: 0.5, today: '2026-11-01', minNights: 2, more: { voidGrid: grid } });
+const base = dayNum('2026-12-01'); const len = 40;
+const occ = [new Uint8Array(len)];
+for (let i = 0; i < 10; i++) occ[0][i] = 1; for (let i = 12; i < len; i++) occ[0][i] = 1;
+return playArrivals(c, c.params, [{ room: 0, c: base + 10, los: 1, at: base + 7, lead: 3, u: 0, tie: 0, t0: null, x1: true }], occ, base, { minNights: { 0: 2 }, len }).length;
+};
+check('Void grid: a hidden 1-night request fills a 2-night void only where the grid drops the minimum', min1Run(g11h.voidGrid) === 1 && min1Run({ ...g11h.voidGrid, min1: [[false, false, false], [false, false, false], [false, false, false]] }) === 0, `${min1Run(g11h.voidGrid)} ${min1Run({ ...g11h.voidGrid, min1: [] })}`);
 check('Void grid: the cell for the void length and lead; none beyond the grid; no grid = the single gap setting', vt.join() === '0.2,0.3,0.2,0,0,0.15', vt.join());
 // 11e. Demand lift: a one-off event's own nights x1.5, nothing either side; a yearly one balanced so its window's total holds;
 // a set rate's own demand wins over the event's on its nights.
@@ -4039,4 +4068,4 @@ if (!(sr && (sr.reason === 'infill' || sr.reason === 'short-notice'))) cut('void
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { setRateAt, demandAt, voidCutFor, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };

@@ -315,7 +315,13 @@ events: [],
 setRates: [],
 // {lengths, leads, pct[length][lead]}: your own void-filling cut by void length (nights) and days before check-in
 // (bookingmodel.js voidCutFor); replaces gapDiscountPct/gapMaxNights. Seeded from the owner's hand-drawn grid (25 Nov 2026).
-voidGrid: { lengths: [2, 3, 4, 5, 6, 7], leads: [5, 10, 20, 30, 40], pct: [[25, 25, 20, 20, 20], [20, 20, 20, 20, 20], [20, 20, 20, 20, 10], [20, 20, 20, 10, 10], [20, 20, 10, 10, 0], [10, 10, 10, 0, 0]] },
+// min1: cells where you also drop the minimum stay to 1 night (2-night voids up to 40 days out, 3-night up to 30, 4-night
+// up to 5). A 1-night void gets nothing.
+voidGrid: {
+lengths: [2, 3, 4, 5, 6, 7], leads: [5, 10, 20, 30, 40],
+pct: [[25, 25, 20, 20, 20], [20, 20, 20, 20, 20], [20, 20, 20, 20, 10], [20, 20, 20, 10, 10], [20, 20, 10, 10, 0], [10, 10, 10, 0, 0]],
+min1: [[true, true, true, true, true], [true, true, true, true, false], [true, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false], [false, false, false, false, false]],
+},
 // What each channel keeps of what the guest pays, % (Airbnb host fee 15.5% + 20% VAT): bookingmodel.js channelKeep.
 channelFees: { airbnb: 18.6, direct: 0 },
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):

@@ -272,8 +272,8 @@ const g = s.voidGrid;
 if (!g || !Array.isArray(g.lengths)) return '<div class="settings-note" style="margin:0;">No grid: the older single gap discount applies.</div>';
 const col = (j) => `${j === 0 ? 'up to ' : ''}${escapeHtml(String(g.leads[j]))} days`;
 return `<div style="overflow-x:auto;"><table class="limits-table be-void-grid"><thead><tr><th>Void length</th>${g.leads.map((_, j) => `<th class="num">${col(j)}</th>`).join('')}</tr></thead><tbody>
-${g.lengths.map((L, i) => `<tr><td>${i === 0 ? 'up to ' : ''}${escapeHtml(String(L))} nights</td>${g.leads.map((_, j) => `<td class="num">${numBox(`voidGrid.pct.${i}.${j}`, (g.pct[i] || [])[j], { width: 50, placeholder: '0' })}%</td>`).join('')}</tr>`).join('')}
-</tbody></table></div>`;
+${g.lengths.map((L, i) => `<tr><td>${i === 0 ? 'up to ' : ''}${escapeHtml(String(L))} nights</td>${g.leads.map((_, j) => `<td class="num" style="white-space:nowrap;">${numBox(`voidGrid.pct.${i}.${j}`, (g.pct[i] || [])[j], { width: 50, placeholder: '0' })}% <label title="Also drop the minimum stay to 1 night here"><input type="checkbox" data-be="voidGrid.min1.${i}.${j}"${((g.min1 || [])[i] || [])[j] === true ? ' checked' : ''}> 1n</label></td>`).join('')}</tr>`).join('')}
+</tbody></table></div><div class="settings-note" style="margin:2px 0 0;">Ticked "1n": you also drop the minimum stay to 1 night there, which lets in the 1-night requests a longer minimum hides (Hidden 1-night demand, above). A 1-night void gets no cut and no change: two changeovers on one day aren't worth it.</div>`;
 }
 // Rates you've set on Airbnb (prefs.bookingEvaluator.setRates; see setRateAt in bookingmodel.js): on these nights the model
 // prices from your rate, not from its own learnt price, and adds no gap or void cut of its own.
