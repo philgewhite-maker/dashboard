@@ -369,7 +369,11 @@ if (!rows.length) return `<div class="settings-note" style="margin:0;">No Airbnb
 const stays = rows.filter((r) => String(r.type).toLowerCase() === 'reservation').length;
 const dates = rows.map((r) => r.date).filter(Boolean).sort();
 const accounts = [...new Set(rows.map((r) => r.ownerKey))].length;
-return `<div class="settings-note" style="margin:0;">${rows.length} rows stored in full (${stays} stays, ${accounts} account${accounts === 1 ? '' : 's'}), ${escapeHtml(dates[0] || '')} to ${escapeHtml(dates[dates.length - 1] || '')}. <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#airbnb-earnings-import">Import another export</span>.</div>`;
+const res = rows.filter((r) => String(r.type).toLowerCase() === 'reservation');
+const codes = new Map((data.airbnbReservations || []).filter((r) => r.confirmationCode && r.guests != null).map((r) => [r.confirmationCode, r.guests]));
+const party = res.filter((r) => r.guests != null || codes.has(r.confirmationCode)).length;
+const searched = res.filter((r) => r.guests == null && !codes.has(r.confirmationCode) && r.guestsCheckedOn).length;
+return `<div class="settings-note" style="margin:0;">${rows.length} rows stored in full (${stays} stays, ${accounts} account${accounts === 1 ? '' : 's'}), ${escapeHtml(dates[0] || '')} to ${escapeHtml(dates[dates.length - 1] || '')}. Party size known for ${party} of ${res.length} stays${searched ? ` (${searched} searched with no confirmation email found: possibly in another account's inbox)` : ''}${res.length - party - searched > 0 ? `; the next Airbnb Sync looks for the rest` : ''}. <span class="inline-goto-link" data-goto-tab="finances" data-goto-target="#airbnb-earnings-import">Import another export</span>.</div>`;
 }
 
 // The table of what the model worked out for each room, so the rates can be sanity-checked before relying on them.
@@ -394,9 +398,9 @@ const rows = ctx.rooms.map((room, i) => {
 const pr = p.prices[i];
 const wd = pr.weekday ?? pr.base;
 const we = pr.weekend ?? wd * pr.uplift;
-return `<tr><td>${escapeHtml(room.label)}</td><td class="num">${pr.n} (${pr.nEarn} from export)</td><td class="num">${money(wd)}</td><td class="num">${money(we)}</td><td class="num">${money(pr.clean)}</td><td class="num">${(pr.avgShortNotice * 100).toFixed(1)}% / ${(pr.avgLength * 100).toFixed(1)}%</td><td class="settings-note" style="margin:0;">${escapeHtml(pr.source)}</td></tr>`;
+return `<div class="be-est-room"><div class="be-est-name">${escapeHtml(room.label)}</div><dl class="be-est-grid"><dt>Sun–Thu</dt><dd>${money(wd)}</dd><dt>Fri–Sat</dt><dd>${money(we)}</dd><dt title="What the cleaning fee guests pay brings you on a booking, after the channel fee">Clean income</dt><dd>${money(pr.clean)}</dd><dt>Stays used</dt><dd>${pr.n} (${pr.nEarn} from export)</dd><dt title="Average short-notice / length-of-stay discount undone on those stays">Undone</dt><dd>${(pr.avgShortNotice * 100).toFixed(1)}% notice, ${(pr.avgLength * 100).toFixed(1)}% length</dd></dl><div class="settings-note" style="margin:2px 0 0;">${escapeHtml(pr.source)}</div></div>`;
 }).join('');
-el.innerHTML = rows ? `<div style="overflow-x:auto;"><table class="limits-table be-table"><thead><tr><th>Room</th><th class="num">Stays used</th><th class="num">Raw nightly, Sun–Thu</th><th class="num">Raw nightly, Fri–Sat</th><th class="num" title="Median cleaning fee guests were charged">Cleaning fee guests pay</th><th class="num" title="Average short-notice / length discount undone on those stays">Discounts undone (short notice / length)</th><th>Source</th></tr></thead><tbody>${rows}</tbody></table></div><div class="settings-note" style="margin:4px 0 0;">The raw rate is what reached you per night with the cleaning fee taken out, and the discounts above undone. The cleaning fee is income on each booking; what a clean costs you is the separate figure under Cleaning and changeovers.</div>` : '<div class="settings-note" style="margin:0;">No rooms.</div>';
+el.innerHTML = rows ? `<div class="be-est-rooms">${rows}</div><div class="settings-note" style="margin:4px 0 0;">Sun–Thu and Fri–Sat are the raw nightly rates: what reached you per night with the cleaning fee and any extra-guest charge taken out, and the discounts undone. Under each room, what its rate rests on. The cleaning fee is income on each booking; what a clean costs you is the separate figure under Cleaning and changeovers.</div>` : '<div class="settings-note" style="margin:0;">No rooms.</div>';
 } catch (err) {
 console.error('Estimated rates failed:', err);
 el.innerHTML = `<div class="settings-note" style="margin:0;">Couldn't work them out: ${escapeHtml(err.message || String(err))}</div>`;

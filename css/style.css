@@ -4933,3 +4933,10 @@ input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=color],[ty
 .sh-table th,.sh-table td{white-space:normal;padding-right:6px;vertical-align:top;}
 .sh-table td .sh-dim{display:inline-block;white-space:nowrap;}
 }
+
+/* Booking evaluator -> Estimated rates: one compact block per room (a table was wider than a phone). */
+.be-est-rooms{display:flex;flex-direction:column;gap:10px;}
+.be-est-name{font-weight:600;margin-bottom:2px;}
+.be-est-grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 12px;margin:0;font-size:0.9em;font-variant-numeric:tabular-nums;}
+.be-est-grid dt{color:var(--muted);}
+.be-est-grid dd{margin:0;}
