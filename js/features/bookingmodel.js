@@ -537,6 +537,7 @@ const netShareOf = (e) => { const g = Number(e.grossEarnings); const a = Number(
 // belongs to (by confirmation code), for Airbnb's extra-guest charge.
 const guestsByCode = new Map();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && Number(r.guests) > 0) guestsByCode.set(r.confirmationCode, Number(r.guests)); });
+(data.lettingLedger || []).forEach((e) => { if (e.confirmationCode && Number(e.guests) > 0 && !guestsByCode.has(e.confirmationCode)) guestsByCode.set(e.confirmationCode, Number(e.guests)); });
 const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: Number(e.guests) > 0 ? Number(e.guests) : (guestsByCode.get(e.confirmationCode) ?? null) }));
 const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();

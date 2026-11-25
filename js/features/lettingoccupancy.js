@@ -16,6 +16,7 @@ import { escapeHtml, dateStrAdd, todayStr, uid } from '../utils.js';
 import { listingColorVar, resolveColor, addMonths, monthLabel, ownerKeyFor, ownerNameFor, lettingChartMonthTotal, lettingIncomeItems, nightRateRooms, money0 } from './letting.js';
 import { isUnconfirmedStay, roomBlocks } from '../icsparse.js';
 import { activeListingId } from '../roomowner.js';
+import { partySizeOf, setPartySize } from './partysize.js';
 import { latestProjection, projectionForMonth, projectedNights, projectedByDate, runProjection, refreshProjection, statusText, isDeadVoid, deadVoidsOf, showProjection as showProjectionOn } from './bookingprojection.js';
 
 const DAY_MS = 86400000;
@@ -379,7 +380,7 @@ return { total, known, share: total ? known / total : 0 };
 
 // ---- State & markup ----------------------------------------------------------
 
-const state = { voidPlansOpen: false, ym: '', metric: 'bookings', compare: 'prev', channel: '', room: '', hoverStay: null, hoverDay: null };
+const state = { gapScope: 'months', voidPlansOpen: false, ym: '', metric: 'bookings', compare: 'prev', channel: '', room: '', hoverStay: null, hoverDay: null };
 const PLOTS = { timeline: null, pace: null };
 
 // The stays and income entries behind every chart here, cut to the room picked in the Room box (every room
@@ -1146,21 +1147,32 @@ el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Where thi
 <td>${why(r)}</td></tr>`).join('') || '<tr><td colspan="4">No income entries fall in this month.</td></tr>'}</tbody></table></div>`;
 }
 
-// The bookings behind the shaded band on Nights booked: stays touching this month or the comparison
-// month that have no booking date. Typing the day sets it where it belongs (a stay's confirmedOn, or
-// bookedOn on an income / cancellation entry that has no stay record), and the chart redraws.
-function undatedStays(stays) {
+// Bookings with data gaps: a missing booking date (the shaded band on Nights booked) or a missing party size (the
+// booking evaluator's extra-guest charge). Scope: the stays touching this month or the comparison month, or every
+// booking. Typing a booking date sets it where it belongs (a stay's confirmedOn, or bookedOn on an income / cancellation
+// entry that has no stay record); a party size goes on the record and its earnings rows (partysize.js).
+// A long let has no party size gap (its rate isn't a nightly one), nor does a cancelled booking.
+function gapsOf(s) {
+const g = [];
+if (!s.bookedOn) g.push('date');
+if (s.status !== 'cancelled' && !s.longLet && !s.approx && partySizeOf(s.id) == null) g.push('party');
+return g;
+}
+function gapStays(stays) {
 const months = [state.ym, ...compareMonths(state.ym, state.compare)];
-return stays.filter((s) => !s.bookedOn && months.some((m) => nightsInMonth(s, m) > 0)).sort((a, b) => String(a.checkin).localeCompare(String(b.checkin)));
+return stays.filter((s) => gapsOf(s).length && (state.gapScope === 'all' || months.some((m) => nightsInMonth(s, m) > 0))).sort((a, b) => String(a.checkin).localeCompare(String(b.checkin)));
 }
 
 function renderUndated(stays) {
 const el = document.getElementById('occ-undated');
 if (!el) return;
 const open = el.open;
-const list = undatedStays(stays);
+const list = gapStays(stays);
 const months = [state.ym, ...compareMonths(state.ym, state.compare)];
+const nDate = list.filter((s) => gapsOf(s).includes('date')).length;
+const nParty = list.filter((s) => gapsOf(s).includes('party')).length;
 const rows = list.map((s) => {
+const gaps = gapsOf(s);
 const room = (data.airbnbListings || []).find((l) => l.id === s.listingId);
 const where = months.map((m) => ({ m, n: nightsInMonth(s, m) })).filter((x) => x.n > 0).map((x) => `${x.n} night${x.n === 1 ? '' : 's'} in ${escapeHtml(longMonth(x.m).split(' ')[0])}`).join(', ');
 const entryOnly = String(s.id).startsWith('led:');
@@ -1171,12 +1183,14 @@ const link = entryOnly
 return `<div class="occ-undated-row">
 <span class="occ-undated-who">${escapeHtml(s.guest || 'No name')}</span>
 <span class="settings-note" style="margin:0;">${escapeHtml(room ? (room.label || room.prefix || 'Room') : 'Room?')} &middot; ${escapeHtml(shortDate(s.checkin))} &rarr; ${escapeHtml(shortDate(s.checkout))} &middot; ${where} &middot; ${escapeHtml(kind)}${s.approx ? ' (length unknown, one night drawn)' : ''} &middot; ${link}</span>
-<label class="occ-undated-set">Booked on <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(todayStr())}"></label>
+${gaps.includes('date') ? `<label class="occ-undated-set">Booked on <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(todayStr())}"></label>` : ''}
+${gaps.includes('party') ? `<label class="occ-undated-set">Guests <input type="number" class="settings-input" data-occ-guests="${escapeHtml(s.id)}" min="1" max="30" step="1" style="width:56px;"></label>` : ''}
 </div>`;
 }).join('');
-el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Bookings with no booking date (${list.length})</summary>
-<div class="settings-note" style="margin:4px 0 6px;">These are the nights in the shaded band on Nights booked. Type the day each was booked and it moves out of the band. Where the confirmation email is in your inbox the Airbnb sync fills it in itself; older and cancelled bookings often have none, and the date is in the Airbnb reservation if you can still open it.</div>
-${rows || '<div class="settings-note" style="margin:0;">Every booking in these months has a booking date.</div>'}`;
+el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Bookings with data gaps (${list.length}${list.length ? `: ${[nDate ? `${nDate} no booking date` : '', nParty ? `${nParty} no party size` : ''].filter(Boolean).join(', ')}` : ''})</summary>
+<div class="sync-row" style="align-items:center;margin:4px 0;"><select class="settings-input" data-occ-gap-scope><option value="months"${state.gapScope === 'months' ? ' selected' : ''}>This month and the comparison</option><option value="all"${state.gapScope === 'all' ? ' selected' : ''}>Every booking</option></select></div>
+<div class="settings-note" style="margin:0 0 6px;">No booking date: these are the nights in the shaded band on Nights booked; type the day each was booked and it moves out of the band. No party size: the booking evaluator needs it to take Airbnb's extra-guest charge out of what the stay paid. The Airbnb sync fills both from the confirmation email where it is in your inbox; older and cancelled bookings often have none, and both are in the Airbnb reservation if you can still open it.</div>
+${rows || `<div class="settings-note" style="margin:0;">${state.gapScope === 'all' ? 'Every booking has a booking date and a party size.' : 'Every booking in these months has a booking date and a party size.'}</div>`}`;
 el.open = open;
 }
 
@@ -1395,6 +1409,10 @@ document.getElementById('occ-void-plans').addEventListener('change', onVoidPlanC
 document.getElementById('occ-plans-pending').addEventListener('click', onPlansRerun);
 refreshProjectionStatus();
 document.getElementById('occ-undated').addEventListener('change', (e) => {
+const scope = e.target.closest('[data-occ-gap-scope]');
+if (scope) { state.gapScope = scope.value === 'all' ? 'all' : 'months'; renderLettingOccupancy(); return; }
+const party = e.target.closest('[data-occ-guests]');
+if (party && party.value) { if (setPartySize(party.dataset.occGuests, party.value)) { queueSave(); renderLettingOccupancy(); } return; }
 const input = e.target.closest('[data-occ-booked]');
 if (input && input.value) setBookedOn(input.dataset.occBooked, input.value);
 });
