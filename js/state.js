@@ -313,10 +313,9 @@ events: [],
 // nightly prices you set on Airbnb, as Airbnb shows them; on those nights they replace the model's own price
 // (bookingmodel.js setRateAt).
 setRates: [],
-// [{maxNights, withinDays|null, pct}]: your own void-filling cut, by void length and how close in (bookingmodel.js
-// voidCutFor); replaces gapDiscountPct/gapMaxNights when set. Starts at the owner's stated rule: voids under 7 nights,
-// within a month, 20%.
-voidDiscounts: [{ maxNights: 6, withinDays: 30, pct: 20 }],
+// {lengths, leads, pct[length][lead]}: your own void-filling cut by void length (nights) and days before check-in
+// (bookingmodel.js voidCutFor); replaces gapDiscountPct/gapMaxNights. Seeded from the owner's hand-drawn grid (25 Nov 2026).
+voidGrid: { lengths: [2, 3, 4, 5, 6, 7], leads: [5, 10, 20, 30, 40], pct: [[25, 25, 20, 20, 20], [20, 20, 20, 20, 20], [20, 20, 20, 20, 10], [20, 20, 20, 10, 10], [20, 20, 10, 10, 0], [10, 10, 10, 0, 0]] },
 // What each channel keeps of what the guest pays, % (Airbnb host fee 15.5% + 20% VAT): bookingmodel.js channelKeep.
 channelFees: { airbnb: 18.6, direct: 0 },
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):

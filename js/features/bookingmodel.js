@@ -318,23 +318,35 @@ return { raw: nightly / ((1 - sn) * (1 - ln) * (1 - nl) * (1 - tr) * (1 - vc)), 
 }
 
 // ---- Your own void-filling discount, and the channels' fees ----------------------------------------------------------
-// prefs.bookingEvaluator.voidDiscounts = [{maxNights, withinDays|null, pct}]: a void (free nights with a booking either
-// side) of at most maxNights, booked within withinDays of its first night (blank = any time), takes pct off; the deepest
-// tier that fits applies. It is a cut YOU make on the rate, not one of Airbnb's rules. With no tiers, the older single
-// setting (gapDiscountPct on gaps of gapMaxNights or fewer, at any lead) is the one tier.
-function voidTiers(s) {
-const t = Array.isArray(s.voidDiscounts) && s.voidDiscounts.length ? s.voidDiscounts : [{ maxNights: s.gapMaxNights, withinDays: null, pct: s.gapDiscountPct }];
-return t.filter((x) => x && Number(x.pct) > 0 && Number(x.maxNights) > 0);
+// prefs.bookingEvaluator.voidGrid = {lengths: [2..7], leads: [5, 10, 20, 30, 40], pct: [[...] per length]}: the cut YOU make
+// on a void (free nights with a booking either side), by its length and how many days before its first night the booking
+// comes: pct[i][j] for a void of at most lengths[i] nights (and more than lengths[i-1]; a 1-night void reads the first row)
+// booked at most leads[j] days ahead (and more than leads[j-1]). A longer void, or a booking further ahead than the last
+// column, takes none. Each cell is the deepest cut you'd have reached by then. It is not one of Airbnb's rules. With no grid
+// (null), the older single setting (gapDiscountPct on gaps of gapMaxNights or fewer, at any lead) applies.
+function voidGridOf(s) {
+const g = s && s.voidGrid;
+if (!g || !Array.isArray(g.lengths) || !Array.isArray(g.leads) || !Array.isArray(g.pct) || !g.lengths.length || !g.leads.length) return null;
+return g;
 }
 function voidCutFor(s, voidNights, lead) {
-let best = 0;
-voidTiers(s).forEach((x) => {
-const within = x.withinDays == null || x.withinDays === '' ? Infinity : Number(x.withinDays);
-if (voidNights <= Number(x.maxNights) && (lead == null || lead <= within)) best = Math.max(best, Math.min(90, Number(x.pct)) / 100);
-});
-return best;
+const g = voidGridOf(s);
+if (!g) {
+const pct = Number(s.gapDiscountPct) || 0; const max = Number(s.gapMaxNights) || 0;
+return pct > 0 && voidNights <= max ? Math.min(90, pct) / 100 : 0;
 }
-const voidCutMax = (s) => voidTiers(s).reduce((m, x) => Math.max(m, Math.min(90, Number(x.pct)) / 100), 0);
+if (lead == null) return 0;
+const i = g.lengths.findIndex((L) => voidNights <= Number(L));
+const j = g.leads.findIndex((D) => lead <= Number(D));
+if (i < 0 || j < 0) return 0;
+const v = Number((g.pct[i] || [])[j]);
+return Number.isFinite(v) && v > 0 ? Math.min(90, v) / 100 : 0;
+}
+const voidCutMax = (s) => {
+const g = voidGridOf(s);
+if (!g) return Math.min(90, Number(s.gapDiscountPct) || 0) / 100;
+return g.pct.reduce((m, row) => Math.max(m, ...(row || []).map((v) => Math.min(90, Number(v) || 0) / 100)), 0);
+};
 // The fee a channel takes off what the guest pays for the stay (prefs.bookingEvaluator.channelFees, % : Airbnb's host fee
 // is 15.5% + 20% VAT = 18.6%). Used for everything priced forward from a rate as the guest sees it (a set rate, the
 // extra-guest charge, the listed cleaning fee). Past stays use what each actually kept (its earnings row's Amount / Gross).
@@ -1734,7 +1746,7 @@ const discs = ctx.rooms.map((_, i) => roomDiscount(ctx, params, i));
 const topRated = discs.map((d) => 1 - topRatedOf(s, d));
 const newPct = newListingPctOf(s);
 const newUntil = ctx.rooms.map((_, i) => { const st = params.stages && params.stages.get((params.roomListing || [])[i]); return newPct > 0 && (params.roomStage || [])[i] === 'new' && st ? st.newUntil : -Infinity; });
-const tiersOn = voidTiers(s).length > 0;
+const tiersOn = voidCutMax(s) > 0;
 // v9 (audit finding 6): a simulated booking is cancelled with probability params.cancelRate (the rate learnt from your
 // cancelled stays, as the evaluator already applies to the request it judges), at a moment drawn uniformly between its
 // booking and its check-in; its nights are held until then and free again after (so a later request can re-book them),
@@ -2781,7 +2793,7 @@ const simulate = (minNights, pct, asIs = false) => {
 const reach = Math.max(curMax, v.nights);
 // Without any plan already set on this void, so the options are compared with each other and with doing nothing.
 const bare = { ...ctx, s: { ...ctx.s, voidPlans: (ctx.s.voidPlans || []).filter((q) => !(q.roomKey === v.roomKey && q.from < v.to && q.to > v.from)) } };
-const p = makeProjection(bare, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], boostPct: 40, play: { minNights: { [room.key]: minNights }, s: asIs ? {} : { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax, voidDiscounts: [] } } });
+const p = makeProjection(bare, { from: v.from, to: v.to, runs, params: calib, roomKeys: [room.key], boostPct: 40, play: { minNights: { [room.key]: minNights }, s: asIs ? {} : { gapDiscountPct: pct, gapMaxNights: pct > 0 ? reach : curMax, voidGrid: null } } });
 if (p.error) return null;
 while (!p.step(100)) { /* run to the end */ }
 const r = p.finish();
@@ -3027,7 +3039,7 @@ return { fits, tau: Math.sqrt(tau2) };
 
 // v7: `more` adds settings and `cal` picks the calibrate (v6's, for the equivalence case).
 function testContext({ occupancy, today = '2026-11-01', minNights = 1, more = {}, cal = calibrate }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidDiscounts: [], newListingDiscountPct: 0, ...more };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, newListingDiscountPct: 0, ...more };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
@@ -3254,9 +3266,9 @@ const fGap = gapRun([]); const fSet = gapRun([{ id: 'r', roomKey: 'A', from: '20
 const fEv = gapRun([{ id: 'r', roomKey: 'A', from: '2026-12-11', last: '2026-12-12', weekday: 120, reason: 'event', setOn: '2026-10-01' }]);
 check('Void cut: applies with no set rate and on an event rate, not on an infill rate', Math.abs(fGap - 0.8) < 1e-9 && Math.abs(fSet - 1) < 1e-9 && Math.abs(fEv - 0.8) < 1e-9, `${fGap} ${fSet} ${fEv}`);
 // 11g. Void tiers: deepest that fits; outside the lead window none; no tiers = the single gap setting at any lead.
-const tiers11g = { voidDiscounts: [{ maxNights: 6, withinDays: 30, pct: 20 }, { maxNights: 3, withinDays: 14, pct: 30 }] };
-const vt = [voidCutFor(tiers11g, 5, 20), voidCutFor(tiers11g, 3, 10), voidCutFor(tiers11g, 3, 20), voidCutFor(tiers11g, 5, 40), voidCutFor(tiers11g, 8, 5), voidCutFor({ voidDiscounts: [], gapDiscountPct: 15, gapMaxNights: 4 }, 4, 300)];
-check('Void tiers pick the deepest that fits, by void length and lead', vt.join() === '0.2,0.3,0.2,0,0,0.15', vt.join());
+const tiers11g = { voidGrid: { lengths: [3, 6], leads: [14, 30], pct: [[30, 20], [20, 20]] } };
+const vt = [voidCutFor(tiers11g, 5, 20), voidCutFor(tiers11g, 3, 10), voidCutFor(tiers11g, 3, 20), voidCutFor(tiers11g, 5, 40), voidCutFor(tiers11g, 8, 5), voidCutFor({ voidGrid: null, gapDiscountPct: 15, gapMaxNights: 4 }, 4, 300)];
+check('Void grid: the cell for the void length and lead; none beyond the grid; no grid = the single gap setting', vt.join() === '0.2,0.3,0.2,0,0,0.15', vt.join());
 // 11e. Demand lift: a one-off event's own nights x1.5, nothing either side; a yearly one balanced so its window's total holds;
 // a set rate's own demand wins over the event's on its nights.
 const evOnce = { id: 'e1', name: 'One-off', rule: 'once', date: '2026-12-10', nights: 2, upliftPct: 0, demandPct: 50, dates: [] };
@@ -3821,7 +3833,7 @@ check('v9 shrinkage: leave-one-out towards the other room, one room alone unchan
 const poolWorld = ({ rates, launch, seed, today = '2026-11-01' }) => {
 const keys = ['A', 'B', 'C'];
 const rooms = rates.map((_, i) => ({ key: keys[i], label: `Room ${keys[i]}`, listingIds: [`L${keys[i]}`], include: true, weight: 1, minNights: 1, priceWeekday: 100, priceWeekend: 100 }));
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidDiscounts: [], newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, newListingDiscountPct: 0, elasticity: 0, elasticityPrior: { ensuite: 0, shared: 0, season: new Array(12).fill(1), shortNoticeMult: 1 } };
 const c = { today, s, firstClean: 50, rooms, stays: [], requests: [], proposals: [], listingLabels: Object.fromEntries(rooms.map((r) => [r.listingIds[0], r.label])), scale: {}, calRuns: 40 };
 calibrate(c);
 const p = c.params; p.cancelRate = 0;
@@ -4027,4 +4039,4 @@ if (!(sr && (sr.reason === 'infill' || sr.reason === 'short-notice'))) cut('void
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { setRateAt, demandAt, voidCutFor, voidTiers, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { setRateAt, demandAt, voidCutFor, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };

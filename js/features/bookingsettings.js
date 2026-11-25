@@ -32,7 +32,7 @@ if (!s.elasticityPrior || typeof s.elasticityPrior !== 'object' || s.elasticityP
 if (!Array.isArray(s.elasticityPrior.season) || s.elasticityPrior.season.length !== 12) s.elasticityPrior.season = [...d.elasticityPrior.season];
 if (!Array.isArray(s.unavailable) || s.unavailable === d.unavailable) s.unavailable = Array.isArray(s.unavailable) ? s.unavailable.map((u) => ({ ...u })) : [];
 if (!Array.isArray(s.voidPlans) || s.voidPlans === d.voidPlans) s.voidPlans = Array.isArray(s.voidPlans) ? s.voidPlans.map((p) => ({ ...p })) : [];
-if (!Array.isArray(s.voidDiscounts) || s.voidDiscounts === d.voidDiscounts) s.voidDiscounts = (Array.isArray(s.voidDiscounts) ? s.voidDiscounts : d.voidDiscounts || []).map((x) => ({ ...x }));
+if (s.voidGrid === undefined || s.voidGrid === d.voidGrid) s.voidGrid = s.voidGrid === null ? null : structuredClone(s.voidGrid || d.voidGrid);
 if (!s.channelFees || typeof s.channelFees !== 'object' || s.channelFees === d.channelFees) s.channelFees = { ...(d.channelFees || {}), ...(s.channelFees && typeof s.channelFees === 'object' ? s.channelFees : {}) };
 if (!Array.isArray(s.setRates) || s.setRates === d.setRates) s.setRates = Array.isArray(s.setRates) ? s.setRates.map((x) => ({ ...x })) : [];
 if (!Array.isArray(s.events) || s.events === d.events) s.events = Array.isArray(s.events) ? s.events.map((x) => ({ ...x })) : [];
@@ -265,6 +265,16 @@ const id = escapeHtml(ev.id);
 return `${nextHtml}<span class="be-ev-dates">${(ev.dates || []).map((d) => `<span class="heat-flag">${escapeHtml(evDate(d))} <span class="del-x" data-be-ev-date-del="${id}" data-date="${escapeHtml(d)}" title="Remove this date">&times;</span></span>`).join(' ')}
 <input type="date" class="settings-input" data-be-ev-date-in="${id}" title="An announced first night" style="width:140px;"><button class="sync-btn sm inline" type="button" data-be-ev-date-add="${id}">Add date</button></span>`;
 }
+// The void-filling grid (prefs.bookingEvaluator.voidGrid; voidCutFor in bookingmodel.js): rows are void lengths, columns
+// days before check-in, each cell a % (blank = 0).
+function voidGridHtml(s) {
+const g = s.voidGrid;
+if (!g || !Array.isArray(g.lengths)) return '<div class="settings-note" style="margin:0;">No grid: the older single gap discount applies.</div>';
+const col = (j) => `${j === 0 ? 'up to ' : ''}${escapeHtml(String(g.leads[j]))} days`;
+return `<div style="overflow-x:auto;"><table class="limits-table be-void-grid"><thead><tr><th>Void length</th>${g.leads.map((_, j) => `<th class="num">${col(j)}</th>`).join('')}</tr></thead><tbody>
+${g.lengths.map((L, i) => `<tr><td>${i === 0 ? 'up to ' : ''}${escapeHtml(String(L))} nights</td>${g.leads.map((_, j) => `<td class="num">${numBox(`voidGrid.pct.${i}.${j}`, (g.pct[i] || [])[j], { width: 50, placeholder: '0' })}%</td>`).join('')}</tr>`).join('')}
+</tbody></table></div>`;
+}
 // Rates you've set on Airbnb (prefs.bookingEvaluator.setRates; see setRateAt in bookingmodel.js): on these nights the model
 // prices from your rate, not from its own learnt price, and adds no gap or void cut of its own.
 const SET_RATE_REASONS = [['event', 'Event'], ['season', 'Season'], ['infill', 'Infill / gap'], ['short-notice', 'Short notice'], ['other', 'Other']];
@@ -452,9 +462,9 @@ ${row('Hidden 1-night demand', `${numBox('oneNightDemandPct', s.oneNightDemandPc
 <h4 class="be-set-h">Discounts and price</h4>
 ${discountsHtml(s)}
 ${row('Channel fees', `Airbnb ${numBox('channelFees.airbnb', (s.channelFees || {}).airbnb, { step: 0.1, width: 56 })}% Direct ${numBox('channelFees.direct', (s.channelFees || {}).direct, { step: 0.1, width: 56 })}%`, 'What each channel keeps of what the guest pays for the stay. Airbnb\'s host fee is 15.5% + 20% VAT = 18.6%. Used for prices you\'ve set, the extra-guest charge and the listed cleaning fee; past stays use what each one actually kept.')}
-<div class="be-set-row"><span class="be-set-label">Void-filling cuts</span><span class="settings-note" style="margin:0;">The cut you make on a void (free nights with a booking either side) as it gets close: a void of up to N nights, booked within D days of its first night (blank = any time), takes X% off. The deepest tier that fits applies. Your past void fills have it taken back out before the model learns your price. Not applied on nights whose rate you've set as an infill or short-notice rate.</span></div>
-<div id="be-void-tiers">${(s.voidDiscounts || []).map((x, i) => `<div class="be-set-row"><span class="be-set-label"></span><span class="be-set-inputs">up to ${numBox(`voidDiscounts.${i}.maxNights`, x.maxNights, { width: 46, min: 1 })} nights, within ${numBox(`voidDiscounts.${i}.withinDays`, x.withinDays, { width: 52, min: 0, placeholder: 'any' })} days: ${numBox(`voidDiscounts.${i}.pct`, x.pct, { width: 50 })}% off</span><span class="del-x" data-be-void-del="${i}" title="Remove">&times;</span></div>`).join('') || '<div class="settings-note" style="margin:0;">No tiers: the older single gap discount applies.</div>'}</div>
-<div class="sync-row" style="align-items:center;"><button class="sync-btn sm inline" type="button" id="be-void-add">Add a tier</button><span class="settings-note" style="margin:0;" id="be-void-check"></span></div>
+<div class="be-set-row"><span class="be-set-label">Void-filling cuts</span><span class="settings-note" style="margin:0;">The cut you make on a void (free nights with a booking either side), by its length and how many days before its first night the booking comes. Each cell is the deepest cut you'd have reached by then; a longer void or a booking further ahead than the last column takes none. Your past void fills have it taken back out before the model learns your price. Not applied on nights whose rate you've set as an infill or short-notice rate.</span></div>
+${voidGridHtml(s)}
+<div class="sync-row" style="align-items:center;"><span class="settings-note" style="margin:0;" id="be-void-check"></span></div>
 ${row('Price sensitivity (v6 level)', numBox('elasticity', -Math.abs(Number(s.elasticity) || 0), { step: 0.1, width: 56, min: -10 }), 'The older model\'s single figure, negative like the ones below (-1.5: 10% dearer, about 15% fewer bookings). The live model (v8) uses it only to keep the demand level at today\'s discounts where the older model put it; how demand moves when a price changes comes from the guest-price sensitivity below.')}
 ${row('An enquiry counts as', `${numBox('enquiryWeight', s.enquiryWeight, { step: 0.05, width: 56 })} of a request`, 'Enquiries are often guests shopping around.')}
 ${guestPriceHtml(s)}
@@ -547,7 +557,7 @@ const path = input.dataset.be;
 let value;
 if (input.type === 'checkbox') value = input.checked;
 else if (input.type === 'date') value = input.value;
-else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian|extraGuestFee|withinDays/i.test(path) ? null : undefined;
+else if (input.value.trim() === '') value = /price|cleaningIncome|stayMedian|extraGuestFee/i.test(path) ? null : /^voidGrid\.pct\./.test(path) ? 0 : undefined;
 else value = Number(input.value);
 if (value === undefined || (typeof value === 'number' && !Number.isFinite(value))) { renderBookingEvaluatorSettings(); return; }
 if (path === 'airbnbCleaningCost') {
@@ -680,16 +690,6 @@ if (!ev) return;
 ev.dates = (ev.dates || []).filter((d) => d !== evDateDel.dataset.date);
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
-const voidDel = e.target.closest('[data-be-void-del]');
-if (voidDel) {
-const s = settings();
-s.voidDiscounts = s.voidDiscounts.filter((_, i) => i !== Number(voidDel.dataset.beVoidDel));
-queueSave(); renderBookingEvaluatorSettings(); return;
-}
-if (e.target.closest('#be-void-add')) {
-settings().voidDiscounts.push({ maxNights: 3, withinDays: 14, pct: 30 });
-queueSave(); renderBookingEvaluatorSettings(); return;
-}
 const rateDel = e.target.closest('[data-be-rate-del]');
 if (rateDel) {
 const s = settings();
@@ -727,8 +727,8 @@ settings().events.push(normaliseEvent(ev));
 queueSave(); renderBookingEvaluatorSettings(); return;
 }
 if (!e.target.closest('#be-reset')) return;
-const { rooms, unavailable, calibration, voidPlans, events, setRates, voidDiscounts, channelFees } = settings();
-data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events, setRates, voidDiscounts, channelFees };
+const { rooms, unavailable, calibration, voidPlans, events, setRates, voidGrid, channelFees } = settings();
+data.prefs.bookingEvaluator = { ...structuredClone(DEFAULT_PREFS.bookingEvaluator), rooms, unavailable, calibration, voidPlans, events, setRates, voidGrid, channelFees };
 queueSave();
 renderBookingEvaluatorSettings();
 });
