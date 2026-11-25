@@ -732,21 +732,36 @@ addSample(r, x.listingId, { amount: Number(x.income) - extraIncomeOf(r, x.guests
 });
 const everyRaw = samples.flat().map((x) => x.raw);
 // Friday/Saturday premium, per room. The starting point is your setting (weekendUpliftPct: what your Fri/Sat price is
-// over your Sun-Thu one, +20% by default: £186 against £155). Your stays move it as their numbers grow: weekend-heavy
-// stays (at least 2/3 of their nights Fri/Sat) against weekday-only ones, the two medians' ratio pulled towards the
-// starting point with weight n / (n + 10), n the smaller group (so 3 of each counts for under a quarter, 30 for three
-// quarters). Taken on its own from a handful of stays, the ratio swung below 1 (Double: 3 against 4 stays), and a stay
-// half weekend half weekday says little about either.
+// over your Sun-Thu one, +20% by default: £186 against £155). Your stays move it as their numbers grow. Every stay is
+// used, by its share of Fri/Sat nights (ws): a stay's nightly rate is taken as weekday x premium^ws, so a 7-night stay with
+// its 2 weekend nights (ws 2/7) says 2/7 as much about the premium as a Fri-Sat stay, and a Thu-Sat stay (ws 2/3) is
+// two-thirds weekend, not all of it. The fit is a straight line through ln(rate) against ws (least squares, then again
+// without any stay more than 3 robust spreads off it, so one odd payout can't decide it); its slope is ln(premium).
+// How much it counts: n / (n + 10), n = 2 x the spread of ws across the stays (sum of (ws - mean)^2), which is the
+// number of each when the stays are all-weekend or all-weekday (3 of each: under a quarter; 30: three quarters).
 const UPLIFT_SHRINK = 10;
 const upliftPrior = Math.min(1.6, Math.max(0.9, 1 + (Number(s.weekendUpliftPct ?? 20) || 0) / 100));
+const lineFit = (pts) => {
+const m = pts.length; if (m < 3) return null;
+const mx = pts.reduce((a, p) => a + p.x, 0) / m; const my = pts.reduce((a, p) => a + p.y, 0) / m;
+const sxx = pts.reduce((a, p) => a + (p.x - mx) ** 2, 0);
+if (!(sxx > 0)) return null;
+const b = pts.reduce((a, p) => a + (p.x - mx) * (p.y - my), 0) / sxx;
+return { a: my - b * mx, b, sxx };
+};
 const upliftFit = samples.map((sm) => {
-const low = sm.filter((x) => x.ws === 0).map((x) => x.raw);
-const high = sm.filter((x) => x.ws >= 2 / 3).map((x) => x.raw);
-const n = Math.min(low.length, high.length);
-const data = n >= 3 ? median(high) / median(low) : null;
+let pts = sm.filter((x) => x.raw > 0).map((x) => ({ x: x.ws, y: Math.log(x.raw) }));
+let f = lineFit(pts);
+if (f) {
+const res = pts.map((p) => p.y - f.a - f.b * p.x);
+const mad = median(res.map((r) => Math.abs(r - median(res)))) * 1.4826;
+if (mad > 0) { const kept = pts.filter((p, k) => Math.abs(res[k]) <= 3 * mad); if (kept.length < pts.length) { const f2 = lineFit(kept); if (f2) { f = f2; pts = kept; } } }
+}
+const n = f ? 2 * f.sxx : 0;
+const data = f && n >= 3 ? Math.exp(f.b) : null;
 const w = data ? n / (n + UPLIFT_SHRINK) : 0;
 const u = data ? Math.exp(w * Math.log(data) + (1 - w) * Math.log(upliftPrior)) : upliftPrior;
-return { u: Math.min(1.6, Math.max(0.9, u)), data, nWeekend: high.length, nWeekday: low.length, w };
+return { u: Math.min(1.6, Math.max(0.9, u)), data, nStays: pts.length, nWithWeekend: pts.filter((p) => p.x > 0).length, nEquiv: n, w };
 });
 const uplifts = upliftFit.map((f) => f.u);
 samples.forEach((sm, i) => sm.forEach((x) => { x.wd = x.raw / (1 + x.ws * (uplifts[i] - 1)); }));
@@ -3274,6 +3289,21 @@ return calibrate(c);
 } });
 const p11b = ctx11b.params.prices[0];
 check('Extra-guest charge out of past payouts, average added back per night', Math.abs(p11b.trace.medianPaidPerNight - 101.2) < 0.05 && Math.abs(p11b.extraGuest - 8.8) < 1e-9 && Math.abs(p11b.extraGuestNet - 8.8) < 1e-9 && p11b.meanExtraGuests === 1, `${p11b.trace.medianPaidPerNight} ${p11b.extraGuest} ${p11b.meanExtraGuests}`);
+// 11i. Fri/Sat premium from every stay by its share of weekend nights. Weekday £100, premium x1.5, each stay paying
+// 100 x 1.5^ws a night: 6 Fri-Sat stays (ws 1), 6 Mon-Thu (ws 0), 6 Mon-Mon weeks (ws 2/7, 2 weekend nights of 7), and
+// one £300-a-night weekday stay that the refit drops. The fit reads x1.5 exactly; the setting (+20%) pulls it back by
+// its weight.
+const ctx11i = testContext({ occupancy: 0.5, more: { channelFees: { airbnb: 0 }, weekendUpliftPct: 20 }, cal: (c) => {
+const rows = [];
+const add = (k, off, nights, ws, nightly) => rows.push({ listingId: 'LA', guest: `w${k}`, code: `HMW${k}`, start: dayStr(dayNum('2026-03-02') + 7 * k + off), nights, amount: nights * nightly, cleaningFee: 0, bookingDate: '2026-01-01', share: 1, guests: 1 });
+for (let k = 0; k < 6; k++) { add(k, 4, 2, 1, 150); add(k + 6, 0, 4, 0, 100); add(k + 12, 0, 7, 2 / 7, 100 * 1.5 ** (2 / 7)); }
+add(18, 0, 3, 0, 300);
+c.earnings = rows;
+return calibrate(c);
+} });
+const f11i = ctx11i.params.prices[0].upliftFit;
+const u11i = Math.exp(f11i.w * Math.log(1.5) + (1 - f11i.w) * Math.log(1.2));
+check('Fri/Sat premium: every stay counted by its weekend share, outlier dropped, pulled towards the setting', f11i.data != null && Math.abs(f11i.data - 1.5) < 1e-6 && f11i.nStays === 18 && f11i.nWithWeekend === 12 && Math.abs(ctx11i.params.prices[0].uplift - u11i) < 1e-9 && f11i.w > 0.3 && f11i.w < 0.6, `data ${f11i.data} n ${f11i.nStays}/${f11i.nWithWeekend} equiv ${f11i.nEquiv.toFixed(2)} w ${f11i.w.toFixed(3)} u ${ctx11i.params.prices[0].uplift.toFixed(4)}`);
 // 11c. A set rate replaces the model's price (x Airbnb's fee share, 1 here with no earnings rows), on its nights only, Fri/Sat
 // at its weekend figure, and from its setOn only.
 const ctx11c = testContext({ occupancy: 0.5, today: '2026-11-01', more: { channelFees: { airbnb: 0 }, setRates: [
