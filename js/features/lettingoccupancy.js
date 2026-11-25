@@ -454,6 +454,7 @@ return `<div class="letting-chart-wrap" id="letting-occupancy-section">
 <div class="chart-canvas-wrap occ-wrap" style="position:relative;height:240px;"><canvas id="pace-canvas"></canvas><div class="occ-tip" id="pace-tip" hidden></div></div>
 <details class="settings-subgroup" style="margin-top:6px;"><summary class="settings-note" style="cursor:pointer;">Table view</summary><div id="occ-table" style="overflow-x:auto;"></div></details>
 <details class="settings-subgroup" id="occ-undated" style="margin-top:6px;"></details>
+<div class="sync-row" style="align-items:center;margin-top:6px;"><button type="button" class="sync-btn sm inline" id="occ-export-xlsx">Export bookings (Excel)</button><span class="settings-note" id="occ-export-status" style="margin:0;">Every booking and enquiry, monthly totals per room, the latest forecast, with charts.</span></div>
 </div>`;
 }
 
@@ -1152,9 +1153,13 @@ el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Where thi
 // booking. Typing a booking date sets it where it belongs (a stay's confirmedOn, or bookedOn on an income / cancellation
 // entry that has no stay record); a party size goes on the record and its earnings rows (partysize.js).
 // A long let has no party size gap (its rate isn't a nightly one), nor does a cancelled booking.
+// A booking date after check-in is a gap too ('baddate'): it is when the record was typed in, not when the stay was
+// agreed, and the booking model ignores it (bookingmodel.js buildContext), so the stay counts as undated until fixed.
+const badBookedOn = (s) => !!(s.bookedOn && s.checkin && String(s.bookedOn).slice(0, 10) > s.checkin);
 function gapsOf(s) {
 const g = [];
 if (!s.bookedOn) g.push('date');
+else if (badBookedOn(s)) g.push('baddate');
 if (s.status !== 'cancelled' && !s.longLet && !s.approx && partySizeOf(s.id) == null) g.push('party');
 return g;
 }
@@ -1171,6 +1176,7 @@ const list = gapStays(stays);
 const months = [state.ym, ...compareMonths(state.ym, state.compare)];
 const nDate = list.filter((s) => gapsOf(s).includes('date')).length;
 const nParty = list.filter((s) => gapsOf(s).includes('party')).length;
+const nBad = list.filter((s) => gapsOf(s).includes('baddate')).length;
 const rows = list.map((s) => {
 const gaps = gapsOf(s);
 const room = (data.airbnbListings || []).find((l) => l.id === s.listingId);
@@ -1184,13 +1190,14 @@ return `<div class="occ-undated-row">
 <span class="occ-undated-who">${escapeHtml(s.guest || 'No name')}</span>
 <span class="settings-note" style="margin:0;">${escapeHtml(room ? (room.label || room.prefix || 'Room') : 'Room?')} &middot; ${escapeHtml(shortDate(s.checkin))} &rarr; ${escapeHtml(shortDate(s.checkout))} &middot; ${where} &middot; ${escapeHtml(kind)}${s.approx ? ' (length unknown, one night drawn)' : ''} &middot; ${link}</span>
 ${gaps.includes('date') ? `<label class="occ-undated-set">Booked on <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(todayStr())}"></label>` : ''}
+${gaps.includes('baddate') ? `<label class="occ-undated-set" title="The booking date on record, ${escapeHtml(shortDate(String(s.bookedOn).slice(0, 10)))}, is after check-in">Booked on <span class="letting-nobook">${escapeHtml(shortDate(String(s.bookedOn).slice(0, 10)))}, after check-in</span> <input type="date" class="settings-input" data-occ-booked="${escapeHtml(s.id)}" max="${escapeHtml(s.checkin)}"></label>` : ''}
 ${gaps.includes('party') ? `<label class="occ-undated-set">Guests <input type="number" class="settings-input" data-occ-guests="${escapeHtml(s.id)}" min="1" max="30" step="1" style="width:56px;"></label>` : ''}
 </div>`;
 }).join('');
-el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Bookings with data gaps (${list.length}${list.length ? `: ${[nDate ? `${nDate} no booking date` : '', nParty ? `${nParty} no party size` : ''].filter(Boolean).join(', ')}` : ''})</summary>
+el.innerHTML = `<summary class="settings-note" style="cursor:pointer;">Bookings with data gaps (${list.length}${list.length ? `: ${[nDate ? `${nDate} no booking date` : '', nBad ? `${nBad} booking date after check-in` : '', nParty ? `${nParty} no party size` : ''].filter(Boolean).join(', ')}` : ''})</summary>
 <div class="sync-row" style="align-items:center;margin:4px 0;"><select class="settings-input" data-occ-gap-scope><option value="months"${state.gapScope === 'months' ? ' selected' : ''}>This month and the comparison</option><option value="all"${state.gapScope === 'all' ? ' selected' : ''}>Every booking</option></select></div>
-<div class="settings-note" style="margin:0 0 6px;">No booking date: these are the nights in the shaded band on Nights booked; type the day each was booked and it moves out of the band. No party size: the booking evaluator needs it to take Airbnb's extra-guest charge out of what the stay paid. The Airbnb sync fills both from the confirmation email where it is in your inbox; older and cancelled bookings often have none, and both are in the Airbnb reservation if you can still open it.</div>
-${rows || `<div class="settings-note" style="margin:0;">${state.gapScope === 'all' ? 'Every booking has a booking date and a party size.' : 'Every booking in these months has a booking date and a party size.'}</div>`}`;
+<div class="settings-note" style="margin:0 0 6px;">No booking date: these are the nights in the shaded band on Nights booked; type the day each was booked and it moves out of the band. Booking date after check-in: the date on record can't be when the stay was agreed (usually it's when the entry was typed in), so the model treats it as unknown; type the real one. No party size: the booking evaluator needs it to take Airbnb's extra-guest charge out of what the stay paid. The Airbnb sync fills both from the confirmation email where it is in your inbox; older and cancelled bookings often have none, and both are in the Airbnb reservation if you can still open it.</div>
+${rows || `<div class="settings-note" style="margin:0;">${state.gapScope === 'all' ? 'Every booking has a sensible booking date and a party size.' : 'Every booking in these months has a sensible booking date and a party size.'}</div>`}`;
 el.open = open;
 }
 
@@ -1405,6 +1412,11 @@ document.getElementById('occ-project-show').addEventListener('change', (e) => { 
 document.getElementById('occ-project-btn').addEventListener('click', () => runProjectionFromUi(3));
 document.getElementById('occ-project-more-btn').addEventListener('click', () => runProjectionFromUi(6));
 document.getElementById('occ-dead-voids').addEventListener('change', onVoidPlanChange);
+document.getElementById('occ-export-xlsx').addEventListener('click', async () => {
+const st = document.getElementById('occ-export-status');
+st.textContent = 'Building the workbook...';
+try { const r = await (await import('./bookingexport.js')).exportBookingsXlsx(); st.textContent = `Downloaded: ${r.bookings} bookings and enquiries, ${r.months} months${r.forecast ? ', with the latest forecast' : ', no saved forecast yet'}.`; } catch (e) { st.textContent = `Export failed: ${e && e.message ? e.message : e}`; }
+});
 document.getElementById('occ-void-plans').addEventListener('change', onVoidPlanChange);
 document.getElementById('occ-plans-pending').addEventListener('click', onPlansRerun);
 refreshProjectionStatus();
