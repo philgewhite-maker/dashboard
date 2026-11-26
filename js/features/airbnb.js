@@ -23,7 +23,7 @@ import { parseIcsReservations, parseIcsBlocks, isUnconfirmedStay, isForgettableS
 // still be entered (see syncAirbnbListing's removal step).
 const AWAITING_INCOME_DAYS = 30;
 import { fetchIcs } from '../files.js';
-import { wifiByStay, stayWifiHtml } from './wifipresence.js';
+import { wifiByStay, stayWifiHtml, cleanerPresence } from './wifipresence.js';
 import { canAttemptGoogleAction, hasCalendarWrite, isSignedIn, signIn } from '../sync/googleauth.js';
 import { listCalendars, createEvent, findEvents, getEvent, patchEventDates } from '../googlecalendar.js';
 
@@ -788,7 +788,8 @@ function cleanerChipHtml(reservation, edge) {
 const match = findCleanerMatch(reservation, edge);
 const label = edge === 'checkin' ? '&rarr;&#129529;' : '&#129529;&rarr;';
 const edgeName = edge === 'checkin' ? 'Check-in clean' : 'Check-out clean';
-if (match) return `<span class="cal-badge cleaner-chip" title="${edgeName}">${label} ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)} <span class="tag-x" data-airbnb-cleaner-unassign="${reservation.id}:${edge}" title="Un-assign this clean from this stay. The calendar event stays where it is; it just stops counting for this ${edge === 'checkin' ? 'check-in' : 'check-out'}.">&times;</span></span>`;
+const here = match ? cleanerPresence(match.name) : '';
+if (match) return `<span class="cal-badge cleaner-chip${here === 'live' ? ' wifi-live' : here === 'today' ? ' wifi-seen' : ''}" title="${edgeName}${here === 'live' ? `: ${escapeHtml(match.name)} is on the Wi-Fi now` : here === 'today' ? `: ${escapeHtml(match.name)} was on the Wi-Fi today` : ''}">${label} ${formatAirbnbDate(match.date)} &middot; ${escapeHtml(match.name)} <span class="tag-x" data-airbnb-cleaner-unassign="${reservation.id}:${edge}" title="Un-assign this clean from this stay. The calendar event stays where it is; it just stops counting for this ${edge === 'checkin' ? 'check-in' : 'check-out'}.">&times;</span></span>`;
 const key = `${reservation.id}:${edge}`;
 if (!openCleanerForms.has(key)) {
 return `<span class="cal-badge cleaner-chip cleaner-chip-tbc" data-airbnb-cleaner-toggle="${key}" data-airbnb-cleaner-drop="${key}" title="${edgeName}: drop a cleaner here, or click to add who's doing this clean and when">${label} TBC</span><span class="sync-status" data-airbnb-cleaner-status="${key}"></span>`;
@@ -1426,7 +1427,9 @@ el.innerHTML = `<datalist id="airbnb-cleaner-names">${names.map((n) => `<option 
 el.querySelectorAll('.pick-chip').forEach((chip) => {
 const name = chip.dataset.pickValue;
 chip.draggable = true;
-chip.title = `Drag ${name} onto a "TBC" clean`;
+const here = cleanerPresence(name);
+if (here) chip.classList.add(here === 'live' ? 'wifi-live' : 'wifi-seen');
+chip.title = `${here === 'live' ? `${name} is on the Wi-Fi now. ` : here === 'today' ? `${name} was on the Wi-Fi today. ` : ''}Drag ${name} onto a "TBC" clean`;
 // A name that's on the calendar comes back on the next scan, so only
 // one added here by hand can be removed.
 if (!onCalendar.has(name.toLowerCase()) && (data.airbnbCleaners || []).some((n) => n.toLowerCase() === name.toLowerCase())) {

@@ -4805,6 +4805,15 @@ background:var(--slate-bg);color:var(--slate);
 .wifi-dev-when{flex:1 1 200px;font-size:12px;color:var(--muted);}
 .wifi-dev .tag-add-input{flex:1 1 130px;max-width:180px;}
 .wifi-dev-stay{flex:1 1 100%;font-size:12px;}
+/* Here now / here today: the same two outlines as a stay's guest name (.stay-guest.wifi-live / .wifi-seen). */
+.wifi-who{border-radius:4px;padding:0 3px;}
+.wifi-who.wifi-seen,.cal-badge.cleaner-chip.wifi-seen,.pick-chip.wifi-seen{outline:1.5px solid var(--sage);outline-offset:0;}
+.wifi-who.wifi-live,.cal-badge.cleaner-chip.wifi-live,.pick-chip.wifi-live{outline:2.5px solid var(--sage);outline-offset:0;background:var(--sage-bg);}
+.wifi-sort-row{align-items:center;margin:6px 0;}
+.wifi-group{border-top:1px solid var(--line);padding:2px 0;}
+.wifi-group:first-of-type{border-top:0;}
+.wifi-group>summary{cursor:pointer;font-size:13px;font-weight:600;padding:6px 0;}
+.wifi-group-live{font-weight:400;font-size:12px;color:var(--sage);}
 
 /* ---- Booking evaluator settings: long-let offer check + per-listing discounts (bookingsettings.js) ---- */
 .llc-form{display:flex;flex-wrap:wrap;align-items:flex-end;gap:6px 10px;font-size:12px;}

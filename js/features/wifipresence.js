@@ -162,6 +162,41 @@ return (visits || [])
 .sort((a, b) => b.from - a.from);
 }
 
+// Is a device here now, or was it here today? 'live' while one of its visits is still open, 'today' when one was seen
+// (began or was last seen) on today's local date, else ''. The same two states as a stay's guest-name outline.
+function presenceOf(mac, visits, now = Date.now()) {
+const today = localDay(now);
+let state = '';
+(visits || []).forEach((v) => {
+if (v.mac !== mac || state === 'live') return;
+if (v.to == null) { state = 'live'; return; }
+const last = ms(v.lastSeen || v.to || v.from);
+if (last != null && localDay(last) === today) state = 'today';
+});
+return state;
+}
+// A cleaner device's label against a cleaner's name (the Airbnb panel's pool and clean chips): the same name, or one
+// starting with the other ("Maria" and "Maria iPhone", "Maria's phone"), ignoring case.
+function labelMatchesName(label, name) {
+const a = String(label || '').trim().toLowerCase(); const b = String(name || '').trim().toLowerCase();
+if (!a || !b) return false;
+return a === b || a.startsWith(`${b} `) || b.startsWith(`${a} `) || a.startsWith(`${b}'`) || a.startsWith(`${b}\u2019`);
+}
+// For the Airbnb panel: a cleaner's name -> 'live' | 'today' | '' from the devices tagged Cleaner whose label matches it.
+function cleanerPresence(name, now = Date.now()) {
+const devices = data.wifiDevices || {};
+let best = '';
+Object.keys(devices).forEach((mac) => {
+const d = devices[mac];
+if (!d || d.role !== 'cleaner' || best === 'live' || !labelMatchesName(d.label || d.hostname, name)) return;
+const p = presenceOf(mac, data.wifiVisits, now);
+if (p === 'live' || (p === 'today' && !best)) best = p;
+});
+return best;
+}
+const presenceClass = (p) => (p === 'live' ? ' wifi-live' : p === 'today' ? ' wifi-seen' : '');
+const presenceTitle = (p) => (p === 'live' ? 'On the Wi-Fi now' : p === 'today' ? 'Seen on the Wi-Fi today' : '');
+
 const pad = (n) => String(n).padStart(2, '0');
 function clock(t) { const d = new Date(t); return `${pad(d.getHours())}:${pad(d.getMinutes())}`; }
 function dayName(t) { return new Date(t).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); }
@@ -494,10 +529,12 @@ function stayWifiHtml(item, chipFor, now = Date.now()) {
 return `<div class="stay-wifi${item.ambiguous ? ' amb' : ''}"><div class="wifi-line">${escapeHtml(stayLine(item, now))}</div>${item.devices.length ? `<div class="wifi-devs">${stayDevicesHtml(item, chipFor)}</div>` : ''}</div>`;
 }
 
-function cleanerRowsHtml(list) {
+function cleanerRowsHtml(list, now = Date.now()) {
 if (!list.length) return '<div class="settings-note" style="margin:0;">No visits yet. Tag a device as Cleaner below and its arrivals and departures appear here.</div>';
+const today = localDay(now);
 return list.slice(0, MAX_CLEANER_ROWS).map((v) => {
-const who = escapeHtml(v.name);
+const p = v.to == null ? 'live' : localDay(v.lastSeen || v.to) === today ? 'today' : '';
+const who = `<span class="wifi-who${presenceClass(p)}"${p ? ` title="${presenceTitle(p)}"` : ''}>${escapeHtml(v.name)}</span>`;
 const day = dayName(v.from);
 const times = v.to == null
 ? `arrived ${clock(v.from)}, still here (last seen ${clock(v.lastSeen)})`
@@ -508,18 +545,18 @@ return `<div class="wifi-clean-row"><span class="wifi-clean-day">${escapeHtml(da
 
 // `matched`: the stays this device was matched to (from matchStays), shown as chips; an unassigned one then reads as an
 // automatic guest rather than as something still to sort out.
-function deviceRowHtml(mac, d, matched = [], chipFor = (r) => escapeHtml(r.guestName || 'Stay')) {
+function deviceRowHtml(mac, d, matched = [], chipFor = (r) => escapeHtml(r.guestName || 'Stay'), presence = '') {
 const name = deviceName(d, mac);
 const auto = !d.role && matched.length;
 const roleOpts = ROLES.map(([v, label]) => `<option value="${v}"${(d.role || '') === v ? ' selected' : ''}>${v === '' && auto ? 'Guest (auto)' : label}</option>`).join('');
 const stayHtml = matched.length ? `<span class="wifi-dev-stay">${matched.map((r) => chipFor(r)).join(' ')}</span>` : '';
 const first = ms(d.firstSeen); const last = ms(d.lastSeen);
 return `<div class="wifi-dev" data-wifi-mac="${escapeHtml(mac)}">
-<span class="wifi-dev-name" title="${escapeHtml(mac)}">${escapeHtml(name)} <small>…${escapeHtml(mac.slice(-5))}</small></span>
+<span class="wifi-dev-name" title="${escapeHtml(mac)}${presence ? ` · ${presenceTitle(presence)}` : ''}"><span class="wifi-who${presenceClass(presence)}">${escapeHtml(name)}</span> <small>…${escapeHtml(mac.slice(-5))}</small></span>
 <span class="cal-badge ${d.net === 'guest' ? 'blue' : 'sage'}">${d.net === 'guest' ? 'guest' : 'home'}</span>
 <span class="wifi-dev-when">${first != null ? `first ${escapeHtml(dayName(first))} ${clock(first)}` : ''}${last != null ? ` · last ${escapeHtml(dayName(last))} ${clock(last)}` : ''}</span>
 <select data-wifi-role="${escapeHtml(mac)}" title="What this device is. Guest and Unassigned guest-network devices are matched to stays; Cleaner ones are timed below.">${roleOpts}</select>
-<input type="text" autocomplete="off" class="tag-add-input" data-wifi-label="${escapeHtml(mac)}" placeholder="Label (optional)" value="${escapeHtml(d.label || '')}">
+<input type="text" autocomplete="off" class="tag-add-input" data-wifi-label="${escapeHtml(mac)}"${d.role === 'cleaner' ? ' list="airbnb-cleaner-names" title="The cleaner&#39;s name, as on the Airbnb panel, so their clean chips light up while they&#39;re here"' : ''} placeholder="${d.role === 'cleaner' ? 'Cleaner&#39;s name' : 'Label (optional)'}" value="${escapeHtml(d.label || '')}">
 ${stayHtml}
 </div>`;
 }
@@ -561,17 +598,71 @@ const goAirbnb = '<span class="inline-goto-link" data-goto-tab="overview" data-g
 stays.innerHTML = `<div class="settings-note" style="margin:0;">${live.length ? `Connected now: ${live.map((it) => chipFor(it.stay)).join(' ')}. ` : ''}Guest devices show on each stay in ${goAirbnb}: a green outline on the guest's name means devices were seen (stronger while connected), and the stay's &#9662; lists them.</div>`;
 
 const cleaners = document.getElementById('wifi-cleaners');
-if (cleaners) cleaners.innerHTML = cleanerRowsHtml(cleanerVisits(data.wifiDevices, data.wifiVisits));
+if (cleaners) cleaners.innerHTML = cleanerRowsHtml(cleanerVisits(data.wifiDevices, data.wifiVisits), now);
 
 const macs = Object.keys(data.wifiDevices || {});
-const order = (mac) => { const d = data.wifiDevices[mac]; return `${d.net === 'guest' ? 0 : 1}${d.role || staysByMac.has(mac) ? 1 : 0}${String(9e15 - (ms(d.lastSeen) || 0)).padStart(16, '0')}`; };
-macs.sort((a, b) => order(a).localeCompare(order(b)));
+const groups = groupDevices(macs, data.wifiDevices, staysByMac, now);
 const list = document.getElementById('wifi-devices');
-if (list) list.innerHTML = macs.length ? macs.map((m) => deviceRowHtml(m, data.wifiDevices[m], staysByMac.get(m) || [], chipFor)).join('') : '<div class="settings-note" style="margin:0;">No devices yet.</div>';
+if (list) {
+list.innerHTML = macs.length ? `<div class="sync-row wifi-sort-row"><label class="settings-note" style="margin:0;">Sort <select class="mini" data-wifi-sort>${SORTS.map(([v, l]) => `<option value="${v}"${deviceSort === v ? ' selected' : ''}>${l}</option>`).join('')}</select></label></div>`
++ groups.map((g) => `<details class="wifi-group" data-wifi-group="${g.key}"${groupOpen(g) ? ' open' : ''}><summary>${escapeHtml(g.label)} <span class="count-badge">${g.macs.length}</span>${g.live ? ` <span class="wifi-group-live">${g.live} here now</span>` : ''}</summary>${sortMacs(g.macs).map((m) => deviceRowHtml(m, data.wifiDevices[m], staysByMac.get(m) || [], chipFor, presenceOf(m, data.wifiVisits, now))).join('')}</details>`).join('')
+: '<div class="settings-note" style="margin:0;">No devices yet.</div>';
+}
 const label = document.getElementById('wifi-devices-summary');
-if (label) label.textContent = `Devices (${macs.length})`;
+const nNew = (groups.find((g) => g.key === 'new') || { macs: [] }).macs.length;
+if (label) label.textContent = `Devices (${macs.length}${nNew ? ` · ${nNew} new or unsorted` : ''})`;
+const outer = document.querySelector('.wifi-devices-details');
+if (outer && nNew && !outerOpened) { outer.open = true; outerOpened = true; }
 const count = document.getElementById('wifi-count');
 if (count) count.textContent = agentStatus && agentStatus.guest_clients ? `${agentStatus.guest_clients} now` : '';
+}
+
+// ---- device list: groups, sorting, folding ---------------------------------------------------------------------
+
+// Groups, top to bottom. New and unsorted first (no role, not matched to a stay), then the guests staying now; the rest
+// fold away. A guest device (tagged, or matched to stays automatically) whose stays have all ended is an old guest.
+const GROUPS = [
+['new', 'New and unsorted', true], ['guestNow', 'Guests staying now', true], ['cleaner', 'Cleaners', true],
+['me', 'Me', false], ['family', 'Family', false], ['visitor', 'Visitors', false], ['household', 'Household', false],
+['oldGuest', 'Old guests', false], ['ignore', 'Ignored', false],
+];
+const SORTS = [['last', 'Last seen'], ['first', 'First seen'], ['name', 'Name']];
+const PREF_KEY = 'wifiDeviceList';
+let deviceSort = 'last';
+let groupState = {}; // group key -> open (true/false), as this viewer left it (localStorage: a per-viewer convenience)
+let outerOpened = false;
+try { const p = JSON.parse(localStorage.getItem(PREF_KEY) || '{}'); if (SORTS.some(([v]) => v === p.sort)) deviceSort = p.sort; if (p.open && typeof p.open === 'object') groupState = p.open; } catch (e) { /* defaults */ }
+function savePrefs() { try { localStorage.setItem(PREF_KEY, JSON.stringify({ sort: deviceSort, open: groupState })); } catch (e) { /* this viewer only */ } }
+const groupOpen = (g) => (g.key in groupState ? groupState[g.key] : g.open);
+
+function groupDevices(macs, devices, staysByMac, now) {
+const by = new Map(GROUPS.map(([key, label, open]) => [key, { key, label, open, macs: [], live: 0 }]));
+macs.forEach((mac) => {
+const d = devices[mac] || {};
+const stays = staysByMac.get(mac) || [];
+const here = presenceOf(mac, data.wifiVisits, now);
+let key;
+if (d.role && d.role !== 'guest') key = by.has(d.role) ? d.role : 'new';
+else if (!d.role && !stays.length) key = 'new';
+else {
+const inProgress = stays.some((r) => r.checkin && r.checkout && now >= localMs(r.checkin, 0) && now <= localMs(r.checkout, 12));
+key = inProgress || here === 'live' ? 'guestNow' : 'oldGuest';
+}
+const g = by.get(key);
+g.macs.push(mac);
+if (here === 'live') g.live += 1;
+});
+return [...by.values()].filter((g) => g.macs.length);
+}
+
+function sortMacs(list) {
+const d = data.wifiDevices;
+const key = {
+last: (m) => -(ms(d[m].lastSeen) || 0),
+first: (m) => -(ms(d[m].firstSeen) || 0),
+name: (m) => deviceName(d[m], m).toLowerCase(),
+}[deviceSort] || ((m) => -(ms(d[m].lastSeen) || 0));
+return list.slice().sort((a, b) => { const x = key(a); const y = key(b); return x < y ? -1 : x > y ? 1 : 0; });
 }
 
 function initWifiPresence() {
@@ -590,7 +681,15 @@ if (pendingAction === 'reboot') runControl('router.reboot', { confirm: 'reboot' 
 else runControl('router.guestWifi', { on: pendingAction === 'guestOn' });
 });
 const list = document.getElementById('wifi-devices');
+list.addEventListener('toggle', (e) => {
+const g = e.target;
+if (!g || !g.matches || !g.matches('details[data-wifi-group]')) return;
+groupState[g.dataset.wifiGroup] = g.open;
+savePrefs();
+}, true);
 list.addEventListener('change', (e) => {
+const sort = e.target.closest('[data-wifi-sort]');
+if (sort) { deviceSort = sort.value; savePrefs(); renderWifiPresence(); return; }
 const role = e.target.closest('[data-wifi-role]');
 const label = e.target.closest('[data-wifi-label]');
 const mac = role ? role.dataset.wifiRole : label ? label.dataset.wifiLabel : null;
@@ -599,6 +698,8 @@ if (role) data.wifiDevices[mac].role = role.value;
 if (label) data.wifiDevices[mac].label = label.value.trim();
 queueSave();
 renderWifiPresence();
+// A Cleaner tag or name lights up that cleaner's chips on the Airbnb panel.
+import('./airbnb.js').then((m) => m.renderAirbnb()).catch(() => {});
 });
 // The stay-expander "which stay" picker lives on the Airbnb panel (and anywhere else stayWifiHtml is shown).
 document.addEventListener('change', (e) => {
@@ -621,4 +722,4 @@ setTimeout(autoPull, 5000);
 setInterval(autoPull, AUTO_PULL_MS);
 }
 
-export { initWifiPresence, renderWifiPresence, wifiByStay, stayWifiHtml, pull as pullWifiEvents, mergeWifiEvents, matchStays, cleanerVisits, selfTest };
+export { initWifiPresence, renderWifiPresence, wifiByStay, cleanerPresence, presenceOf, labelMatchesName, stayWifiHtml, pull as pullWifiEvents, mergeWifiEvents, matchStays, cleanerVisits, selfTest };
