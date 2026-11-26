@@ -6,6 +6,7 @@
 const KEY = 'dashboard-theme';
 const ORDER = ['auto', 'light', 'dark'];
 const LABEL = { auto: 'Theme: auto', light: 'Theme: light', dark: 'Theme: dark' };
+const ICON = { auto: '\u25D0', light: '\u2600\uFE0E', dark: '\u263E' }; // half circle, sun, moon
 const BAR = { light: '#FAF9F5', dark: '#161512' };
 
 function stored() {
@@ -26,8 +27,9 @@ if (meta) meta.setAttribute('content', BAR[effective(mode)]);
 window.dispatchEvent(new Event('themechange'));
 const btn = document.getElementById('theme-toggle');
 if (btn) {
-btn.textContent = LABEL[mode];
-btn.title = 'Cycles auto (follows this device) → light → dark. Saved on this device only.';
+btn.textContent = ICON[mode];
+btn.setAttribute('aria-label', LABEL[mode]);
+btn.title = `${LABEL[mode]}. Cycles auto (follows this device) → light → dark. Saved on this device only.`;
 }
 }
 

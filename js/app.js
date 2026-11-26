@@ -285,7 +285,7 @@ list.forEach(([name, fn]) => { try { const r = fn(); if (r && r.catch) r.catch((
 }
 
 async function main() {
-document.getElementById('today-date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' });
+document.getElementById('today-date').textContent = new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
 
 initSaveNote();
 initSaveFlush();
