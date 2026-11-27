@@ -178,7 +178,7 @@ const STAGE_DEMAND_K = 20; // pseudo-requests holding a stage's demand multiplie
 // Priors for a stage against "rated" (3+ reviews, no superhost). The price ones are third-party figures with no source
 // (ranges of -12% to -20% and +10% to +18% in achieved nightly rate; the midpoints are used). There is no figure at all
 // for demand, so it starts at "no effect". Settings can override them (prefs.bookingEvaluator.stagePriors).
-const STAGE_PRIOR = { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 };
+const STAGE_PRIOR = { newAdrPct: -16, superhostAdrPct: 2.5, newDemand: 1, superhostDemand: 1.025 };
 const NEW_LISTING_DISCOUNT_PCT = 15;
 const TOP_RATED_GUEST_SHARE_PCT = 50; // fallback only: the owner's figure (top-rated guests probably 50%+ of bookings), as DEFAULT_PREFS
 // Demand (see demandFor): the minimum stay assumed in force before shorter requests start appearing, how far back
@@ -719,12 +719,14 @@ if (x.ci >= start + nights && (next == null || x.ci < next)) next = x.ci;
 });
 return prev != null && next != null ? next - prev : null;
 };
+const voidFrom = typeof s.voidCutFrom === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s.voidCutFrom) ? dayNum(s.voidCutFrom) : null;
 const addSample = (r, listingId, { amount, cleaning, nights, start, booked, via }) => {
 const disc = discountsOf(s, 'airbnb', listingId);
 const madeOn = booked == null ? start - UNDATED_BOOKING_LEAD : booked;
 const stage = stageAt(stages.get(listingId), madeOn);
 const vn = booked == null ? null : voidAtBooking(r, start, nights, booked);
-const vc = vn == null ? 0 : voidCutFor(s, vn, start - booked);
+// v942: no void cut is undone on a stay booked before the cuts began (Settings: voidCutFrom).
+const vc = vn == null || (voidFrom != null && booked < voidFrom) ? 0 : voidCutFor(s, vn, start - booked);
 const out = rawNightlyRate({ amount, cleaning, nights, leadDays: booked == null ? null : start - booked, newListing: stage === 'new' ? newPct : 0, topRated: topRatedOf(s, disc), voidCut: vc }, disc);
 if (out) samples[r].push({ raw: out.raw, nightly: out.nightly, ws: weekendShare(start, nights), month: monthOf(start), via, sn: out.sn, ln: out.ln, nl: out.nl, tr: out.tr, vc: out.vc, voidNights: vn, lead: booked == null ? null : start - booked, stage, listingId, start, booked: madeOn, nights }); // v9: nights, for the market history ratio
 };

@@ -279,7 +279,10 @@ superhostFrom: '2026-01-01', superhostListings: {},
 // Which listings are your own (record ids): null = worked out, a listing whose owner is called Phil or that has none.
 ownListingIds: null,
 topRatedGuestSharePct: 50,
-stagePriors: { newAdrPct: -16, superhostAdrPct: 14, newDemand: 1, superhostDemand: 1 },
+// Superhost (27 Nov 2026, owner's call): +2.5% on the rate and +2.5% on requests, half each of a 5% effect. Your 19 stays
+// from the Superhost spell showed no premium against the old +14% (part of it may be in demand, or hidden by Guest
+// favourite coming first); a Guest favourite status of its own is to follow once its dates are known.
+stagePriors: { newAdrPct: -16, superhostAdrPct: 2.5, newDemand: 1, superhostDemand: 1.025 },
 // Model v7's guest price (js/features/guestprice.js, which holds the same values as its fallback). Per Airbnb listing id:
 // roomTypes 'ensuite' | 'shared'; cleaningFees are the LISTED amounts {perStay, shortStay, shortStayMaxNights}, scaled to
 // received money by the model. No platform fee is modelled: all income is received money. Read 14 Nov 2026;
@@ -297,6 +300,9 @@ cleaningFees: {
 // listing's own fit from the price ledger {listingId: {value, se, n, fittedOn}}, empty until that phase.
 elasticityPrior: { ensuite: -1.0, shared: -1.8, season: [1.2, 1.2, 1.2, 1.0, 1.0, 0.8, 0.8, 0.8, 1.0, 1.0, 1.2, 1.0], shortNoticeDays: 7, shortNoticeMult: 1.2, priorSd: 0.5, fits: {} },
 gapDiscountPct: 20, gapMaxNights: 3,
+// The day the void-filling cuts began (bookingmodel.js calibrate): a stay booked before it is taken to have had no void cut,
+// so none is undone on it. Aggressive void filling started with the model, early Nov 2026; little before. '' = always.
+voidCutFrom: '2026-11-01',
 elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
 // the occupancy the evaluator calibrates demand to.
@@ -3885,6 +3891,12 @@ delete data.prefs.bookingEvaluator.lastMinute;
 const savedListings = (data.prefs.bookingEvaluator.discounts || {}).listings;
 data.prefs.bookingEvaluator.discounts = { airbnb: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).airbnb || {}) }, direct: { shortNotice: [], length: [], ...((data.prefs.bookingEvaluator.discounts || {}).direct || {}) }, listings: { ...DEFAULT_PREFS.bookingEvaluator.discounts.listings, ...(savedListings && typeof savedListings === 'object' ? savedListings : {}) } };
 data.prefs.bookingEvaluator.stagePriors = { ...DEFAULT_PREFS.bookingEvaluator.stagePriors, ...(data.prefs.bookingEvaluator.stagePriors || {}) };
+// Rev 2 (v942): the old Superhost defaults (+14% rate, no demand effect) move to the new ones once; a value you've changed is kept.
+if (!(data.prefs.bookingEvaluator.stagePriorsRev >= 2)) {
+const sp = data.prefs.bookingEvaluator.stagePriors;
+if (Number(sp.superhostAdrPct) === 14 && Number(sp.superhostDemand) === 1) { sp.superhostAdrPct = DEFAULT_PREFS.bookingEvaluator.stagePriors.superhostAdrPct; sp.superhostDemand = DEFAULT_PREFS.bookingEvaluator.stagePriors.superhostDemand; }
+data.prefs.bookingEvaluator.stagePriorsRev = 2;
+}
 // Model v7's guest price and elasticity prior: the seeded listings and keys reach a device whose saved copy predates
 // them; a saved value wins (per listing, per key).
 {
