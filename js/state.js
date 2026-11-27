@@ -274,7 +274,7 @@ listings: {
 // stagePriors: where the model starts before your own before/after data corrects it: nightly rate with no rating,
 // and as a Superhost, as a % against a rated listing (unsourced third-party figures), and the same for requests as a
 // multiple (1 = no effect: no figure was found).
-newListingDiscountPct: 15,
+newListingDiscountPct: 5, // v943: the owner's call, a net 5% (was 15%)
 superhostFrom: '2026-01-01', superhostListings: {},
 // Which listings are your own (record ids): null = worked out, a listing whose owner is called Phil or that has none.
 ownListingIds: null,
@@ -303,6 +303,9 @@ gapDiscountPct: 20, gapMaxNights: 3,
 // The day the void-filling cuts began (bookingmodel.js calibrate): a stay booked before it is taken to have had no void cut,
 // so none is undone on it. Aggressive void filling started with the model, early Nov 2026; little before. '' = always.
 voidCutFrom: '2026-11-01',
+// The day you began using the short-notice and length-of-stay discounts in earnest (bookingmodel.js calibrate): they are
+// undone only on stays booked from it. Late Oct 2026, when bookings ramped up; '' = undone on every past stay.
+discountsFrom: '2026-10-25',
 elasticity: 1.5, enquiryWeight: 0.3,
 // [{id, roomKey, from, to}]: times a room wasn't offered (in use, off Airbnb), left out of
 // the occupancy the evaluator calibrates demand to.
@@ -3896,6 +3899,11 @@ if (!(data.prefs.bookingEvaluator.stagePriorsRev >= 2)) {
 const sp = data.prefs.bookingEvaluator.stagePriors;
 if (Number(sp.superhostAdrPct) === 14 && Number(sp.superhostDemand) === 1) { sp.superhostAdrPct = DEFAULT_PREFS.bookingEvaluator.stagePriors.superhostAdrPct; sp.superhostDemand = DEFAULT_PREFS.bookingEvaluator.stagePriors.superhostDemand; }
 data.prefs.bookingEvaluator.stagePriorsRev = 2;
+}
+// Rev 3 (v943): the new-listing discount's old default (15%) moves to 5% once; a value you've changed is kept.
+if (!(data.prefs.bookingEvaluator.stagePriorsRev >= 3)) {
+if (Number(data.prefs.bookingEvaluator.newListingDiscountPct) === 15) data.prefs.bookingEvaluator.newListingDiscountPct = DEFAULT_PREFS.bookingEvaluator.newListingDiscountPct;
+data.prefs.bookingEvaluator.stagePriorsRev = 3;
 }
 // Model v7's guest price and elasticity prior: the seeded listings and keys reach a device whose saved copy predates
 // them; a saved value wins (per listing, per key).
