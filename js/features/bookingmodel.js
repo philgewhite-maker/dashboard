@@ -751,7 +751,14 @@ if (!(Number(x.income) > 0) || n <= 0) return;
 const r = ri.get(x.listingId);
 if (x.noDemand) { skipped[r].push(Number(x.income) / n); return; }
 if (start < since) return;
-const usual = feeMedian(cleanFees[r]) ?? feeMedian(everyCleaning) ?? 0;
+// The clean this stay's guest paid: the listing's fee for a stay of this length (the short-stay fee up to its night
+// limit), as received after Airbnb's fee, from Settings -> Guest price; else the fee the export rows show (median).
+// v941: before, every such stay took the export's usual per-stay fee, so a 2-night stay lost the full fee, not the
+// short-stay one (Alan Croft, Double, 23-25 Nov 2026, HMFNA8AZSZ: £184.25 - £67.56 = £58.34 a night, not £69.74).
+const lfx = guestPriceSettings(s).cleaningFees[x.listingId];
+const shortFee = lfx && lfx.shortStay != null && lfx.shortStay !== '' && n <= (Number(lfx.shortStayMaxNights) || 0) ? Number(lfx.shortStay) : null;
+const listedFee = shortFee != null ? shortFee : lfx && Number(lfx.perStay) > 0 ? Number(lfx.perStay) : null;
+const usual = listedFee != null ? listedFee * keepAirbnb : (feeMedian(cleanFees[r]) ?? feeMedian(everyCleaning) ?? 0);
 addSample(r, x.listingId, { amount: Number(x.income) - extraIncomeOf(r, x.guests, n, roomShare[r]), cleaning: usual, nights: n, start, booked: x.bookedOn ? dayNum(x.bookedOn) : null, via: 'stay' });
 });
 const everyRaw = samples.flat().map((x) => x.raw);
