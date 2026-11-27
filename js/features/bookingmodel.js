@@ -550,7 +550,14 @@ const netShareOf = (e) => { const g = Number(e.grossEarnings); const a = Number(
 const guestsByCode = new Map();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && Number(r.guests) > 0) guestsByCode.set(r.confirmationCode, Number(r.guests)); });
 (data.lettingLedger || []).forEach((e) => { if (e.confirmationCode && Number(e.guests) > 0 && !guestsByCode.has(e.confirmationCode)) guestsByCode.set(e.confirmationCode, Number(e.guests)); });
-const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Number(e.amount), cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: Number(e.guests) > 0 ? Number(e.guests) : (guestsByCode.get(e.confirmationCode) ?? null) }));
+// A stay amended after booking (shortened, say) keeps its Reservation row at the ORIGINAL payout while its dates show the
+// new length; Airbnb takes the difference back on a separate "Adjustment" row with the same confirmation code (Yuhan,
+// HMX4EZDZCY: £774.67 for 5 nights, cut to 3, -£267.61). Those rows are netted into the stay's Amount, so its nightly rate
+// is what the nights actually stayed paid. "Resolution Adjustment" rows (Resolution Centre claims) are not room rate and
+// are left out, as are cancellation fees. A stay is never netted below nothing.
+const adjustByCode = new Map();
+(data.airbnbEarnings || []).forEach((e) => { if (String(e.type).toLowerCase() === 'adjustment' && e.confirmationCode && Number.isFinite(Number(e.amount))) adjustByCode.set(e.confirmationCode, (adjustByCode.get(e.confirmationCode) || 0) + Number(e.amount)); });
+const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Math.max(0, Number(e.amount) + (adjustByCode.get(e.confirmationCode) || 0)), adjusted: adjustByCode.get(e.confirmationCode) || 0, cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: Number(e.guests) > 0 ? Number(e.guests) : (guestsByCode.get(e.confirmationCode) ?? null) }));
 const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
