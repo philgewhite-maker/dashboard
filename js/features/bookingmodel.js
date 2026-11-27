@@ -179,7 +179,9 @@ const STAGE_DEMAND_K = 20; // pseudo-requests holding a stage's demand multiplie
 // Priors for a stage against "rated" (3+ reviews, no superhost). The price ones are third-party figures with no source
 // (ranges of -12% to -20% and +10% to +18% in achieved nightly rate; the midpoints are used). There is no figure at all
 // for demand, so it starts at "no effect". Settings can override them (prefs.bookingEvaluator.stagePriors).
-const STAGE_PRIOR = { newAdrPct: -16, superhostAdrPct: 2.5, newDemand: 1, superhostDemand: 1.025 };
+// v944: Guest favourite, on top of whichever stage (owner's call: +2.5% rate, x1.025 requests, as Superhost), prior only.
+const STAGE_PRIOR = { newAdrPct: -16, superhostAdrPct: 2.5, newDemand: 1, superhostDemand: 1.025, favouriteAdrPct: 2.5, favouriteDemand: 1.025 };
+const FAVOURITE_AFTER_REVIEWS = 6; // Airbnb's Guest favourite came after the 6th review (owner, 27 Nov 2026)
 const NEW_LISTING_DISCOUNT_PCT = 5; // v943: the owner's call, a net 5% (15% undone on every early stay pushed them 21% high)
 const TOP_RATED_GUEST_SHARE_PCT = 50; // fallback only: the owner's figure (top-rated guests probably 50%+ of bookings), as DEFAULT_PREFS
 // Demand (see demandFor): the minimum stay assumed in force before shorter requests start appearing, how far back
@@ -426,17 +428,23 @@ const byStays = stays.length >= 3 ? stays[2].co + REVIEW_LAG_DAYS : null;
 if (byReviews != null && (byStays == null || byReviews <= byStays)) { ratedOn = byReviews; ratedVia = 'reviews'; }
 else if (byStays != null) { ratedOn = byStays; ratedVia = 'stays'; }
 const sh = (s.superhostListings && s.superhostListings[id]) || ((ctx.ownListings || {})[id] ? s.superhostFrom : '');
+const fv = (s.guestFavouriteListings || {})[id];
+const fvOn = fv === 'reviews' ? (reviewed.length >= FAVOURITE_AFTER_REVIEWS ? reviewed[FAVOURITE_AFTER_REVIEWS - 1].co + REVIEW_LAG_DAYS : null) : validDate(fv) ? dayNum(fv) : null;
 const have = ratedVia === 'reviews' ? 3 : Math.min(2, Math.max(reviewed.length, ratedOn == null ? stays.length : 0));
 out.set(id, {
 liveOn: firsts.length ? Math.min(...firsts) - LIVE_BEFORE_FIRST_ASK : null,
 ratedOn, ratedVia, reviews: reviewed.length, stays: stays.length,
 superhostOn: validDate(sh) ? dayNum(sh) : null,
+// v944: Guest favourite (Settings: guestFavouriteListings[listingId]), 'reviews' = from the listing's 6th review on record
+// (its stay's checkout + REVIEW_LAG_DAYS, known only once that has passed), or a date. It stacks on the stage (favAt).
+favouriteOn: fvOn,
 // When a listing still in the new stage is expected to leave it (the simulated bookings made before then carry the discount).
 newUntil: ratedOn != null ? ratedOn : T + NEW_STAGE_DAYS_PER_REVIEW * (3 - have),
 });
 }));
 return out;
 }
+const favAt = (st, t) => !!st && st.favouriteOn != null && t >= st.favouriteOn;
 function stageAt(st, t) {
 if (!st || st.ratedOn == null || t < st.ratedOn) return 'new';
 return st.superhostOn != null && t >= st.superhostOn ? 'superhost' : 'rated';
@@ -449,6 +457,7 @@ const nl = newListingPctOf(s);
 return {
 price: { new: Math.max(0.3, (1 + Number(p.newAdrPct) / 100) / (1 - nl)), rated: 1, superhost: Math.max(0.3, 1 + Number(p.superhostAdrPct) / 100) },
 demand: { new: Number(p.newDemand) > 0 ? Number(p.newDemand) : 1, rated: 1, superhost: Number(p.superhostDemand) > 0 ? Number(p.superhostDemand) : 1 },
+favourite: { price: Math.max(0.3, 1 + (Number(p.favouriteAdrPct) || 0) / 100), demand: Number(p.favouriteDemand) > 0 ? Number(p.favouriteDemand) : 1 },
 };
 }
 const weightedMedian = (xs) => { // [{v, w}]
@@ -678,6 +687,8 @@ const priors = stagePriors(s);
 const newPct = newListingPctOf(s);
 const roomListing = ctx.rooms.map((room) => activeListingId(room.listingIds, ctx.stays, today));
 const roomStage = ctx.rooms.map((_, i) => stageAt(stages.get(roomListing[i]), T));
+const roomFav = ctx.rooms.map((_, i) => favAt(stages.get(roomListing[i]), T));
+const favMult = (b) => (b ? priors.favourite.price : 1);
 const samples = ctx.rooms.map(() => []); // {raw, nightly, ws (share of nights Fri/Sat), month, via, sn, ln, nl, tr, stage, listingId, start, booked}
 const cleanFees = ctx.rooms.map(() => []);
 const skipped = ctx.rooms.map(() => []); // nightly income of the stays left out as not short-let demand
@@ -743,7 +754,7 @@ const vn = booked == null ? null : voidAtBooking(r, start, nights, booked);
 // v942: no void cut is undone on a stay booked before the cuts began (Settings: voidCutFrom).
 const vc = vn == null || (voidFrom != null && booked < voidFrom) ? 0 : voidCutFor(s, vn, start - booked);
 const out = rawNightlyRate({ amount, cleaning, nights, leadDays: booked == null ? null : start - booked, newListing: stage === 'new' ? newPct : 0, topRated: topRatedOf(s, disc), voidCut: vc, special }, disc);
-if (out) samples[r].push({ sp: out.sp, raw: out.raw, nightly: out.nightly, ws: weekendShare(start, nights), month: monthOf(start), via, sn: out.sn, ln: out.ln, nl: out.nl, tr: out.tr, vc: out.vc, voidNights: vn, lead: booked == null ? null : start - booked, stage, listingId, start, booked: madeOn, nights }); // v9: nights, for the market history ratio
+if (out) samples[r].push({ fav: favAt(stages.get(listingId), madeOn), sp: out.sp, raw: out.raw, nightly: out.nightly, ws: weekendShare(start, nights), month: monthOf(start), via, sn: out.sn, ln: out.ln, nl: out.nl, tr: out.tr, vc: out.vc, voidNights: vn, lead: booked == null ? null : start - booked, stage, listingId, start, booked: madeOn, nights }); // v9: nights, for the market history ratio
 };
 (ctx.earnings || []).forEach((e) => {
 const r = ri.get(e.listingId);
@@ -844,7 +855,7 @@ stageFit[stg] = { prior, observed, n, fitted, capped: fitted !== raw };
 const po = { ...PRICE_OPTS, ...(ctx.priceOpts || {}) };
 // pastRise: each stay also put on today's market price level (its stay date against today), so older stays don't hold the base down.
 const riseTo = (start) => (po.pastRise > 0 ? Math.pow(1 + po.pastRise, (T - start) / 365) : 1);
-samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage] * riseTo(x.start); x.w = Math.pow(0.5, Math.max(0, T - x.booked) / po.halfLife); }));
+samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage] * favMult(roomFav[i]) / favMult(x.fav) * riseTo(x.start); x.w = Math.pow(0.5, Math.max(0, T - x.booked) / po.halfLife); }));
 // The month-of-year shape of the rate, shared by the rooms: each sample against its own room's median, by the month of
 // the stay, held by monthK pseudo-samples at London's shape (marketGamma, below) or at 1 with no market prior.
 // Season-neutral base (deseason, from v903): each sample is divided by its month's index before the recency-weighted
@@ -916,7 +927,7 @@ source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' 
 // The calibration so far. availabilityOf and exposureGrid read the stay-length curve and the weekday mix from it,
 // and the lead-time fit below needs both of those, so it is filled in as each piece is worked out.
 const futureRise = Math.max(-0.5, Math.min(0.5, po.futureRise != null ? Number(po.futureRise) || 0 : (Number(s.marketRisePct ?? 5) || 0) / 100));
-const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples, priceInterp: !!po.interp, futureRise, pastRise: po.pastRise || 0, priceSeason: po.priceSeason };
+const P = { roomFav, roomFavMult: roomFav.map(favMult), favPrice: priors.favourite.price, stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples, priceInterp: !!po.interp, futureRise, pastRise: po.pastRise || 0, priceSeason: po.priceSeason };
 const avs = ctx.rooms.map((_, i) => availabilityOf(ctx, P, i));
 
 // Stay length: requests (an enquiry at its weight), plus stays that didn't come from one.
@@ -2154,13 +2165,14 @@ const stages = params.stages || new Map();
 const end = weekStartN(dayNum(ctx.today));
 const perRoom = ctx.rooms.map((room, ri) => {
 const grid = exposureGrid(ctx, params, ri);
-const n = { new: 0, rated: 0, superhost: 0 }; const weeks = { new: 0, rated: 0, superhost: 0 };
-if (!grid) return { n, weeks };
+const n = { new: 0, rated: 0, superhost: 0 }; const weeks = { new: 0, rated: 0, superhost: 0 }; let favWeeks = 0;
+if (!grid) return { n, weeks, favWeeks };
 const launched = room.listingIds.map((id) => ({ id, st: stages.get(id) })).filter((x) => x.st && x.st.liveOn != null).sort((a, b) => a.st.liveOn - b.st.liveOn);
 const stageOfWeek = (w) => { let cur = launched[0]; launched.forEach((x) => { if (x.st.liveOn <= w) cur = x; }); return stageAt(cur ? cur.st : null, w); };
-for (let w = grid.first; w < end; w += 7) if (grid.listedWeek(w)) weeks[stageOfWeek(w)]++; // v9: the same weeks the level counts
+const favOfWeek = (w) => { let cur = launched[0]; launched.forEach((x) => { if (x.st.liveOn <= w) cur = x; }); return favAt(cur ? cur.st : null, w); };
+for (let w = grid.first; w < end; w += 7) if (grid.listedWeek(w)) { weeks[stageOfWeek(w)]++; if (favOfWeek(w)) favWeeks++; } // v9: the same weeks the level counts
 grid.asks.forEach((a) => { if (a.t >= grid.first && a.t < end) n[stageOfWeek(weekStartN(a.t))] += a.w; });
-return { n, weeks };
+return { n, weeks, favWeeks };
 });
 const mult = { rated: 1 }; const fit = {};
 ['new', 'superhost'].forEach((stg) => {
@@ -2175,11 +2187,15 @@ const fitted = nEff > 0 ? Math.min(2, Math.max(0.5, Math.exp((num + STAGE_DEMAND
 mult[stg] = fitted;
 fit[stg] = { prior: prior[stg], observed: nEff > 0 ? Math.exp(num / nEff) : null, n: nEff, fitted };
 });
-const adj = perRoom.map(({ weeks }, ri) => {
+// v944: Guest favourite stacks on the stage: today's x favourite over its average across the measured weeks.
+const favD = (params.stagePriors || stagePriors(ctx.s)).favourite.demand;
+const adj = perRoom.map(({ weeks, favWeeks }, ri) => {
 const W = weeks.new + weeks.rated + weeks.superhost;
 if (!W) return 1;
 const avg = (weeks.new * mult.new + weeks.rated * mult.rated + weeks.superhost * mult.superhost) / W;
-return mult[(params.roomStage || [])[ri] || 'rated'] / avg;
+const favNow = (params.roomFav || [])[ri] ? favD : 1;
+const favAvg = (favWeeks * favD + (W - favWeeks)) / W;
+return mult[(params.roomStage || [])[ri] || 'rated'] / avg * favNow / favAvg;
 });
 const out = { mult, fit, adj, perRoom };
 cache.set('stage', out);
@@ -3611,6 +3627,13 @@ const stays17e = stays17.map((x) => ({ ...x, income: x.id.startsWith('n') ? 200 
 const p17e = calibrate(fresh({ ...noStage, ...disc17e, discountsFrom: '2026-08-01' }, stays17e));
 const p17f = calibrate(fresh({ ...noStage, ...disc17e, discountsFrom: '' }, stays17e));
 check('Discounts began: short notice is undone only on stays booked from that day', Math.abs(p17e.prices[0].base - 100) < 1e-9 && p17f.prices[0].trace.byStage.new.undone > 110, `base ${p17e.prices[0].base.toFixed(2)} with the date; early stays ${p17f.prices[0].trace.byStage.new.undone} without it`);
+// v944: Guest favourite stacks on the stage. From 20 Aug the listing is a Guest favourite (+2.5%): the late three, booked
+// 25 Aug, paid 102.5; the early three, booked 10 Jul, paid 100, and are lifted to today's footing (favourite): base 102.5.
+const stays17g = stays17.map((x) => ({ ...x, income: x.id.startsWith('n') ? 200 : 205 }));
+const p17g = calibrate(fresh({ ...noStage, guestFavouriteListings: { LA: '2026-08-20' } }, stays17g));
+// 'reviews': from the 6th review on record, its stay's checkout + REVIEW_LAG_DAYS (r3 checks out 23 Sep: 27 Sep).
+const p17h = calibrate(fresh({ ...noStage, guestFavouriteListings: { LA: 'reviews' } }, stays17.map((x) => ({ ...x, reviewed: true }))));
+check('Guest favourite: +2.5% on top of the stage, from a date or from the 6th review', Math.abs(p17g.prices[0].base - 102.5) < 1e-9 && p17g.roomFav[0] === true && p17h.stages.get('LA').favouriteOn === dayNum('2026-09-27'), `base ${p17g.prices[0].base.toFixed(2)}; from the 6th review: ${p17h.stages.get('LA').favouriteOn == null ? 'none' : dayStr(p17h.stages.get('LA').favouriteOn)}`);
 // 18. Per-listing discounts. LA: last-minute 10% within 5 days, 5% within 10; 5% for 5+ nights, weekly 10%, monthly
 // 18%; top-rated guests 15%. LB: 10% within 2 days; weekly 10%, monthly 20%; no top-rated discount. LC has no entry
 // and falls back to the shared Airbnb steps (5% within 10 days).
@@ -4143,7 +4166,8 @@ const s = ctx.s;
 const steps = [];
 const add = (key, label, from, to, reason, extra = {}) => { steps.push({ key, label, amount: to - from, from, to, reason, ...extra }); return to; };
 const stage = (params.roomStage || [])[ri] || 'rated';
-const stageMult = (params.stagePrice || {})[stage] || 1;
+const favM = (params.roomFavMult || [])[ri] || 1;
+const stageMult = ((params.stagePrice || {})[stage] || 1) * favM;
 const m = monthOf(n);
 const we = weekendNight(n);
 const sr = setRateAt(ctx, ri, n);
@@ -4167,7 +4191,7 @@ const yrs = Math.max(0, n - dayNum(ctx.today)) / 365;
 v = add('trend', 'Market rise', v, v * rise, rise === 1 ? (params.futureRise ? 'none: tonight is at today\'s price level' : 'off (Settings: market price rise 0%)') : `x${rise.toFixed(3)}: London prices rising ${Math.round(params.futureRise * 1000) / 10}% a year (Settings), ${yrs.toFixed(2)} years ahead${params.pastRise ? `; past stays were put on today's level at ${Math.round(params.pastRise * 1000) / 10}% a year (${MARKET_PRICE_CREDIT})` : ''}`, { factor: rise });
 v = add('weekday', 'Weekday', v, we ? (p.weekend != null ? p.weekend / stageMult : v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
 const fit = (params.stageFit || {})[stage];
-v = add('stage', 'Rating stage', v, v * stageMult, stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${stageMult.toFixed(2)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`, { stage, mult: stageMult });
+v = add('stage', 'Rating stage', v, v * stageMult, (stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${(stageMult / favM).toFixed(3)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`) + (favM !== 1 ? `; Guest favourite x${favM.toFixed(3)} on top (your setting)` : ''), { stage, mult: stageMult, favourite: favM !== 1 });
 }
 const day = dayStr(n);
 if (!sr) eventFactorsAt(ctx, ri, n).forEach((f) => { v = add(f.key, f.label, v, v * f.factor, f.reason, { event: f.event, factor: f.factor }); });

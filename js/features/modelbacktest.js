@@ -310,7 +310,7 @@ for (const date of asOf) {
 const T = dayNum(date);
 // Actuals: stays booked after T and within the horizon (and before today).
 const targets = [];
-fullP.priceSamples.forEach((sm, i) => sm.forEach((x) => { if (x.booked > T && x.booked <= Math.min(T + horizon, T0)) targets.push({ i, x, actual: x.wd / (fullSt[x.stage] || 1) }); }));
+fullP.priceSamples.forEach((sm, i) => sm.forEach((x) => { if (x.booked > T && x.booked <= Math.min(T + horizon, T0)) targets.push({ i, x, actual: x.wd / (fullSt[x.stage] || 1) / (x.fav ? (fullP.favPrice || 1) : 1) }); }));
 if (!targets.length) continue;
 for (const [name, po] of Object.entries(variants)) {
 const ctx = truncate(full, date, opts, {});
@@ -320,7 +320,7 @@ try { P = calibrate(ctx); } catch (e) { continue; }
 targets.forEach(({ i, x, actual }) => {
 const p = P.prices[i];
 if (!p || !(p.n >= 3) || p.weekday != null || !(actual > 0)) return;
-const stageMult = (P.stagePrice || {})[(P.roomStage || [])[i] || 'rated'] || 1;
+const stageMult = ((P.stagePrice || {})[(P.roomStage || [])[i] || 'rated'] || 1) * ((P.roomFavMult || [])[i] || 1);
 // The season for the stay's own nights: the interpolated curve when the calibration uses one, else the month bucket.
 let ix = p.byMonth[x.month] != null && p.base > 0 ? p.byMonth[x.month] / p.base : 1;
 if (P.priceInterp && model.seasonPrice && p.base > 0 && x.nights > 0) { let sum = 0; for (let d = 0; d < x.nights; d++) sum += model.seasonPrice(p, x.start + d, true); ix = sum / x.nights / p.base; }

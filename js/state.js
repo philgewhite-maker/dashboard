@@ -282,7 +282,11 @@ topRatedGuestSharePct: 50,
 // Superhost (27 Nov 2026, owner's call): +2.5% on the rate and +2.5% on requests, half each of a 5% effect. Your 19 stays
 // from the Superhost spell showed no premium against the old +14% (part of it may be in demand, or hidden by Guest
 // favourite coming first); a Guest favourite status of its own is to follow once its dates are known.
-stagePriors: { newAdrPct: -16, superhostAdrPct: 2.5, newDemand: 1, superhostDemand: 1.025 },
+stagePriors: { newAdrPct: -16, superhostAdrPct: 2.5, newDemand: 1, superhostDemand: 1.025, favouriteAdrPct: 2.5, favouriteDemand: 1.025 },
+// Guest favourite, by listing record id: 'reviews' = from its 6th review on record, or the date it was gained. It stacks
+// on the rating stage (+favouriteAdrPct on the rate, x favouriteDemand on requests). Seeded 27 Nov 2026 from the owner:
+// Lewis's En-Suite and Zara's Double gained it after their 6th review.
+guestFavouriteListings: { '28jwkbim4b4': 'reviews', ecw6zeyngzc: 'reviews' },
 // Model v7's guest price (js/features/guestprice.js, which holds the same values as its fallback). Per Airbnb listing id:
 // roomTypes 'ensuite' | 'shared'; cleaningFees are the LISTED amounts {perStay, shortStay, shortStayMaxNights}, scaled to
 // received money by the model. No platform fee is modelled: all income is received money. Read 14 Nov 2026;

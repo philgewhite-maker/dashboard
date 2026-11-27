@@ -481,6 +481,8 @@ ${guestPriceHtml(s)}
 ${row('New-listing discount', `${numBox('newListingDiscountPct', s.newListingDiscountPct, { width: 56, step: 0.5 })}% off`, 'What a new listing takes off for bookings made before its third review. Undone on those past stays to get back to the raw rate.')}
 ${row('Superhost since', `<input type="date" class="settings-input" data-be="superhostFrom" value="${escapeHtml(s.superhostFrom || '')}">`, 'The date your own listings gained Superhost. Clear it if they never did.')}
 ${row('Superhost effect', `${numBox('stagePriors.superhostAdrPct', (s.stagePriors || {}).superhostAdrPct, { width: 50, step: 0.5, min: -50 })}% on the rate, requests x${numBox('stagePriors.superhostDemand', (s.stagePriors || {}).superhostDemand, { width: 56, step: 0.005, min: 0.5 })}`, 'Where the model starts for a Superhost listing against a rated one, before your own stays either side of the change correct it. 2.5% and x1.025 split a 5% effect between price and demand.')}
+${row('Guest favourite effect', `${numBox('stagePriors.favouriteAdrPct', (s.stagePriors || {}).favouriteAdrPct, { width: 50, step: 0.5, min: -50 })}% on the rate, requests x${numBox('stagePriors.favouriteDemand', (s.stagePriors || {}).favouriteDemand, { width: 56, step: 0.005, min: 0.5 })}`, 'On top of the rating stage (Superhost or not), from the day a listing became a Guest favourite. Not corrected by your stays yet: too few since.')}
+${evaluatorRooms().flatMap((room) => room.listingIds).map((id) => { const l = (data.airbnbListings || []).find((x) => x.id === id); const v = (s.guestFavouriteListings || {})[id] || ''; const kind = v === 'reviews' ? 'reviews' : v ? 'date' : ''; return row(`Guest favourite: ${escapeHtml(l ? l.label || 'Listing' : id)}`, `<select class="settings-input" data-be-fav="${escapeHtml(id)}"><option value=""${kind === '' ? ' selected' : ''}>No</option><option value="reviews"${kind === 'reviews' ? ' selected' : ''}>From its 6th review</option><option value="date"${kind === 'date' ? ' selected' : ''}>From a date</option></select>${kind === 'date' ? ` <input type="date" class="settings-input" data-be="guestFavouriteListings.${escapeHtml(id)}" value="${escapeHtml(v)}">` : ''}`); }).join('')}
 ${row('Top-rated guests', `${numBox('topRatedGuestSharePct', s.topRatedGuestSharePct, { width: 56 })}% of bookings`, 'The share of bookings assumed to come from guests who get a listing\'s top-rated-guest discount. A guess: nothing on record says which guests did.')}
 <div id="be-own-listings"></div>
 <button class="sync-btn sm inline" type="button" id="be-reset" style="margin-top:8px;">Reset to starting assumptions</button>`;
@@ -560,6 +562,16 @@ else fee[f] = v;
 g.cleaningFees[key] = fee;
 }
 queueSave(); return;
+}
+const favSel = e.target.closest('[data-be-fav]');
+if (favSel) {
+const s = settings();
+const id = favSel.dataset.beFav;
+s.guestFavouriteListings = { ...(s.guestFavouriteListings || {}) };
+if (favSel.value === 'reviews') s.guestFavouriteListings[id] = 'reviews';
+else if (favSel.value === 'date') s.guestFavouriteListings[id] = new Date().toISOString().slice(0, 10);
+else s.guestFavouriteListings[id] = '';
+queueSave(); renderBookingEvaluatorSettings(); return;
 }
 const input = e.target.closest('[data-be]');
 if (!input) return;
