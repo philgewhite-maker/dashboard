@@ -326,6 +326,8 @@ min1: [[true, true, true, true, true], [true, true, true, true, false], [true, f
 channelFees: { airbnb: 18.6, direct: 0 },
 // Fri/Sat price over Sun-Thu, %: the starting point your stays then move (bookingmodel.js calibrate, upliftFit).
 weekendUpliftPct: 20,
+// London's yearly price rise carried onto future nights, %: bookingmodel.js basePrice (marketRiseAt). Not on nights you've priced.
+marketRisePct: 5,
 // Factors the monthly model review has applied, on top of the starting assumptions (js/features/modelreview.js):
 // {demand, lead, cancel, appliedOn, note, history:[{on, demand, from, n}]}. 1 = no correction.
 calibration: { demand: 1, lead: 1, cancel: 1, appliedOn: '', note: '', history: [] },
@@ -4619,14 +4621,18 @@ scope: (info && info.scope) || '',
 count: info && typeof info.count === 'number' ? info.count : null,
 };
 queueSave();
+// The Import data summary (manualimport.js renderImportRuns) listens for this.
+try { document.dispatchEvent(new CustomEvent('import-run', { detail: { key } })); } catch (e) { /* no DOM (tests) */ }
 }
 
 function importStatusLine(key) {
 const s = data.importStatus && data.importStatus[key];
 if (!s || !s.lastRunAt) return '';
 const when = new Date(s.lastRunAt).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+const days = Math.floor((Date.now() - new Date(s.lastRunAt).getTime()) / 86400000);
+const ago = days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
 const parts = [s.scope, typeof s.count === 'number' ? `${s.count} item${s.count === 1 ? '' : 's'}` : ''].filter(Boolean);
-return `Last run: ${when}${parts.length ? ' — ' + parts.join(', ') : ''}`;
+return `Last run: ${when} (${ago})${parts.length ? ' — ' + parts.join(', ') : ''}`;
 }
 
 // A plan already made ("Planning to meet"/"Planning to call") is

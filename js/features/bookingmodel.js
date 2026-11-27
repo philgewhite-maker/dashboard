@@ -89,7 +89,7 @@ import { roomBlocks } from '../icsparse.js';
 import { activeListingId } from '../roomowner.js';
 import { collectStays } from './lettingoccupancy.js';
 import { evaluatorRooms, roomSettings } from './bookingsettings.js';
-import { MARKET_SEASON, MARKET_CREDIT } from './marketdata.js';
+import { MARKET_SEASON, MARKET_CREDIT, MARKET_PRICE_SEASON, MARKET_PRICE_RISE_PAST, MARKET_PRICE_CREDIT } from './marketdata.js';
 import { allInGuestPrice, elasticityFor, demandMultiplier, guestPriceSettings, elasticitySettings, cleaningFeeFor, roomTypeOf } from './guestprice.js';
 import * as v8model from './bookingmodel-v8.js'; // selfTest only: the pooling cases compare the level with v8's on the same records
 import { basketReference, basketOfRoom, hotelPriceAt, HOTELS } from './hotelbasket.js';
@@ -133,7 +133,7 @@ const FIT_TAU_MIN = 0.25; // floor on the between-room spread of (fit - prior) u
 // The random seeds are built with v6's number, and without the settings v7 adds (guestPrice, elasticityPrior), so v6
 // and v7 draw the same randomness for the same inputs, and editing those settings does not reshuffle the draws.
 const SEED_VERSION = 6;
-const seedSettings = (s) => { const { guestPrice, elasticityPrior, events, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
+const seedSettings = (s) => { const { guestPrice, elasticityPrior, events, marketRisePct, ...rest } = s || {}; return rest; }; // eslint-disable-line no-unused-vars
 // Rating stage (see listingStages) and the price calibration built on it. Every figure here is an assumption.
 const LIVE_BEFORE_FIRST_ASK = 7; // a listing went live this many days before its first request or booking
 const REVIEW_LAG_DAYS = 4; // a review is taken to appear this many days after checkout (the review's own date is not stored)
@@ -151,7 +151,13 @@ const PRICE_MARKET_GAMMA = 0.3; // power on London's seasonal (stays) shape used
 // interp (v912): the month index is read as a curve through the month midpoints (seasonPrice) instead of a step at each
 // month boundary. Not backtested: the choice is the owner's (a step of up to ~20% overnight on the 1st is not how prices move).
 const PRICE_OPTS_V906 = { deseason: false, iterate: 1, halfLife: 180, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: 0, interp: false };
-const PRICE_OPTS = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA, interp: true };
+// priceSeason (v937): which market shape the month index is held towards: 'stays' (London's busy months, MARKET_SEASON,
+// raised to marketGamma) or 'airroi' (London private-room prices, MARKET_PRICE_SEASON, raised to marketGamma; 1 = as is).
+// pastRise (v937): the market's yearly price rise (as a fraction) taken out of past stays, so a stay a year ago counts
+// at today's price level: x (1 + pastRise) ^ (years before today). 0 = off.
+// futureRise: the yearly rise put on nights after today (basePrice); from Settings (marketRisePct), or set here to
+// override it in a backtest. Off for any night whose price you've set.
+const PRICE_OPTS = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA, interp: true, priceSeason: 'stays', pastRise: 0 };
 // Yearly events (Settings -> Booking evaluator -> Yearly events; see eventFactorsAt). A recurring event of at most
 // EVENT_MAX_NIGHTS nights is one the price history already contains (its stays sit inside the month index), so its uplift
 // is paired with an offset on the EVENT_OFFSET_DAYS either side that keeps the period's average where the history has it.
@@ -794,7 +800,9 @@ stageFit[stg] = { prior, observed, n, fitted, capped: fitted !== raw };
 });
 // Every sample on the footing of its room's stage today, weighted by how recently it was booked.
 const po = { ...PRICE_OPTS, ...(ctx.priceOpts || {}) };
-samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage]; x.w = Math.pow(0.5, Math.max(0, T - x.booked) / po.halfLife); }));
+// pastRise: each stay also put on today's market price level (its stay date against today), so older stays don't hold the base down.
+const riseTo = (start) => (po.pastRise > 0 ? Math.pow(1 + po.pastRise, (T - start) / 365) : 1);
+samples.forEach((sm, i) => sm.forEach((x) => { x.cur = x.wd * stagePrice[roomStage[i]] / stagePrice[x.stage] * riseTo(x.start); x.w = Math.pow(0.5, Math.max(0, T - x.booked) / po.halfLife); }));
 // The month-of-year shape of the rate, shared by the rooms: each sample against its own room's median, by the month of
 // the stay, held by monthK pseudo-samples at London's shape (marketGamma, below) or at 1 with no market prior.
 // Season-neutral base (deseason, from v903): each sample is divided by its month's index before the recency-weighted
@@ -811,7 +819,8 @@ samples.forEach((sm, i) => { if (roomMed[i] > 0) sm.forEach((x) => monthRel[x.mo
 // marketGamma > 0: each month is held towards London's seasonal shape raised to that power (MARKET_SEASON is a count of
 // stays, not a price; prices move less than demand, hence the power) instead of towards 1, and a month with fewer than
 // 3 of your stays (or none) still gets that shape rather than no index.
-const prior = (m) => (po.marketGamma > 0 ? Math.pow(MARKET_SEASON[m], po.marketGamma) : 1);
+const marketShape = po.priceSeason === 'airroi' ? MARKET_PRICE_SEASON : MARKET_SEASON;
+const prior = (m) => (po.marketGamma > 0 ? Math.pow(marketShape[m], po.marketGamma) : 1);
 let raw = monthRel.map((xs, m) => {
 if (po.marketGamma > 0) return Math.exp((xs.length ? xs.length * Math.log(median(xs)) : 0) / (xs.length + po.monthK) + po.monthK * Math.log(prior(m)) / (xs.length + po.monthK));
 return xs.length >= 3 ? Math.exp(xs.length * Math.log(median(xs)) / (xs.length + po.monthK)) : null;
@@ -864,7 +873,8 @@ source: room.priceWeekday != null || room.priceWeekend != null ? 'your setting' 
 
 // The calibration so far. availabilityOf and exposureGrid read the stay-length curve and the weekday mix from it,
 // and the lead-time fit below needs both of those, so it is filled in as each piece is worked out.
-const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples, priceInterp: !!po.interp };
+const futureRise = Math.max(-0.5, Math.min(0.5, po.futureRise != null ? Number(po.futureRise) || 0 : (Number(s.marketRisePct ?? 5) || 0) / 100));
+const P = { stages, roomListing, roomStage, stagePrice, stageFit, stagePriors: priors, monthIdx, priceSamples: samples, priceInterp: !!po.interp, futureRise, pastRise: po.pastRise || 0, priceSeason: po.priceSeason };
 const avs = ctx.rooms.map((_, i) => availabilityOf(ctx, P, i));
 
 // Stay length: requests (an enquiry at its weight), plus stays that didn't come from one.
@@ -1127,6 +1137,8 @@ const t = (n - a) / (b - a);
 return { value: Math.exp((1 - t) * Math.log(va) + t * Math.log(vb)), m0: ma, m1: mb, t, va, vb };
 }
 const seasonPrice = (p, n, interp) => seasonAt(p, n, interp).value;
+// The market's yearly price rise carried forward from today to night n (1 for tonight or earlier).
+const marketRiseAt = (ctx, params, n) => (params.futureRise ? Math.pow(1 + params.futureRise, Math.max(0, n - dayNum(ctx.today)) / 365) : 1);
 
 // ---- Yearly events (Settings -> Booking evaluator -> Yearly events) ---------------------------
 // prefs.bookingEvaluator.events: the shape is documented in js/eventcalendar.js.
@@ -1284,7 +1296,7 @@ function basePrice(ctx, params, roomIdx, n) {
 const p = params.prices[roomIdx];
 const sr = setRateAt(ctx, roomIdx, n);
 if (sr) return sr.rate * (p.rateShare || 1);
-const monthly = p.weekday ?? seasonPrice(p, n, params.priceInterp);
+const monthly = p.weekday ?? seasonPrice(p, n, params.priceInterp) * marketRiseAt(ctx, params, n);
 let v = weekendNight(n) ? (p.weekend ?? monthly * p.uplift) : monthly;
 const room = ctx.rooms[roomIdx];
 const day = dayStr(n);
@@ -3086,7 +3098,7 @@ return { fits, tau: Math.sqrt(tau2) };
 
 // v7: `more` adds settings and `cal` picks the calibrate (v6's, for the equivalence case).
 function testContext({ occupancy, today = '2026-11-01', minNights = 1, more = {}, cal = calibrate }) {
-const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, weekendUpliftPct: 0, newListingDiscountPct: 0, ...more };
+const s = { ...DEFAULT_PREFS.bookingEvaluator, discounts: { airbnb: { shortNotice: [], length: [] }, direct: { shortNotice: [], length: [] } }, gapDiscountPct: 0, voidGrid: null, weekendUpliftPct: 0, newListingDiscountPct: 0, marketRisePct: 0, ...more };
 const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
@@ -3191,6 +3203,13 @@ return calibrate(c).prices[0];
 };
 const old = run(PRICE_OPTS_V906);
 const now = run({ ...PRICE_OPTS });
+// Market rise (v937): past stays put on today's level raise the base by less than the full year's rise (the stays are
+// 1 to 10 months old); a night a year ahead is 5% dearer at 5% a year, tonight and earlier unchanged.
+const risen = run({ ...PRICE_OPTS, pastRise: 0.083 });
+const rA = risen.base / now.base;
+const fr = { futureRise: 0.05 };
+const tdy = { today: '2026-01-01' };
+check('Market rise: past stays lift the base by part of a year’s rise; a night a year out is x1.05, tonight x1', rA > 1.005 && rA < 1.083 && Math.abs(marketRiseAt(tdy, fr, dayNum('2027-01-01')) - 1.05) < 1e-12 && marketRiseAt(tdy, fr, dayNum('2025-12-01')) === 1 && marketRiseAt(tdy, { futureRise: 0 }, dayNum('2027-01-01')) === 1, `base x${rA.toFixed(4)}, a year out x${marketRiseAt(tdy, fr, dayNum('2027-01-01')).toFixed(4)}`);
 const err = (p, m, want) => Math.abs(Math.log(p.byMonth[m] / want));
 check('Season-neutral base: below the recency-led v906 base, and January and October each land nearer their own price',
 now.base < old.base && err(now, 0, 80) < err(old, 0, 80) && err(now, 9, 120) <= err(old, 9, 120) + 1e-9 && now.byMonth.every((v) => v != null),
@@ -3979,7 +3998,7 @@ const othersBefore = early.requests.filter((q) => q.listingId !== 'LC' && dayNum
 {
 const w = poolWorld({ rates: [HOUSE, HOUSE, HOUSE], launch: [730, 730, LAUNCH], seed: 11 });
 const disc = { airbnb: { shortNotice: [{ days: 5, pct: 10 }, { days: 10, pct: 5 }], length: [{ nights: 5, pct: 5 }, { nights: 7, pct: 10 }, { nights: 28, pct: 18 }] }, direct: { shortNotice: [], length: [] } };
-w.s = { ...w.s, discounts: disc, elasticity: 1.5, elasticityPrior: { ...DEFAULT_PREFS.bookingEvaluator.elasticityPrior } };
+w.s = { ...w.s, discounts: disc, marketRisePct: 0, elasticity: 1.5, elasticityPrior: { ...DEFAULT_PREFS.bookingEvaluator.elasticityPrior } };
 const T41 = dayNum(w.today);
 const gapFrom = dayStr(T41 - 420).slice(0, 7); const gapTo = dayStr(T41 - 300).slice(0, 7); // four months with nothing on record in room B
 w.stays = w.stays.filter((x) => !(x.listingId === 'LB' && x.checkin.slice(0, 7) >= gapFrom && x.checkout.slice(0, 7) <= gapTo));
@@ -3987,7 +4006,7 @@ w.requests = w.requests.filter((q) => !(q.listingId === 'LB' && q.receivedAt.sli
 for (let i = 0; i < 12; i++) { const t = T41 - 30 - i * 23; w.requests.push({ id: `e${i}`, listingId: 'LA', kind: 'enquiry', receivedAt: `${dayStr(t)}T10:00:00.000Z`, checkin: dayStr(t + 20), checkout: dayStr(t + 23) }); }
 const allOff = Object.fromEntries(Object.keys(V9_FLAGS).map((k) => [k, false]));
 const run = (c, m) => { const d = w.rooms.map((_, ri) => (m === v8model ? m.driftKit.demandFor(c, c.params, ri) : demandFor(c, c.params, ri))); const p = m.projectVoids(c, { from: '2026-12-01', to: '2027-03-01', runs: 120 }); const ev = m.evaluate({ listingId: 'LC', checkin: '2026-12-10', checkout: '2026-12-13', payout: 330, platform: 'airbnb', guestReviews: 5 }, c, { runs: 120 }); return { L: d.map((x) => x.L), n: d.map((x) => x.n), nights: p.voids.reduce((a, v) => a + v.expectedNights, 0), income: p.total.expected, diff: ev.diff, cancel: c.params.cancelRate }; };
-const c8 = { ...w }; v8model.calibrate(c8); const r8 = run(c8, v8model);
+const c8 = { ...w, s: (({ marketRisePct, ...rest }) => rest)(w.s) }; v8model.calibrate(c8); /* v8 has no market rise and seeds with every setting it is given */ const r8 = run(c8, v8model);
 const cOff = { ...w, v9flags: allOff }; calibrate(cOff); const rOff = run(cOff, { projectVoids, evaluate });
 const cOn = { ...w }; calibrate(cOn); const rOn = run(cOn, { projectVoids, evaluate });
 const sameL = rOff.L.every((L, i) => close(L, r8.L[i], 1e-9)) && rOff.n.every((n, i) => n === r8.n[i]);
@@ -4084,7 +4103,11 @@ v = add('stage', 'Rating stage', v, v, 'none: a set price is used as it is', { s
 const sa = params.priceInterp ? seasonAt(p, n, true) : null;
 const ix = sa ? (p.base > 0 ? sa.value / p.base : null) : (p.byMonth[m] != null && p.base > 0 ? p.byMonth[m] / p.base : null);
 v = add('base', 'Base', 0, p.base / stageMult, stage === 'rated' ? p.source : `${p.source}, taken back to a rated footing (÷ x${stageMult.toFixed(2)}, re-applied below)`, { samples: p.n, source: p.source });
-v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month' : sa ? `season curve x${ix.toFixed(2)} (between ${MONTH_ABBR[sa.m0]} x${(sa.va / p.base).toFixed(2)} and ${MONTH_ABBR[sa.m1]} x${(sa.vb / p.base).toFixed(2)}; your stays by month, held towards London's season; the base is season-neutral)` : `month index x${ix.toFixed(2)} (your stays in this month, held towards London's season; the base is season-neutral)`, { index: ix });
+const shapeName = params.priceSeason === 'airroi' ? 'London private-room prices by month (AirROI)' : "London's season";
+v = add('season', 'Season', v, ix == null ? v : v * ix, ix == null ? 'no index for this month' : sa ? `season curve x${ix.toFixed(2)} (between ${MONTH_ABBR[sa.m0]} x${(sa.va / p.base).toFixed(2)} and ${MONTH_ABBR[sa.m1]} x${(sa.vb / p.base).toFixed(2)}; your stays by month, held towards ${shapeName}; the base is season-neutral)` : `month index x${ix.toFixed(2)} (your stays in this month, held towards ${shapeName}; the base is season-neutral)`, { index: ix });
+const rise = marketRiseAt(ctx, params, n);
+const yrs = Math.max(0, n - dayNum(ctx.today)) / 365;
+v = add('trend', 'Market rise', v, v * rise, rise === 1 ? (params.futureRise ? 'none: tonight is at today\'s price level' : 'off (Settings: market price rise 0%)') : `x${rise.toFixed(3)}: London prices rising ${Math.round(params.futureRise * 1000) / 10}% a year (Settings), ${yrs.toFixed(2)} years ahead${params.pastRise ? `; past stays were put on today's level at ${Math.round(params.pastRise * 1000) / 10}% a year (${MARKET_PRICE_CREDIT})` : ''}`, { factor: rise });
 v = add('weekday', 'Weekday', v, we ? (p.weekend != null ? p.weekend / stageMult : v * p.uplift) : v, we ? (p.weekend != null ? 'Fri/Sat: your weekend price' : `Fri/Sat: x${p.uplift.toFixed(2)} weekend uplift`) : 'Sun–Thu: no uplift');
 const fit = (params.stageFit || {})[stage];
 v = add('stage', 'Rating stage', v, v * stageMult, stage === 'rated' ? 'rated: x1.00 (the footing)' : `${stage}: x${stageMult.toFixed(2)} against rated (${fit && fit.n > 0 ? `fitted on ${fit.n} stays each side` : 'the prior'})`, { stage, mult: stageMult });
@@ -4113,4 +4136,4 @@ if (!(sr && (sr.reason === 'infill' || sr.reason === 'short-notice'))) cut('void
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { receivedCleaningFees, setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { marketRiseAt, PRICE_OPTS, receivedCleaningFees, setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };

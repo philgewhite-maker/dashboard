@@ -14,7 +14,7 @@
 // own mergeConnectionInto() (fill-gaps + array-union + notes-append,
 // already used by the Compare/duplicate-merge screen) rather than
 // re-inventing field-by-field reconciliation for a second import path.
-import { data, queueSave, blankConnection } from '../state.js';
+import { data, queueSave, blankConnection, recordImportRun } from '../state.js';
 import { escapeHtml, splitCsvLine, hydratePhotoBackgrounds, avatarHtml } from '../utils.js';
 import { CONN_STAGES, matchCandidates, mergeConnectionInto, connectionPickerHtml, bindConnPickers, renderConnections } from './connections.js';
 import { handleTinderText, handleTinderFiles } from './tinderimport.js';
@@ -216,6 +216,7 @@ data.connections.push(blankConnection(r.fields));
 created++;
 });
 queueSave();
+recordImportRun('manualCsv', { scope: `${created} new, ${merged} merged`, count: created + merged });
 renderConnections();
 import('./overview.js').then((m) => m.renderOverview());
 import('./connections.js').then((c) => c.showDuplicatesAfterImport(idsBefore));
@@ -284,7 +285,52 @@ else if (kind === 'albums') handleAlbumsText(text);
 else if (status) status.textContent = "Couldn't tell what this is — paste/upload the console JSON, a Google Photos albums export, a WhatsApp .txt export, or the connections CSV.";
 }
 
+// When each kind of connection import last ran, all in one place above the import box, so you know how far back the
+// next run needs to go. The Tinder line hands you the catch-up call from that date (tinderCatchUp re-checks everyone
+// already captured for activity since a date). Kinds never run show "never". Updated on every recordImportRun.
+const IMPORT_RUN_KINDS = [
+['tinderSnippet', 'Tinder script'],
+['whatsapp', 'WhatsApp'],
+['telegram', 'Telegram'],
+['screenshotMatches', 'Screenshot, matches list'],
+['screenshotProfile', 'Screenshot, profile'],
+['directProfileUpload', 'Profile upload'],
+['photoscan', 'Photo scan'],
+['googlePhotosAlbums', 'Google Photos albums'],
+['manualCsv', 'Connections CSV'],
+];
+function renderImportRuns() {
+const el = document.getElementById('import-runs-summary');
+if (!el) return;
+const st = data.importStatus || {};
+const rows = IMPORT_RUN_KINDS.map(([key, label]) => {
+const s = st[key];
+const at = s && s.lastRunAt ? new Date(s.lastRunAt) : null;
+const days = at ? Math.floor((Date.now() - at.getTime()) / 86400000) : null;
+const when = at ? `${at.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}, ${at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}` : 'never';
+const ago = days == null ? '' : days <= 0 ? 'today' : days === 1 ? 'yesterday' : `${days} days ago`;
+const what = s ? [s.scope, typeof s.count === 'number' ? `${s.count} item${s.count === 1 ? '' : 's'}` : ''].filter(Boolean).join(', ') : '';
+let extra = '';
+if (key === 'tinderSnippet' && at) {
+const ymd = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, '0')}-${String(at.getDate()).padStart(2, '0')}`;
+const call = `tinderCatchUp("${ymd}")`;
+extra = ` <code class="import-run-call">${escapeHtml(call)}</code> <button type="button" class="sync-btn sm inline" data-copy-call="${escapeHtml(call)}" title="Copy the catch-up call for the Tinder console">Copy</button>`;
+}
+return `<tr class="${at ? '' : 'import-run-never'}"><td>${escapeHtml(label)}</td><td>${escapeHtml(when)}${ago ? ` <span class="import-run-ago">(${escapeHtml(ago)})</span>` : ''}</td><td>${escapeHtml(what)}${extra}</td></tr>`;
+});
+el.innerHTML = `<details class="settings-subgroup" open><summary>Last import of each kind</summary><div class="import-runs-wrap"><table class="import-runs-table"><tbody>${rows.join('')}</tbody></table></div></details>`;
+}
+
 function initDatingImport() {
+renderImportRuns();
+document.addEventListener('import-run', renderImportRuns);
+const runsEl = document.getElementById('import-runs-summary');
+if (runsEl) runsEl.addEventListener('click', async (e) => {
+const b = e.target.closest('[data-copy-call]');
+if (!b) return;
+try { await navigator.clipboard.writeText(b.dataset.copyCall); b.textContent = 'Copied'; } catch (err) { b.textContent = 'Select and copy'; }
+setTimeout(() => { b.textContent = 'Copy'; }, 2000);
+});
 const textarea = document.getElementById('dating-import-paste');
 const readBtn = document.getElementById('dating-import-read-btn');
 const fileInput = document.getElementById('dating-import-file-input');

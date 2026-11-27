@@ -4957,3 +4957,13 @@ input:not([type=checkbox],[type=radio],[type=range],[type=file],[type=color],[ty
 .be-est-grid{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:2px 12px;margin:0;font-size:0.9em;font-variant-numeric:tabular-nums;}
 .be-est-grid dt{color:var(--muted);}
 .be-est-grid dd{margin:0;}
+
+/* Connection imports: when each kind last ran (manualimport.js renderImportRuns). */
+.import-runs{margin:0 0 8px;}
+.import-runs-wrap{overflow-x:auto;}
+.import-runs-table{border-collapse:collapse;font-size:12px;}
+.import-runs-table td{padding:3px 10px 3px 0;vertical-align:top;}
+.import-runs-table td:first-child{font-weight:600;white-space:nowrap;}
+.import-run-never td{color:var(--muted);}
+.import-run-ago{color:var(--muted);}
+.import-run-call{font-family:'IBM Plex Mono',monospace;font-size:11px;}
