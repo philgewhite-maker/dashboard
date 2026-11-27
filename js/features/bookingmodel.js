@@ -157,7 +157,13 @@ const PRICE_OPTS_V906 = { deseason: false, iterate: 1, halfLife: 180, monthK: PR
 // at today's price level: x (1 + pastRise) ^ (years before today). 0 = off.
 // futureRise: the yearly rise put on nights after today (basePrice); from Settings (marketRisePct), or set here to
 // override it in a backtest. Off for any night whose price you've set.
-const PRICE_OPTS = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA, interp: true, priceSeason: 'stays', pastRise: 0 };
+// Chosen 27 Nov 2026 (v938), on the owner's call that a price curve beats a demand curve raised to a power: AirROI's
+// price shape as is, and the past rise of MARKET_PRICE_RISE_PAST. On the price backtest (18 monthly dates, 138 later
+// bookings, all with no future rise unless named) the choices could not be told apart: mean |log error| 0.210 for v937's
+// settings, 0.215 for these, 0.216 with the 5% future rise; median 0.138, 0.137, 0.133; bias +3.0%, +2.2%, +3.3%.
+// Half-lives of 120 and 180 days with the past rise scored 0.222 and 0.214. PRICE_OPTS_V937 keeps the old choice.
+const PRICE_OPTS_V937 = { deseason: true, iterate: 3, halfLife: PRICE_HALF_LIFE_DAYS, monthK: PRICE_MONTH_K, smooth: 0, marketGamma: PRICE_MARKET_GAMMA, interp: true, priceSeason: 'stays', pastRise: 0 };
+const PRICE_OPTS = { ...PRICE_OPTS_V937, marketGamma: 1, priceSeason: 'airroi', pastRise: MARKET_PRICE_RISE_PAST };
 // Yearly events (Settings -> Booking evaluator -> Yearly events; see eventFactorsAt). A recurring event of at most
 // EVENT_MAX_NIGHTS nights is one the price history already contains (its stays sit inside the month index), so its uplift
 // is paired with an offset on the EVENT_OFFSET_DAYS either side that keeps the period's average where the history has it.
@@ -3103,6 +3109,7 @@ const ctx = {
 today, s, firstClean: 50,
 rooms: [{ key: 'A', label: 'Room A', listingIds: ['LA'], include: true, weight: 1, minNights, priceWeekday: 100, priceWeekend: 100 }],
 stays: [], requests: [], proposals: [], listingLabels: { LA: 'Room A' }, scale: {},
+priceOpts: { pastRise: 0 }, // the hand-worked cases are worked without the market's past rise
 };
 cal(ctx);
 ctx.params.cancelRate = 0;
@@ -3206,7 +3213,7 @@ const now = run({ ...PRICE_OPTS });
 // Market rise (v937): past stays put on today's level raise the base by less than the full year's rise (the stays are
 // 1 to 10 months old); a night a year ahead is 5% dearer at 5% a year, tonight and earlier unchanged.
 const risen = run({ ...PRICE_OPTS, pastRise: 0.083 });
-const rA = risen.base / now.base;
+const rA = risen.base / run({ ...PRICE_OPTS, pastRise: 0 }).base;
 const fr = { futureRise: 0.05 };
 const tdy = { today: '2026-01-01' };
 check('Market rise: past stays lift the base by part of a year’s rise; a night a year out is x1.05, tonight x1', rA > 1.005 && rA < 1.083 && Math.abs(marketRiseAt(tdy, fr, dayNum('2027-01-01')) - 1.05) < 1e-12 && marketRiseAt(tdy, fr, dayNum('2025-12-01')) === 1 && marketRiseAt(tdy, { futureRise: 0 }, dayNum('2027-01-01')) === 1, `base x${rA.toFixed(4)}, a year out x${marketRiseAt(tdy, fr, dayNum('2027-01-01')).toFixed(4)}`);
@@ -4136,4 +4143,4 @@ if (!(sr && (sr.reason === 'infill' || sr.reason === 'short-notice'))) cut('void
 return { date: day, weekend: we, steps, listPrice, factor, price: v, lead };
 }
 const driftKit = { lambdaFor, demandFor, asksFor, availabilityOf, leadCdf, leadFor, basePrice, roomIndexOf, dayNum, dayStr, dowOf, monthOf };
-export { marketRiseAt, PRICE_OPTS, receivedCleaningFees, setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
+export { marketRiseAt, PRICE_OPTS, PRICE_OPTS_V937, receivedCleaningFees, setRateAt, demandAt, voidCutFor, voidMin1, voidGridOf, channelKeep, autoDemandFrom, autoDemandFor, AUTO_DEMAND_K, V9_FLAGS, V9_DEFAULTS, setV9Flags, fitElasticity, marketRhoOf, basketAt, shrinkRoomFits, driftKit, buildContext, calibrate, evaluate, sensitivity, makeProjection, projectVoids, optimiseVoid, defaultProjectionEnd, rawNightlyRate, stepPct, discountsOf, selfTest, MODEL_VERSION, demandFactorOf, listingStages, stageAt, priceTrace, nightBreakdown, seasonPrice, eventOccurrences, eventFactorsAt, eventHistoryCheck, EVENT_MAX_NIGHTS, EVENT_OFFSET_DAYS };
