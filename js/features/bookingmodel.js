@@ -557,7 +557,12 @@ const guestsByCode = new Map();
 // are left out, as are cancellation fees. A stay is never netted below nothing.
 const adjustByCode = new Map();
 (data.airbnbEarnings || []).forEach((e) => { if (String(e.type).toLowerCase() === 'adjustment' && e.confirmationCode && Number.isFinite(Number(e.amount))) adjustByCode.set(e.confirmationCode, (adjustByCode.get(e.confirmationCode) || 0) + Number(e.amount)); });
-const earnings = earningRows.map((e) => ({ listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Math.max(0, Number(e.amount) + (adjustByCode.get(e.confirmationCode) || 0)), adjusted: adjustByCode.get(e.confirmationCode) || 0, cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: Number(e.guests) > 0 ? Number(e.guests) : (guestsByCode.get(e.confirmationCode) ?? null) }));
+// A cancelled booking can still have a Reservation row: its Amount is the share of the payout you kept under the
+// cancellation policy (Andrea, HMSPF92D5R: 100%; HMEDC2S4QB and HM4B4XN58X: 50%), not a nightly rate. Such rows are
+// flagged by the stay record being cancelled (your letting ledger's cancellation entry, or the reservation's status),
+// and calibrate leaves them out of the price; they still count as demand (asksFor), since the booking was made.
+const cancelledCodes = new Set(stays.filter((x) => x.status === 'cancelled' && x.code).map((x) => x.code));
+const earnings = earningRows.map((e) => ({ cancelled: cancelledCodes.has(e.confirmationCode), listingId: e.listingId, guest: e.guest || "", code: e.confirmationCode, start: e.start, nights: Number(e.nights), amount: Math.max(0, Number(e.amount) + (adjustByCode.get(e.confirmationCode) || 0)), adjusted: adjustByCode.get(e.confirmationCode) || 0, cleaningFee: e.cleaningFee == null ? 0 : Number(e.cleaningFee) * netShareOf(e), bookingDate: e.bookingDate, share: netShareOf(e), guests: Number(e.guests) > 0 ? Number(e.guests) : (guestsByCode.get(e.confirmationCode) ?? null) }));
 const codes = new Set(earnings.map((e) => e.code).filter(Boolean));
 const earnedStayIds = new Set();
 (data.airbnbReservations || []).forEach((r) => { if (r.confirmationCode && codes.has(r.confirmationCode)) earnedStayIds.add(r.id); });
@@ -726,7 +731,7 @@ if (out) samples[r].push({ raw: out.raw, nightly: out.nightly, ws: weekendShare(
 (ctx.earnings || []).forEach((e) => {
 const r = ri.get(e.listingId);
 const start = e.start ? dayNum(e.start) : null;
-if (r == null || start == null || start < since || !(e.nights > 0)) return;
+if (r == null || start == null || start < since || !(e.nights > 0) || e.cancelled) return;
 addSample(r, e.listingId, { amount: e.amount - extraIncomeOf(r, e.guests, e.nights, e.share), cleaning: e.cleaningFee, nights: e.nights, start, booked: e.bookingDate ? dayNum(e.bookingDate) : null, via: 'earnings' });
 // v9 (audit finding 3): the fee is kept with whether the stay was longer than the listing's short-stay limit, so the
 // received PER-STAY fee (the scale factor k in receivedCleaningFees compares it with the listed per-stay fee) is the
