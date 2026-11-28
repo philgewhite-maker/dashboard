@@ -4779,6 +4779,8 @@ background:var(--slate-bg);color:var(--slate);
 .heat-rh.humid{color:var(--amber);}
 .heat-rh.damp{color:var(--red);font-weight:600;}
 .heat-rh.off{opacity:.55;}
+.heat-rh-t{color:var(--muted);font-weight:400;}
+.cc-muted{color:var(--muted);}
 .climate-dialog{width:min(980px,96vw);max-height:92vh;overflow:auto;border:1px solid var(--line);border-radius:10px;background:var(--card);color:var(--ink);padding:14px 18px 18px;}
 .climate-dialog::backdrop{background:rgba(0,0,0,.35);}
 .climate-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}

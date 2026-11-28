@@ -57,8 +57,8 @@ const rhText = (rh) => (rh == null ? '–' : `${Math.round(rh)}%`);
 function zoneHumidityHtml(zone) {
 const s = sensorForZone(zone);
 if (!s || s.rh == null) return '';
-const title = `Humidity from the ${s.name} sensor${s.tempC != null ? ` (reads ${s.tempC.toFixed(1)}°)` : ''}${s.online ? '' : ', offline'}`;
-return `<span class="heat-rh ${rhTone(s.rh)}${s.online ? '' : ' off'}" title="${escapeHtml(title)}">${rhText(s.rh)}</span>`;
+const title = `Humidity and temperature at the ${s.name} sensor${s.online ? '' : ', offline'}; the large figure is the thermostat's`;
+return `<span class="heat-rh ${rhTone(s.rh)}${s.online ? '' : ' off'}" title="${escapeHtml(title)}">${rhText(s.rh)}${s.tempC != null ? `<span class="heat-rh-t"> · ${s.tempC.toFixed(1)}°</span>` : ''}</span>`;
 }
 
 // Sensors in no heating zone get their own row (heating.js), so a room without a thermostat still shows.
@@ -150,11 +150,11 @@ const zone = zoneOfSensor(live.get(s.id) || { id: s.id, name: s.name }, zones);
 if (zone) zoneTaken.add(zone);
 const ser = hist.series[s.key] || {};
 const zser = zone ? hist.series[`neohub:${zone}`] || {} : {};
-rooms.push({ key: s.key, label: zone || s.name, temp: ser.temp || zser.temp || [], rh: ser.rh || [], heat: zser.heat || [], target: zser.target || [] });
+rooms.push({ key: s.key, label: zone || s.name, temp: ser.temp || zser.temp || [], thermo: ser.temp ? zser.temp || [] : [], rh: ser.rh || [], heat: zser.heat || [], target: zser.target || [] });
 });
 sensors.filter((s) => s.src === 'neohub' && !zoneTaken.has(s.id)).forEach((s) => {
 const ser = hist.series[s.key] || {};
-rooms.push({ key: s.key, label: s.id, temp: ser.temp || [], rh: [], heat: ser.heat || [], target: ser.target || [] });
+rooms.push({ key: s.key, label: s.id, temp: ser.temp || [], thermo: [], rh: [], heat: ser.heat || [], target: ser.target || [] });
 });
 rooms.forEach((r, i) => { r.colour = ROOM_COLOURS[i % ROOM_COLOURS.length]; r.dew = r.temp.map((t, j) => { const d = dewPoint(t, r.rh[j]); return d == null ? null : Math.round(d * 10) / 10; }); });
 return rooms;
@@ -214,7 +214,7 @@ d += `${pen ? 'L' : 'M'}${x(t).toFixed(1)},${y(v).toFixed(1)}`; pen = true; last
 });
 return d;
 };
-const linesSvg = lines.map((l) => `<path d="${path(l.pts)}" fill="none" stroke="${l.colour}" stroke-width="${l.dash ? 1.5 : 2}"${l.dash ? ' stroke-dasharray="4 3"' : ''} stroke-linejoin="round"/>`).join('');
+const linesSvg = lines.map((l) => `<path d="${path(l.pts)}" fill="none" stroke="${l.colour}" stroke-width="${l.dotted ? 1.5 : l.dash ? 1.5 : 2}"${l.dotted ? ' stroke-dasharray="1 3" stroke-linecap="round"' : l.dash ? ' stroke-dasharray="4 3"' : ''} stroke-linejoin="round"/>`).join('');
 const stripsSvg = strips.map((s, i) => {
 const yy = bottom + 4 + i * 5;
 return s.pts.filter((p) => p[1] != null && p[1] >= 0.5).map(([t]) => `<rect x="${x(t).toFixed(1)}" y="${yy}" width="${Math.max(1, s.w).toFixed(1)}" height="3" fill="${s.colour}"/>`).join('');
@@ -236,14 +236,15 @@ const heatOn = r.heat.filter((v) => v != null);
 const t = avg(r.temp);
 return `<tr><td><span class="cc-key" style="background:${r.colour}"></span>${escapeHtml(r.label)}</td>
 <td>${t == null ? '–' : `${t.toFixed(1)}°`}</td>
+<td>${avg(r.thermo) == null ? '–' : `${avg(r.thermo).toFixed(1)}°`}</td>
 <td>${rh.length ? `${Math.round(avg(rh))}%` : '–'}</td>
 <td>${rh.length ? `${Math.round(Math.max(...rh))}%` : '–'}</td>
 <td class="${rh.length && hrs(rh.filter((v) => v >= DAMP_RH).length) ? 'cc-bad' : ''}">${rh.length ? `${hrs(rh.filter((v) => v >= DAMP_RH).length)} h` : '–'}</td>
 <td>${heatOn.length ? `${Math.round((heatOn.reduce((s, v) => s + v, 0) / heatOn.length) * 100)}%` : '–'}</td></tr>`;
 }).join('');
 const o = Array.isArray(outdoor) && outdoor.length ? outdoor : null;
-const outRow = o ? `<tr class="cc-out"><td><span class="cc-key dash"></span>Outdoors</td><td>${avg(o.map((p) => p.temp)).toFixed(1)}°</td><td>${Math.round(avg(o.map((p) => p.rh)))}%</td><td>${Math.round(Math.max(...o.map((p) => p.rh)))}%</td><td>–</td><td>${o.reduce((s, p) => s + (p.rain || 0), 0).toFixed(1)} mm rain</td></tr>` : '';
-return `<div class="climate-table-wrap"><table class="climate-table"><thead><tr><th>Room</th><th>Avg temp</th><th>Avg RH</th><th>Peak RH</th><th>Hours ≥${DAMP_RH}%</th><th>Heating on</th></tr></thead><tbody>${rows}${outRow}</tbody></table></div>`;
+const outRow = o ? `<tr class="cc-out"><td><span class="cc-key dash"></span>Outdoors</td><td>${avg(o.map((p) => p.temp)).toFixed(1)}°</td><td>–</td><td>${Math.round(avg(o.map((p) => p.rh)))}%</td><td>${Math.round(Math.max(...o.map((p) => p.rh)))}%</td><td>–</td><td>${o.reduce((s, p) => s + (p.rain || 0), 0).toFixed(1)} mm rain</td></tr>` : '';
+return `<div class="climate-table-wrap"><table class="climate-table"><thead><tr><th>Room</th><th>Avg temp</th><th>Thermostat</th><th>Avg RH</th><th>Peak RH</th><th>Hours ≥${DAMP_RH}%</th><th>Heating on</th></tr></thead><tbody>${rows}${outRow}</tbody></table></div>`;
 }
 
 function mappingHtml() {
@@ -279,12 +280,12 @@ const oPts = (k) => o.map((p) => [p.t, p[k]]);
 const outLine = (k) => (o.length ? [{ colour: OUT_COLOUR, dash: true, pts: oPts(k) }] : []);
 const stripW = (step / (t1 - t0)) * PLOT_W;
 const strips = rooms.filter((r) => r.heat.some((v) => v != null)).map((r) => ({ colour: r.colour, pts: pts(r.heat), w: stripW }));
-const legend = `<div class="climate-legend">${rooms.map((r) => `<span><span class="cc-key" style="background:${r.colour}"></span>${escapeHtml(r.label)}</span>`).join('')}${o.length ? '<span><span class="cc-key dash"></span>Outdoors</span>' : ''}${strips.length ? '<span class="cc-legend-note">bars under the temperature chart: heating on</span>' : ''}</div>`;
+const legend = `<div class="climate-legend">${rooms.map((r) => `<span><span class="cc-key" style="background:${r.colour}"></span>${escapeHtml(r.label)}</span>`).join('')}${o.length ? '<span><span class="cc-key dash"></span>Outdoors</span>' : ''}${rooms.some((r) => r.thermo.some((v) => v != null)) ? '<span class="cc-legend-note">solid: sensor · dotted: thermostat</span>' : ''}${strips.length ? '<span class="cc-legend-note">bars under the temperature chart: heating on</span>' : ''}</div>`;
 const since = hist.firstLogged ? `Logging since ${new Date(hist.firstLogged * 1000).toLocaleString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}. ` : '';
 const outNote = outdoor && outdoor.error ? `Outdoor weather unavailable: ${escapeHtml(outdoor.error)}. ` : 'Outdoors: Open-Meteo, central London. ';
 tipData = { rooms, ts, step, o };
 body.innerHTML = `${head}${mappingHtml()}${legend}
-${chartSvg({ title: 'Temperature', unit: '°', t0, t1, lines: [...rooms.map((r) => ({ colour: r.colour, pts: pts(r.temp) })), ...outLine('temp')], strips })}
+${chartSvg({ title: 'Temperature', unit: '°', t0, t1, lines: [...rooms.map((r) => ({ colour: r.colour, pts: pts(r.temp) })), ...rooms.filter((r) => r.thermo.some((v) => v != null)).map((r) => ({ colour: r.colour, dotted: true, pts: pts(r.thermo) })), ...outLine('temp')], strips })}
 ${chartSvg({ title: 'Relative humidity', unit: '%', t0, t1, lines: [...rooms.filter((r) => r.rh.some((v) => v != null)).map((r) => ({ colour: r.colour, pts: pts(r.rh) })), ...outLine('rh')], refs: [{ v: DAMP_RH, label: `${DAMP_RH}%: mould risk if sustained` }, { v: WARN_RH, label: `${WARN_RH}%` }] })}
 ${chartSvg({ title: 'Dew point: walls, windows and corners colder than this get condensation', unit: '°', t0, t1, lines: [...rooms.filter((r) => r.dew.some((v) => v != null)).map((r) => ({ colour: r.colour, pts: pts(r.dew) })), ...outLine('dew')] })}
 ${o.length ? chartSvg({ title: 'Rain outdoors (mm per hour)', unit: '', t0, t1, h: 90, lines: [], bars: o.map((p) => [p.t, p.rain]) }) : ''}
@@ -310,7 +311,7 @@ body.querySelectorAll('.cc-cursor').forEach((l) => { l.setAttribute('x1', sx); l
 let near = null;
 tipData.o.forEach((p) => { if (!near || Math.abs(p.t - t) < Math.abs(near.t - t)) near = p; });
 const when = new Date(tipData.ts[i] * 1000).toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
-tip.innerHTML = `<div class="cc-tip-when">${escapeHtml(when)}</div><table>${tipData.rooms.map((r) => `<tr><td><span class="cc-key" style="background:${r.colour}"></span>${escapeHtml(r.label)}</td><td>${fmtV(r.temp[i], '°')}</td><td>${r.rh[i] == null ? '' : `${Math.round(r.rh[i])}%`}</td><td>${r.dew[i] == null ? '' : `dew ${fmtV(r.dew[i], '°')}`}</td><td>${r.heat[i] != null && r.heat[i] >= 0.5 ? 'heating' : ''}</td></tr>`).join('')}
+tip.innerHTML = `<div class="cc-tip-when">${escapeHtml(when)}</div><table>${tipData.rooms.map((r) => `<tr><td><span class="cc-key" style="background:${r.colour}"></span>${escapeHtml(r.label)}</td><td>${fmtV(r.temp[i], '°')}${r.thermo[i] != null ? ` <span class="cc-muted">(stat ${fmtV(r.thermo[i], '°')})</span>` : ''}</td><td>${r.rh[i] == null ? '' : `${Math.round(r.rh[i])}%`}</td><td>${r.dew[i] == null ? '' : `dew ${fmtV(r.dew[i], '°')}`}</td><td>${r.heat[i] != null && r.heat[i] >= 0.5 ? 'heating' : ''}</td></tr>`).join('')}
 ${near && Math.abs(near.t - t) < 5400 ? `<tr><td><span class="cc-key dash"></span>Outdoors</td><td>${fmtV(near.temp, '°')}</td><td>${Math.round(near.rh)}%</td><td>dew ${fmtV(near.dew, '°')}</td><td>${near.rain ? `${near.rain} mm` : ''}</td></tr>` : ''}</table>`;
 tip.hidden = false;
 const bRect = body.getBoundingClientRect();
