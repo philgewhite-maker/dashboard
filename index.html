@@ -17,7 +17,7 @@
 <body>
 <div class="wrap">
 <header class="top">
-<h1 class="sr-only">Dashboard</h1><span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v944</span>
+<h1 class="sr-only">Dashboard</h1><span class="build-stamp" id="build-stamp" title="Bumped with every deploy — if this doesn't match what was just pushed, the page is serving a stale cached copy">v945</span>
 <div class="google-bar" id="google-bar">
 <span id="google-signed-out">
 <button class="google-bar-btn" id="sync-signin-btn" type="button">Sign in to Google</button>
@@ -193,8 +193,13 @@
 <div id="heating-list"></div>
 <div class="sync-row heat-foot">
 <span class="sync-status" id="heating-status"></span>
+<button class="sync-btn sm inline" id="climate-history-btn" type="button">History</button>
 <button class="sync-btn sm inline" id="heating-refresh-btn" type="button">Refresh</button>
 </div>
+<dialog class="climate-dialog" id="climate-history" aria-labelledby="climate-history-title">
+<div class="climate-dialog-head"><h2 id="climate-history-title">Temperature and humidity</h2><button type="button" class="climate-close" data-climate-close aria-label="Close">×</button></div>
+<div id="climate-history-body"></div>
+</dialog>
 </section>
 
 <section class="panel" id="blinds-panel" data-tab="overview">

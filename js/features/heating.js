@@ -16,6 +16,7 @@ import { run, AgentNotConfiguredError } from '../homeagent.js';
 import { getConfig } from '../sync/selfhost.js';
 import { data, queueSave, onDataChange } from '../state.js';
 import { escapeHtml } from '../utils.js';
+import { refreshClimate, zoneHumidityHtml, climateExtraRowsHtml, climateStatusText } from './climate.js';
 
 // Ticker alert thresholds (degrees C). See heatingAlerts().
 const HEAT_LOW_C = 18; // any zone colder than this
@@ -170,6 +171,7 @@ return `<div class="heat-item" data-heat-zone="${escapeHtml(z.zone || '')}"><div
 <span class="heat-zone">${escapeHtml(z.zone || 'Zone')}</span>
 <span class="heat-flags">${flags.join('')}</span>
 ${z.heating ? `<span class="heat-on">${FLAME}</span>` : ''}
+${zoneHumidityHtml(z.zone)}
 <span class="heat-actual">${fmt(z.actual)}</span>
 <span class="heat-target" title="Target">→ ${fmt(z.target)}</span>
 </div>${controlsHtml(z)}</div>`;
@@ -260,8 +262,9 @@ const reading = currentReading();
 const zones = reading ? reading.zones : [];
 // Don't rebuild under a select the user has open (the minute timer would close it).
 if (list.contains(document.activeElement) && document.activeElement.tagName === 'SELECT') return;
-list.innerHTML = zones.length
-? zones.map(zoneRowHtml).join('')
+const extra = climateExtraRowsHtml();
+list.innerHTML = zones.length || extra
+? zones.map(zoneRowHtml).join('') + extra
 : '<div class="empty">No reading yet.</div>';
 list.classList.toggle('is-stale', !!reading && ageOf(reading) > STALE_MS);
 if (count) count.textContent = zones.length ? String(zones.length) : '';
@@ -275,6 +278,8 @@ cls = 'zero';
 } else {
 text = at ? `Read ${at}` : '';
 }
+const cs = climateStatusText();
+if (cs) text = text ? `${text} · ${cs}` : cs;
 }
 status.textContent = text;
 status.className = `sync-status ${cls}`.trim();
@@ -297,6 +302,7 @@ busy = true;
 lastAttemptAt = Date.now();
 if (!auto) render('Asking the home agent…', 'busy');
 try {
+refreshClimate(); // Govee humidity, alongside; its own errors stay its own
 const result = await run('heating.live', {}, { timeoutMs: 30000 });
 data.heatingReading = { fetchedAt: Date.now(), zones: result.zones || [] };
 lastError = null;
@@ -330,6 +336,7 @@ render();
 lastAlertSig = JSON.stringify(heatingAlerts(currentReading()).map((a) => [a.id, a.temp, a.asOf]));
 // A reading synced in from another device updates the panel and the ticker.
 onDataChange(() => { render(); notifyAlerts(); });
+window.addEventListener('climate-updated', () => render());
 // On open (after the first document pull, which can replace the reading).
 setTimeout(() => autoRefreshIfDue(OPEN_REFRESH_MS), 4000);
 // Once a minute: re-age the muted state, refresh when due.

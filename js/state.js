@@ -2780,6 +2780,10 @@ items: [
 tickerCache: {},
 // Latest successful neoHub reading {fetchedAt, zones}, js/features/heating.js.
 heatingReading: null,
+// Latest Govee read {fetchedAt, sensors:[{id,name,sku,tempC,rh,online}]}, js/features/climate.js; device-local like heatingReading.
+climateReading: null,
+// Which heating zone each Govee sensor is in: {sensorId: zoneName | '-'} ('-' = none). No entry = matched by name.
+climateSensorZones: {},
 // Hosts that refused the web host with a 403 -- {host: {at}}. Remembered
 // so a check goes straight to the home agent for them instead of
 // spending a doomed request and its spacing on every URL first. Re-tried
@@ -2994,6 +2998,8 @@ data.ticker.items.push({ id: 'loyalty', kind: 'loyalty' });
 }
 if (!data.tickerCache || typeof data.tickerCache !== 'object') data.tickerCache = {};
 if (data.heatingReading === undefined) data.heatingReading = null;
+if (data.climateReading === undefined) data.climateReading = null;
+if (!data.climateSensorZones || typeof data.climateSensorZones !== 'object') data.climateSensorZones = {};
 if (!data.proxyRefusals || typeof data.proxyRefusals !== 'object') data.proxyRefusals = {};
 if (!Array.isArray(data.lettingLedger)) data.lettingLedger = [];
 if (!Array.isArray(data.loans)) data.loans = [];
@@ -4423,7 +4429,7 @@ const onDiskData = await kvGet(DATA_KEY);
 let kept = false;
 if (persistedSigs && onDiskData && (opts.retries || 0) < 3) {
 try {
-const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBaseText()), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'heatingReading']);
+const { merged, conflicts } = mergeDocuments(JSON.parse(persistedBaseText()), data, onDiskData, ['tickerCache', 'airbnbSyncStatus', 'airbnbCleanerSyncStatus', 'siteHealth', 'heatingReading', 'climateReading']);
 console.warn(`Disk revision ${onDiskRev} is newer than this session's ${knownRev}: merged this session's edits into it${conflicts.length ? ` (the disk copy won on ${conflicts.join(', ')})` : ''}.`);
 data = merged; kept = true;
 } catch (e) { kept = false; }
